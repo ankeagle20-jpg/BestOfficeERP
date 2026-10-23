@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, render_template, request, Response
 from datetime import date, datetime
 import os
+import time
 from db import fetch_all, fetch_one, execute, _tenant_schema_for_request
 from auth import giris_gerekli, yetki_gerekli
 
@@ -696,35 +697,59 @@ def _saglik_audit(olay: str, anlik: dict) -> None:
         pass
 
 
+_ROZET_TTL_SN = 12.0
+_ROZET_KIRMIZI = frozenset({"baglanti_yok", "zaman_asimi", "http_5xx", "http_4xx"})
+_rozet_onbellek = {}
+
+
+def _rozet_onbellek_temizle():
+    _rozet_onbellek.clear()
+
+
+def _rozet_onbellek_al(anahtar):
+    satir = _rozet_onbellek.get(anahtar)
+    if not satir:
+        return None
+    an, seviye, etiket = satir
+    if (time.monotonic() - an) > _ROZET_TTL_SN:
+        return None
+    return seviye, etiket
+
+
+def _rozet_yanit(anahtar, seviye, etiket):
+    _rozet_onbellek[anahtar] = (time.monotonic(), seviye, etiket)
+    return jsonify({"ok": True, "seviye": seviye, "etiket": etiket})
+
+
 @bp.route('/api/saglik-rozet')
 @yetki_gerekli("muhasebe")
 def api_wa_saglik_rozet():
-    """Hub rozeti. Yalnız seviye; sayfa yükünü beklemez. Ayrıntı yok."""
+    """Hub rozeti. Yalnız seviye. Servis kapalıyken sayaç yok."""
     import wa_saglik
 
+    anahtar = _wa_tenant_id()
+    hazir = _rozet_onbellek_al(anahtar)
+    if hazir is not None:
+        seviye, etiket = hazir
+        return jsonify({"ok": True, "seviye": seviye, "etiket": etiket})
+    etiket = _wa_servis_etiket()
     try:
-        ulasim, oturum, _teshis = _saglik_servis_durumu(timeout=(1, 2))
+        ulasim, oturum, _teshis = _saglik_servis_durumu(timeout=(1, 1.5))
     except Exception:
-        return jsonify({
-            "ok": True,
-            "seviye": "bilinmiyor",
-            "etiket": _wa_servis_etiket(),
-        })
-    yasli = 0
-    sayac_ok = True
+        return _rozet_yanit(anahtar, "bilinmiyor", etiket)
+    if ulasim in _ROZET_KIRMIZI:
+        return _rozet_yanit(anahtar, "kirmizi", etiket)
+    if ulasim != "ok":
+        return _rozet_yanit(anahtar, "bilinmiyor", etiket)
+    if oturum != "hazir":
+        return _rozet_yanit(anahtar, "sari", etiket)
     try:
-        sayac = wa_saglik.saglik_sayaclari() or {}
-        yasli = int(sayac.get("yasli_takili") or 0)
+        n = wa_saglik.rozet_takili_sayisi()
     except Exception:
-        sayac_ok = False
-    seviye = wa_saglik.rozet_seviye(ulasim, oturum, yasli)
-    if not sayac_ok and seviye == "yesil":
-        seviye = "bilinmiyor"
-    return jsonify({
-        "ok": True,
-        "seviye": seviye,
-        "etiket": _wa_servis_etiket(),
-    })
+        n = None
+    if n is None or int(n) <= 0:
+        return _rozet_yanit(anahtar, "yesil", etiket)
+    return _rozet_yanit(anahtar, "sari", etiket)
 
 
 @bp.route('/api/saglik-ozet')

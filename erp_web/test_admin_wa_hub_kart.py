@@ -60,6 +60,13 @@ def test_rozet_mantik():
     check("kopuk kirmizi", ws.rozet_seviye("baglanti_yok", None, 0) == "kirmizi")
     check("zaman kirmizi", ws.rozet_seviye("zaman_asimi", None, 0) == "kirmizi")
     check("bilinmiyor", ws.rozet_seviye("garip", None, 0) == "bilinmiyor")
+    src = (ROOT / "wa_saglik.py").read_text(encoding="utf-8")
+    fn = src[src.find("def rozet_takili_sayisi"): src.find("def rozet_seviye")]
+    check("tek sayim", "COUNT(*)" in fn and "statement_timeout = '1000ms'" in fn
+          and "saglik_sayaclari" not in fn)
+    rota = (ROOT / "routes" / "whatsapp_routes.py").read_text(encoding="utf-8")
+    govde = rota[rota.find("def api_wa_saglik_rozet"): rota.find("def api_wa_saglik_ozet")]
+    check("kapali sayac yok", "saglik_sayaclari" not in govde and "timeout=(1, 1.5)" in govde)
 
 
 ROL = {"v": "personel"}
@@ -109,11 +116,35 @@ def test_yetki_ve_rozet():
     def durum_patlar(timeout=(2, 3)):
         raise RuntimeError("kopuk")
 
+    cagri = {"sayac": 0, "eski": 0, "zaman": None}
+
+    def sayac_sifir():
+        cagri["sayac"] += 1
+        return 0
+
+    def sayac_yok():
+        cagri["sayac"] += 1
+        return None
+
+    def eski_sayac():
+        cagri["eski"] += 1
+        return {"yasli_takili": 9}
+
+    def durum_zaman(timeout=(2, 3)):
+        cagri["zaman"] = timeout
+        return "zaman_asimi", None, None
+
+    def durum_qr(timeout=(2, 3)):
+        return "ok", "qr", None
+
     eski_durum = wr._saglik_servis_durumu
-    eski_sayac = ws.saglik_sayaclari
+    eski_takili = ws.rozet_takili_sayisi
+    eski_tam = ws.saglik_sayaclari
     try:
+        wr._rozet_onbellek_temizle()
         wr._saglik_servis_durumu = durum_ok
-        ws.saglik_sayaclari = lambda: {"yasli_takili": 0}
+        ws.rozet_takili_sayisi = sayac_sifir
+        ws.saglik_sayaclari = eski_sayac
         client = _istemci()
         ROL["v"] = "personel"
         r = client.get("/whatsapp/api/saglik-rozet")
@@ -121,27 +152,40 @@ def test_yetki_ve_rozet():
         r = client.get("/whatsapp/api/saglik-ozet")
         check("personel ozet 403", r.status_code == 403)
         ROL["v"] = "admin"
+        wr._rozet_onbellek_temizle()
+        cagri["sayac"] = 0
         r = client.get("/whatsapp/api/saglik-rozet")
         g = r.get_json(silent=True) or {}
         check("platform admin yesil", r.status_code == 200 and g.get("seviye") == "yesil"
-              and g.get("etiket") == "Varsayılan servis" and "yasli" not in g)
-        wr._saglik_servis_durumu = durum_kopuk
+              and set(g) == {"ok", "seviye", "etiket"} and g.get("etiket") == "Varsayılan servis")
+        r2 = client.get("/whatsapp/api/saglik-rozet")
+        check("onbellek", cagri["sayac"] == 1 and (r2.get_json(silent=True) or {}).get("seviye") == "yesil")
+        wr._rozet_onbellek_temizle()
+        wr._saglik_servis_durumu = durum_zaman
+        cagri["sayac"] = 0
+        cagri["eski"] = 0
         r = client.get("/whatsapp/api/saglik-rozet")
         g = r.get_json(silent=True) or {}
-        check("zaman asimi kirmizi", r.status_code == 200 and g.get("seviye") == "kirmizi")
+        check("zaman asimi kirmizi", r.status_code == 200 and g.get("seviye") == "kirmizi"
+              and cagri["zaman"] == (1, 1.5) and cagri["sayac"] == 0 and cagri["eski"] == 0)
+        wr._rozet_onbellek_temizle()
         wr._saglik_servis_durumu = durum_patlar
         r = client.get("/whatsapp/api/saglik-rozet")
         g = r.get_json(silent=True) or {}
         check("hata bilinmiyor", r.status_code == 200 and g.get("seviye") == "bilinmiyor")
-        wr._saglik_servis_durumu = durum_ok
-
-        def sayac_patlar():
-            raise RuntimeError("sayac")
-
-        ws.saglik_sayaclari = sayac_patlar
+        wr._rozet_onbellek_temizle()
+        wr._saglik_servis_durumu = durum_qr
+        cagri["sayac"] = 0
         r = client.get("/whatsapp/api/saglik-rozet")
         g = r.get_json(silent=True) or {}
-        check("sayac hatasi gri", r.status_code == 200 and g.get("seviye") == "bilinmiyor")
+        check("qr sayacsiz sari", r.status_code == 200 and g.get("seviye") == "sari" and cagri["sayac"] == 0)
+        wr._rozet_onbellek_temizle()
+        wr._saglik_servis_durumu = durum_ok
+        ws.rozet_takili_sayisi = sayac_yok
+        r = client.get("/whatsapp/api/saglik-rozet")
+        g = r.get_json(silent=True) or {}
+        check("sayac hatasi yesil", r.status_code == 200 and g.get("seviye") == "yesil"
+              and set(g) == {"ok", "seviye", "etiket"})
 
         def sahte_sayfa(_ad, **kw):
             return kw.get("wa_servis_etiket") or ""
@@ -158,7 +202,9 @@ def test_yetki_ve_rozet():
             wr.render_template = eski_render
     finally:
         wr._saglik_servis_durumu = eski_durum
-        ws.saglik_sayaclari = eski_sayac
+        wr._rozet_onbellek_temizle()
+        ws.rozet_takili_sayisi = eski_takili
+        ws.saglik_sayaclari = eski_tam
 
 
 def test_js():

@@ -62,6 +62,36 @@ def durum_teshis_govde(body: dict) -> dict | None:
     }
 
 
+def rozet_takili_sayisi(esik_dk: int = ESIK_TAKILI_DK):
+    """Takılı kuyruk için tek sayım. Hata veya zaman aşımında None.
+
+    statement_timeout 1 sn. Sonuç yalnız sayı; metin/adres yok.
+    """
+    try:
+        from db import db
+
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SET LOCAL statement_timeout = '1000ms'")
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM sozlesme_whatsapp_gonderim
+                WHERE durum IN ('kuyrukta', 'gonderiliyor')
+                  AND created_at < NOW() - (INTERVAL '1 minute' * %s)
+                """,
+                (int(esik_dk),),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return 0
+        if isinstance(row, dict):
+            return int(row.get("n") or 0)
+        return int(row[0] or 0)
+    except Exception:
+        return None
+
+
 def rozet_seviye(ulasim: str, oturum: str | None, yasli_takili: int = 0) -> str:
     """Hub rozeti: yesil | sari | kirmizi | bilinmiyor. Ayrıntı metni yok."""
     if ulasim in ("baglanti_yok", "zaman_asimi", "http_5xx", "http_4xx"):
