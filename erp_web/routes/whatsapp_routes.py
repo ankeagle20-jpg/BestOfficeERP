@@ -3,7 +3,7 @@ from datetime import date, datetime
 import os
 import time
 from db import fetch_all, fetch_one, execute, _tenant_schema_for_request
-from auth import giris_gerekli, yetki_gerekli
+from auth import admin_gerekli, giris_gerekli, yetki_gerekli
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
 
@@ -946,3 +946,170 @@ def api_qr_ac():
             f'<p>{e}</p><p>Tenant: <code>{_wa_tenant_id()}</code></p></body></html>'
         )
         return Response(body, status=502, content_type='text/html; charset=utf-8')
+
+
+def _toplu_kapali():
+    import wa_kampanya
+
+    if not wa_kampanya.bayrak_acik():
+        return jsonify({"ok": False}), 404
+    return None
+
+
+def _toplu_json(sonuc, tamam=(200,)):
+    neden = (sonuc or {}).get("neden")
+    if not sonuc.get("ok"):
+        kod = 404 if neden == "yok" else 409 if neden in ("acik_var", "test_yok", "durum", "alici_yok") else 400
+        return jsonify({"ok": False, "neden": neden or "kayit"}), kod
+    govde = {"ok": True}
+    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "mid", "kapali", "kampanya"):
+        if anahtar in sonuc:
+            govde[anahtar] = sonuc[anahtar]
+    return jsonify(govde), 200
+
+
+@bp.route('/api/toplu-durum')
+@admin_gerekli
+def api_toplu_durum():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+    return _toplu_json(wa_kampanya.durum_istegi())
+
+
+@bp.route('/api/toplu-taslak', methods=['POST'])
+@admin_gerekli
+def api_toplu_taslak():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+    from flask_login import current_user
+
+    govde = request.get_json(silent=True) or {}
+    sonuc = wa_kampanya.taslak_kaydet(
+        govde.get("sablon"), govde.get("tavan"), govde.get("id"),
+        getattr(current_user, "id", None),
+    )
+    return _toplu_json(sonuc)
+
+
+@bp.route('/api/toplu-onizleme', methods=['POST'])
+@admin_gerekli
+def api_toplu_onizleme():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    sonuc = wa_kampanya.onizleme_istegi(kid)
+    if not sonuc.get("ok"):
+        return _toplu_json(sonuc)
+    return jsonify({"ok": True, **wa_kampanya.onizleme_govde(sonuc)}), 200
+
+
+@bp.route('/api/toplu-test', methods=['POST'])
+@admin_gerekli
+def api_toplu_test():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.test_gonder_istegi(kid, govde.get("telefon")))
+
+
+@bp.route('/api/toplu-test-sonuc')
+@admin_gerekli
+def api_toplu_test_sonuc():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    try:
+        kid = int(request.args.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.test_sonuc_istegi(kid, request.args.get("anahtar") or ""))
+
+
+@bp.route('/api/toplu-baslat', methods=['POST'])
+@admin_gerekli
+def api_toplu_baslat():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.baslat_istegi(kid))
+
+
+@bp.route('/api/toplu-durdur', methods=['POST'])
+@admin_gerekli
+def api_toplu_durdur():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.durdur_istegi(kid))
+
+
+@bp.route('/api/toplu-devam', methods=['POST'])
+@admin_gerekli
+def api_toplu_devam():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.devam_istegi(kid))
+
+
+@bp.route('/api/toplu-haric')
+@admin_gerekli
+def api_toplu_haric_oku():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+    return jsonify(wa_kampanya.haric_liste())
+
+
+@bp.route('/api/toplu-haric', methods=['POST'])
+@admin_gerekli
+def api_toplu_haric_yaz():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    return _toplu_json(wa_kampanya.haric_yaz(govde.get("musteri_id"), bool(govde.get("kapali"))))

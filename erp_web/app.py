@@ -596,6 +596,23 @@ def _start_background_jobs():
         max_instances=1,
         coalesce=True,
     )
+
+    def _wa_kampanya_tick():
+        try:
+            from wa_kampanya import run_wa_kampanya_job
+            run_wa_kampanya_job()
+        except Exception as e:
+            print("[WARN] wa_kampanya:", type(e).__name__)
+
+    scheduler.add_job(
+        _wa_kampanya_tick,
+        "interval",
+        minutes=1,
+        id="wa_toplu_kampanya",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
     # Boot: bir kez hemen çalıştır (scheduler ilk tick'i 30 dk bekler)
@@ -606,8 +623,8 @@ def _start_background_jobs():
     print(
         "[OK] Background scheduler aktif: auto_invoice_cycle/15dk, "
         "izin_otomatik_gece/00:05, mesai_otomatik_cikis/1dk, "
-        "pending_payment_sweep/30dk+boot, erp_not_whatsapp/1dk "
-        "(MESAI_OTOMATIK_CIKIS_ENABLED varsayılan KAPALI)"
+        "pending_payment_sweep/30dk+boot, erp_not_whatsapp/1dk, "
+        "wa_toplu_kampanya/1dk (WA_TOPLU_KAMPANYA varsayılan KAPALI)"
     )
 
 # ── Sağlık (Render health check / yük dengeleyici) — DB veya giriş gerekmez ───
@@ -716,6 +733,20 @@ def inject_module_access():
             is_ledger_only = False
 
     return {"has_module": has_module, "is_ledger_only": is_ledger_only}
+
+
+@app.context_processor
+def inject_wa_toplu_kampanya():
+    acik = False
+    try:
+        from wa_kampanya import bayrak_acik
+        rol = None
+        if getattr(current_user, "is_authenticated", False):
+            rol = getattr(current_user, "role", None)
+        acik = bool(bayrak_acik() and rol == "admin")
+    except Exception:
+        acik = False
+    return {"wa_toplu_kampanya": acik}
 
 
 @app.context_processor

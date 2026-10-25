@@ -62,6 +62,7 @@
   <col class="ml-c-grup2">
   <col class="ml-c-kapanis">
   <col class="ml-c-son">
+  {% if wa_toplu_kampanya %}<col class="ml-c-toplu">{% endif %}
 </colgroup>
 {% endmacro %}
 {% macro ml_customer_thead_tr() %}
@@ -100,6 +101,7 @@
     </th>
     <th class="ml-col-kapanis">Kapanış Tarihi</th>
     <th class="ml-col-son">Son Tahsilat</th>
+    {% if wa_toplu_kampanya %}<th class="ml-col-toplu" title="Toplu mesaj: açık / kapalı">Toplu mesaj</th>{% endif %}
   </tr>
 {% endmacro %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -117,6 +119,8 @@
 .ml-btn.excel{background:linear-gradient(135deg,#0a6640,#043d25);color:#fff}
 .ml-btn.excel-upload{background:linear-gradient(135deg,#0d7a47,#05552e);color:#fff;border:1px solid rgba(255,255,255,.2)}
 .ml-btn.ekle{background:linear-gradient(135deg,#1a5fff,#0030b3);color:#fff}
+.ml-col-toplu{width:92px;text-align:center}
+.wt-haric{font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(0,200,255,.3);background:#0d1520;color:#9bd;cursor:pointer}
 .ml-toolbar{display:flex;align-items:center;gap:8px;margin:0;padding-top:10px;flex-wrap:wrap}
 .ml-search-wrap{position:relative;flex:1;max-width:360px}
 .ml-search-wrap i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#5a7a9a;font-size:11px}
@@ -348,6 +352,7 @@ window.setActiveTab = function(tabId) {
       <a href="{{ url_for('musteriler.export_excel') }}" class="ml-btn excel"><i class="fa fa-file-excel"></i> Excel İndir</a>
       <a href="{{ url_for('musteriler.import_excel') }}" class="ml-btn excel-upload"><i class="fa fa-upload"></i> Excel Yükle</a>
       <a href="#" id="btn-musteri-ekle-giris" class="ml-btn ekle"><i class="fa fa-plus"></i> Müşteri Ekle</a>
+      {% if wa_toplu_kampanya %}<button type="button" id="btn-toplu-mesaj" class="ml-btn back">Toplu Mesaj</button>{% endif %}
     </div>
   </div>
 
@@ -512,9 +517,10 @@ window.setActiveTab = function(tabId) {
           <td class="ml-text ml-col-grup2" title="{{ g2d|e }}">{% if g2d %}{% for token in g2d.split(',') %}<span class="ml-g2-tag">{{ token.strip()|e }}</span>{% endfor %}{% else %}—{% endif %}</td>
           <td class="tarih ml-text ml-kapanis-col ml-col-kapanis" title="Kapanış tarihi">{% if kap_iso|length == 10 %}{{ kap_iso[8:10] }}.{{ kap_iso[5:7] }}.{{ kap_iso[0:4] }}{% else %}—{% endif %}</td>
           <td class="tarih ml-text ml-col-son">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
+          {% if wa_toplu_kampanya %}<td class="ml-col-toplu"><button type="button" class="wt-haric" data-mid="{{ m.id }}">…</button></td>{% endif %}
         </tr>
         {% else %}
-        <tr><td colspan="14" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
+        <tr><td colspan="{% if wa_toplu_kampanya %}15{% else %}14{% endif %}" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -2401,4 +2407,29 @@ function mlRunBulkSave(btn) {
 document.getElementById('btn-bulk-save').addEventListener('click', function() { mlRunBulkSave(this); });
 document.getElementById('btn-hepsini-kayde').addEventListener('click', function() { mlRunBulkSave(this); });
 </script>
+{% if wa_toplu_kampanya %}
+<div id="wtModal" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;align-items:center;justify-content:center">
+  <div style="background:#0d1520;color:#e8f1ff;border:1px solid rgba(0,200,255,.25);border-radius:10px;padding:16px;width:min(440px,92vw);font-size:13px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong>Toplu Mesaj</strong>
+      <button type="button" id="wtKapat" class="ml-btn back">Kapat</button>
+    </div>
+    <label>Şablon <textarea id="wtSablon" maxlength="1000" rows="5" style="width:100%;margin-top:4px"></textarea></label>
+    <label style="display:block;margin-top:8px">Günlük tavan
+      <input id="wtTavan" type="number" min="50" max="250" value="150" style="width:80px;margin-left:6px">
+    </label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+      <button type="button" id="wtOnizle" class="ml-btn back">Önizleme</button>
+      <button type="button" id="wtBaslat" class="ml-btn ekle" disabled>Başlat</button>
+      <button type="button" id="wtDurdur" class="ml-btn back">Durdur</button>
+      <button type="button" id="wtDevam" class="ml-btn back">Devam</button>
+    </div>
+    <p id="wtOnizleme" style="min-height:2.4em;color:#9bd"></p>
+    <label>Test numarası <input id="wtTestNo" type="tel" autocomplete="off" style="width:160px;margin-left:6px"></label>
+    <button type="button" id="wtTest" class="ml-btn back" style="margin-left:6px">Test gönder</button>
+    <p id="wtTestSonuc" style="min-height:1.2em;color:#9bd"></p>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/wa-toplu.js') }}"></script>
+{% endif %}
 {% endblock %}

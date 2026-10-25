@@ -219,6 +219,17 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
         "anahtar": "belirsiz", "seviye": "uyari" if belirsiz > 0 else "ok",
         "baslik": "Sonucu belirsiz", "aciklama": b_metin,
     })
+    if "kampanya_acik" in s:
+        kartlar.append({
+            "anahtar": "kampanya",
+            "seviye": "ok",
+            "baslik": "Kampanya",
+            "aciklama": "Açık {0}. Bekleyen {1}. Durdurulan {2}.".format(
+                int(s.get("kampanya_acik") or 0),
+                int(s.get("kampanya_bekleyen") or 0),
+                int(s.get("kampanya_durdurulan") or 0),
+            ),
+        })
     return kartlar
 
 
@@ -446,6 +457,15 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
         an, akis = en_iyi
         out["son_gonderildi"] = _istanbul_etiket(an)
         out["son_gonderildi_akis"] = _AKIS_AD.get(akis, akis)
+    try:
+        from wa_kampanya import bayrak_acik, kampanya_sayilari
+        if bayrak_acik():
+            n = kampanya_sayilari()
+            out["kampanya_acik"] = int(n.get("acik") or 0)
+            out["kampanya_bekleyen"] = int(n.get("bekleyen") or 0)
+            out["kampanya_durdurulan"] = int(n.get("durdurulan") or 0)
+    except Exception:
+        pass
     return out
 
 
