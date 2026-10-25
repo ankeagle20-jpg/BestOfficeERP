@@ -30349,6 +30349,8 @@ function girisMusteriCogalt() {
 function girisMusteriWhatsAppAc() {
     var phoneEl = document.getElementById('phone');
     var tel = (phoneEl && phoneEl.value) ? phoneEl.value : '';
+    var phone2El = document.getElementById('phone2');
+    var tel2 = (phone2El && phone2El.value) ? phone2El.value : '';
     var ad = ((document.getElementById('name') || {}).value || '').trim();
     if (!ad) {
         var sad = document.getElementById('giris-secili-musteri-ad');
@@ -30364,7 +30366,7 @@ function girisMusteriWhatsAppAc() {
     try { mid = parseInt(typeof selectedId !== 'undefined' ? selectedId : 0, 10) || 0; } catch (eMid) { mid = 0; }
     function mesajPenceresi() {
         if (typeof sozlesmeWhatsAppAc === 'function') {
-            sozlesmeWhatsAppAc({ buton: 'ust', musteriId: mid, telefon: tel, ad: ad, mesaj: mesaj });
+            sozlesmeWhatsAppAc({ buton: 'ust', musteriId: mid, telefon: tel, telefon2: tel2, ad: ad, mesaj: mesaj });
             return;
         }
         bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), mesaj);

@@ -215,20 +215,24 @@ def _wa_kisiler(mid: int) -> list[dict]:
     kart = {}
     try:
         kart = fetch_one(
-            "SELECT phone, yetkili_kisi FROM customers WHERE id = %s",
+            "SELECT phone, phone2, yetkili_kisi FROM customers WHERE id = %s",
             (int(mid),),
         ) or {}
     except Exception:
         try:
-            kart = fetch_one("SELECT phone FROM customers WHERE id = %s", (int(mid),)) or {}
+            kart = fetch_one("SELECT phone, phone2 FROM customers WHERE id = %s", (int(mid),)) or {}
         except Exception:
-            logger.info("odeme linki kart tel")
-            kart = {}
+            try:
+                kart = fetch_one("SELECT phone FROM customers WHERE id = %s", (int(mid),)) or {}
+            except Exception:
+                logger.info("odeme linki kart tel")
+                kart = {}
     return wa_kisi_secenekleri(
         yet,
         kyc,
         kart.get("phone"),
         kart.get("yetkili_kisi"),
+        kart.get("phone2"),
     )
 
 

@@ -404,7 +404,7 @@
     {% if not _layout_hide_chrome and current_user.is_authenticated %}
     <script src="{{ url_for('static', filename='js/randevu-hatirlatma.js') }}"></script>
     <script>window.ERP_ASISTAN_UID = {{ current_user.id }};</script>
-    <script src="{{ url_for('static', filename='js/wa-alici.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/wa-alici.js') }}?v=3"></script>
     <script src="{{ url_for('static', filename='js/erp-asistan.js') }}?v=13"></script>
     {% endif %}
     {% block extra_js %}{% endblock %}

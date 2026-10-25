@@ -96,9 +96,15 @@
     var uyari = document.getElementById("sozlesme-wa-uyari");
     var ek = document.getElementById("sozlesme-wa-ek");
     var ekVar = ek && String(ek.value || "").trim();
+    var toplam = n + (ekVar ? 1 : 0);
+    if (toplam > 3) {
+      if (uyari) uyari.textContent = "En fazla 3 alıcı";
+      if (btn) btn.disabled = true;
+      return;
+    }
     if (btn) btn.disabled = n < 1 && !ekVar;
     if (uyari && n < 1 && !ekVar) uyari.textContent = "En az bir numara seçin";
-    else if (uyari && uyari.textContent === "En az bir numara seçin") uyari.textContent = "";
+    else if (uyari && (uyari.textContent === "En az bir numara seçin" || uyari.textContent === "En fazla 3 alıcı")) uyari.textContent = "";
   }
 
   function ekBirlestir(liste) {
@@ -125,7 +131,7 @@
     var liste = [];
     kaynak.forEach(function (ham) {
       var n = normTel(ham);
-      if (!n || gorulen[n] || liste.length >= 2) return;
+      if (!n || gorulen[n] || liste.length >= 4) return;
       gorulen[n] = 1;
       liste.push(String(ham || ""));
     });
@@ -138,11 +144,12 @@
       kaynakKart.forEach(function (k) {
         var ham = k && k.telefon ? k.telefon : ilkTel;
         var n = normTel(ham);
-        if (!n || gorulenKart[n] || kartlar.length >= 2) return;
+        if (!n || gorulenKart[n] || kartlar.length >= 4) return;
         gorulenKart[n] = 1;
         kartlar.push({
           ham: ham,
           ad: String((k && k.ad) || "").trim(),
+          etiket: String((k && k.etiket) || ""),
           secili: kartlar.length === 0
         });
       });
@@ -188,6 +195,20 @@
     if (satir) satir.hidden = true;
     if (sec) sec.hidden = true;
     secimDugme();
+  }
+
+  function formAday(opts) {
+    var out = [];
+    var gorulen = {};
+    function ekle(tel, etiket) {
+      var n = normTel(tel);
+      if (!n || gorulen[n] || out.length >= 4) return;
+      gorulen[n] = 1;
+      out.push({ telefon: String(tel || ""), ad: "", etiket: etiket });
+    }
+    ekle(opts && opts.telefon, "Kart telefonu");
+    ekle(opts && opts.telefon2, "Kart 2. telefon");
+    return out;
   }
 
   function kisileriYaz(kisiler, ilkTel, ilkAd) {
@@ -410,6 +431,10 @@
       }
     }
     if (!yeniden) {
+      if (liste.length > 3) {
+        if (uyari) uyari.textContent = "En fazla 3 alıcı";
+        return;
+      }
       var ekHata = ekBirlestir(liste);
       if (ekHata) {
         if (uyari) uyari.textContent = ekHata;
@@ -830,14 +855,14 @@
       etiketCiz();
     };
     if (telInp) telInp.oninput = etiketCiz;
-    kisileriYaz([], opts.telefon || "", opts.ad || "");
+    kisileriYaz(acik.tahsilatId ? [] : formAday(opts), opts.telefon || "", opts.ad || "");
     if (acik.musteriId > 0) {
       fetch("/giris/api/sozlesme-whatsapp/kisiler?musteri_id=" + encodeURIComponent(acik.musteriId), { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {
-          if (!j || !j.ok) return;
-          kisileriYaz(j.kisiler || [], opts.telefon || "", opts.ad || "");
-          if (acik && acik.tahsilatId && window.WaAlici) tahsilatEkYaz(j.kisiler || [], opts.telefon || "");
+          if (!j || !j.ok || !(j.kisiler && j.kisiler.length)) return;
+          kisileriYaz(j.kisiler, opts.telefon || "", opts.ad || "");
+          if (acik && acik.tahsilatId && window.WaAlici) tahsilatEkYaz(j.kisiler, opts.telefon || "");
         })
         .catch(function () {});
     }

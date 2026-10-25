@@ -179,59 +179,45 @@ def normalize_wa_telefon(raw) -> str:
     return s
 
 
-def wa_kisi_secenekleri(yetkililer=None, kyc=None, kart_telefon="", kart_yetkili="") -> list[dict]:
-    """Yetkili adı ve telefonu. Birincil önce, aynı numara bir kez. Ad yoksa ad boş."""
+def wa_kisi_secenekleri(yetkililer=None, kyc=None, kart_telefon="", kart_yetkili="", kart_telefon2="") -> list[dict]:
+    """Bilinen numaralar. Öncelik: yetkili, KYC, kart. Aynı normal numara bir kez, en fazla 4."""
     adaylar: list[tuple] = []
 
-    def ekle(oncelik, sira, ad, tel):
+    def ekle(oncelik, sira, ad, tel, etiket):
         numara = str(tel or "").strip()
         if not numara:
             return
-        adaylar.append((oncelik, sira, len(adaylar), str(ad or "").strip(), numara))
+        adaylar.append((oncelik, sira, len(adaylar), str(ad or "").strip(), numara, etiket))
 
     for row in yetkililer or []:
         if not isinstance(row, dict):
             continue
-        ad = row.get("ad_soyad") or row.get("ad") or ""
+        ad = str(row.get("ad_soyad") or row.get("ad") or "").strip()
         try:
             sira = int(row.get("sira") or 0)
         except (TypeError, ValueError):
             sira = 0
         oncelik = 0 if row.get("birincil") else 1
-        ekle(oncelik, sira, ad, row.get("tel"))
-        ekle(oncelik, sira, ad, row.get("tel2"))
-    if not adaylar and isinstance(kyc, dict):
-        ad = kyc.get("yetkili_adsoyad") or ""
-        ekle(0, 0, ad, kyc.get("yetkili_tel"))
-        ekle(0, 0, ad, kyc.get("yetkili_tel2"))
-    if not adaylar:
-        ad = ""
-        if isinstance(kyc, dict):
-            ad = str(kyc.get("yetkili_adsoyad") or "").strip()
-        if not ad:
-            for row in yetkililer or []:
-                if isinstance(row, dict) and row.get("birincil") and str(row.get("ad_soyad") or "").strip():
-                    ad = str(row.get("ad_soyad") or "").strip()
-                    break
-        if not ad:
-            for row in yetkililer or []:
-                if isinstance(row, dict) and str(row.get("ad_soyad") or "").strip():
-                    ad = str(row.get("ad_soyad") or "").strip()
-                    break
-        if not ad:
-            ad = str(kart_yetkili or "").strip()
-        ekle(0, 0, ad, kart_telefon)
-    else:
-        ekle(2, 0, str(kart_yetkili or "").strip(), kart_telefon)
+        ekle(oncelik, sira, ad, row.get("tel"), (ad + " · Yetkili") if ad else "Yetkili")
+        ekle(oncelik, sira, ad, row.get("tel2"), (ad + " · 2. telefon") if ad else "2. telefon")
+    if isinstance(kyc, dict):
+        ad = str(kyc.get("yetkili_adsoyad") or "").strip()
+        ekle(2, 0, ad, kyc.get("yetkili_tel"), "KYC telefonu")
+        ekle(2, 1, ad, kyc.get("yetkili_tel2"), "KYC 2. telefon")
+    kart_ad = str(kart_yetkili or "").strip()
+    ekle(3, 0, kart_ad, kart_telefon, "Kart telefonu")
+    ekle(4, 0, kart_ad, kart_telefon2, "Kart 2. telefon")
     adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
     gorulen = set()
     out = []
-    for _oncelik, _sira, _i, ad, tel in adaylar:
+    for _oncelik, _sira, _i, ad, tel, etiket in adaylar:
         anahtar = normalize_wa_telefon(tel) or re.sub(r"\D", "", tel)
         if not anahtar or anahtar in gorulen:
             continue
         gorulen.add(anahtar)
-        out.append({"ad": ad, "telefon": tel})
+        out.append({"ad": ad, "telefon": tel, "etiket": etiket})
+        if len(out) >= 4:
+            break
     return out
 
 

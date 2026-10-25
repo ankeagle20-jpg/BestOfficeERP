@@ -55,6 +55,17 @@
     return "";
   }
 
+  function etiketYedek(liste, i) {
+    var k = liste[i] || {};
+    var ad = k.ad || "";
+    if (!ad) return i === 0 ? "Yetkili" : "2. telefon";
+    var once = 0;
+    for (var j = 0; j < i; j++) {
+      if (liste[j] && liste[j].ad === ad) once += 1;
+    }
+    return once ? (ad + " · 2. telefon") : (ad + " · Yetkili");
+  }
+
   function yaz(kutu, opts) {
     if (!kutu) return;
     stil();
@@ -65,7 +76,7 @@
     kaynak.forEach(function (k) {
       var ham = k && (k.ham || k.gorunen || k.telefon || "");
       var n = norm(ham);
-      if (!n || gorulen[n] || liste.length >= 2) return;
+      if (!n || gorulen[n] || liste.length >= 4) return;
       gorulen[n] = 1;
       liste.push({
         n: n,
@@ -96,7 +107,7 @@
       metin.className = "wa-alici-metin";
       var etiket = document.createElement("div");
       etiket.className = "wa-alici-etiket";
-      var et = k.etiket || ((i === 0 ? "1. Yetkili" : "2. Yetkili") + (k.ad ? " · " + k.ad : ""));
+      var et = k.etiket || etiketYedek(liste, i);
       etiket.textContent = et;
       var no = document.createElement("div");
       no.className = "wa-alici-no";
