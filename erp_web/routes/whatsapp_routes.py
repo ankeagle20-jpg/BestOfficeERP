@@ -962,10 +962,23 @@ def _toplu_json(sonuc, tamam=(200,)):
         kod = 404 if neden == "yok" else 409 if neden in ("acik_var", "test_yok", "durum", "alici_yok") else 400
         return jsonify({"ok": False, "neden": neden or "kayit"}), kod
     govde = {"ok": True}
-    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "mid", "kapali", "kampanya", "iptal"):
+    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "atilan", "mid", "kapali", "kampanya", "iptal"):
         if anahtar in sonuc:
             govde[anahtar] = sonuc[anahtar]
     return jsonify(govde), 200
+
+
+@bp.route('/api/toplu-liste')
+@admin_gerekli
+def api_toplu_liste():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    resp = jsonify({"ok": True, "satirlar": wa_kampanya.liste_satirlari()})
+    resp.headers.update(wa_kampanya.liste_yanit_baslik())
+    return resp
 
 
 @bp.route('/api/toplu-durum')
@@ -1008,7 +1021,7 @@ def api_toplu_onizleme():
         kid = int(govde.get("id"))
     except (TypeError, ValueError):
         return jsonify({"ok": False, "neden": "gecersiz"}), 400
-    sonuc = wa_kampanya.onizleme_istegi(kid)
+    sonuc = wa_kampanya.onizleme_istegi(kid, govde.get("midler"))
     if not sonuc.get("ok"):
         return _toplu_json(sonuc)
     return jsonify({"ok": True, **wa_kampanya.onizleme_govde(sonuc)}), 200
@@ -1058,7 +1071,8 @@ def api_toplu_baslat():
         kid = int(govde.get("id"))
     except (TypeError, ValueError):
         return jsonify({"ok": False, "neden": "gecersiz"}), 400
-    return _toplu_json(wa_kampanya.baslat_istegi(kid))
+    midler = govde.get("midler") if isinstance(govde.get("midler"), list) else []
+    return _toplu_json(wa_kampanya.baslat_istegi(kid, midler))
 
 
 @bp.route('/api/toplu-durdur', methods=['POST'])

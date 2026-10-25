@@ -1,6 +1,6 @@
 """Toplu mesaj kampanyası. Bayrak kapalıyken iş yok.
 
-Tam telefon ve mesaj metni loga yazılmaz. İkinci telefon kullanılmaz.
+Tam telefon ve mesaj metni loga yazılmaz. Gönderim birincil adaya gider.
 Gecikme hariç tablosundan bağımsızdır.
 """
 from __future__ import annotations
@@ -623,6 +623,95 @@ def _aday_sql() -> str:
     """
 
 
+def secilen_uygula(kayitlar, midler, sablon: str = "") -> dict:
+    """İstenen mid'ler. Kayıtta yok, pasif, hariç, numarasız ve mükerrer numara atılır."""
+    istenen = []
+    for ham in midler or []:
+        try:
+            mid = int(ham)
+        except (TypeError, ValueError):
+            continue
+        if mid > 0 and mid not in istenen:
+            istenen.append(mid)
+    by_mid = {}
+    for k in kayitlar or []:
+        if not k:
+            continue
+        try:
+            mid = int(k.get("mid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid > 0 and mid not in by_mid:
+            by_mid[mid] = k
+    alt = []
+    yok = 0
+    for mid in istenen:
+        if mid not in by_mid:
+            yok += 1
+        else:
+            alt.append(by_mid[mid])
+    sinif = aday_sinifla(alt, sablon)
+    uygun = {int(u.get("mid") or 0) for u in sinif["uygun"]}
+    atilan = yok + sum(1 for k in alt if int(k.get("mid") or 0) not in uygun)
+    sinif["atilan"] = atilan
+    return sinif
+
+
+def liste_derle(kayitlar) -> list:
+    """Ekran satırları. Ad ve numara yalnız dönüş değerindedir."""
+    gorulen = set()
+    out = []
+    sirali = sorted(list(kayitlar or []), key=lambda r: int((r or {}).get("mid") or 0))
+    for k in sirali:
+        if not k:
+            continue
+        try:
+            mid = int(k.get("mid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        durum = str(k.get("durum") or "").strip().lower()
+        haric = bool(k.get("haric"))
+        adaylar = []
+        for a in list(k.get("adaylar") or [])[:4]:
+            if not isinstance(a, dict):
+                continue
+            adaylar.append({
+                "telefon": str(a.get("telefon") or ""),
+                "etiket": str(a.get("etiket") or ""),
+            })
+        tel = str(k.get("tel") or (adaylar[0]["telefon"] if adaylar else ""))
+        norm = norm_telefon(tel)
+        if durum == "pasif":
+            sebep = "pasif"
+        elif durum != "aktif":
+            sebep = "uygunsuz"
+        elif haric:
+            sebep = "haric"
+        elif not norm:
+            sebep = "numarasiz"
+        else:
+            sebep = ""
+        mukerrer = bool(norm and not sebep and norm in gorulen)
+        if norm and not sebep:
+            gorulen.add(norm)
+        out.append({
+            "mid": mid,
+            "ad": str(k.get("ad") or ""),
+            "durum": durum,
+            "haric": haric,
+            "adaylar": adaylar,
+            "sebep": sebep,
+            "mukerrer": mukerrer,
+        })
+    return out
+
+
+def liste_yanit_baslik() -> dict:
+    return {"Cache-Control": "no-store"}
+
+
 def aday_satirlari():
     from db import fetch_all
 
@@ -633,10 +722,125 @@ def aday_satirlari():
         return []
 
 
+def _kayit_kur(musteri, yet_rows, kyc_row, haric: bool) -> dict:
+    from odeme_linki import wa_kisi_secenekleri
+
+    sec = wa_kisi_secenekleri(
+        yet_rows or [],
+        kyc_row if isinstance(kyc_row, dict) else None,
+        (musteri or {}).get("phone"),
+        "",
+        (musteri or {}).get("phone2"),
+    )
+    durum = str((musteri or {}).get("durum") or "").strip().lower()
+    if durum not in ("aktif", "pasif"):
+        durum = "diger"
+    return {
+        "mid": int((musteri or {}).get("mid") or (musteri or {}).get("id") or 0),
+        "ad": str((musteri or {}).get("ad") or ""),
+        "durum": durum,
+        "haric": bool(haric),
+        "tel": (sec[0].get("telefon") if sec else "") or "",
+        "yetkili": (sec[0].get("ad") if sec else "") or "",
+        "adaylar": [
+            {"telefon": s.get("telefon") or "", "etiket": s.get("etiket") or ""}
+            for s in sec
+        ],
+    }
+
+
+def _musteri_durum_sql() -> str:
+    return """
+        CASE WHEN lower(btrim(COALESCE(durum, ''))) = 'aktif' THEN 'aktif'
+             WHEN lower(btrim(COALESCE(durum, ''))) = 'pasif' THEN 'pasif'
+             ELSE 'diger' END
+    """
+
+
+def aday_kayitlari():
+    """Kiracıdaki kartlar ve birincil aday. Satır içeriği loglanmaz."""
+    from db import fetch_all
+
+    durum_sql = _musteri_durum_sql()
+    try:
+        musteriler = fetch_all(
+            f"""
+            SELECT id AS mid,
+                   COALESCE(NULLIF(btrim(name), ''), NULLIF(btrim(musteri_adi), ''), '') AS ad,
+                   {durum_sql} AS durum,
+                   phone, phone2
+            FROM customers
+            ORDER BY id
+            """
+        ) or []
+    except Exception as e:
+        print(f"[WARN] wa_kampanya liste: {type(e).__name__}")
+        try:
+            musteriler = fetch_all(
+                f"""
+                SELECT id AS mid, COALESCE(NULLIF(btrim(name), ''), '') AS ad,
+                       {durum_sql} AS durum, phone, phone2
+                FROM customers
+                ORDER BY id
+                """
+            ) or []
+        except Exception as e2:
+            print(f"[WARN] wa_kampanya liste: {type(e2).__name__}")
+            return []
+    yet = {}
+    try:
+        for row in fetch_all(
+            """
+            SELECT musteri_id, sira, birincil, ad_soyad, tel, tel2
+            FROM musteri_yetkililer
+            ORDER BY musteri_id, birincil DESC, sira ASC NULLS LAST, id ASC
+            """
+        ) or []:
+            yet.setdefault(int(row.get("musteri_id") or 0), []).append(row)
+    except Exception as e:
+        print(f"[WARN] wa_kampanya yetkili: {type(e).__name__}")
+    kyc = {}
+    try:
+        for row in fetch_all(
+            """
+            SELECT DISTINCT ON (musteri_id)
+                   musteri_id, yetkili_adsoyad, yetkili_tel, yetkili_tel2
+            FROM musteri_kyc
+            ORDER BY musteri_id, id DESC
+            """
+        ) or []:
+            kyc[int(row.get("musteri_id") or 0)] = row
+    except Exception as e:
+        print(f"[WARN] wa_kampanya kyc: {type(e).__name__}")
+    haric = set()
+    try:
+        for row in fetch_all("SELECT musteri_id FROM whatsapp_toplu_haric") or []:
+            haric.add(int(row.get("musteri_id") or 0))
+    except Exception as e:
+        print(f"[WARN] wa_kampanya haric: {type(e).__name__}")
+    return [
+        _kayit_kur(m, yet.get(int(m.get("mid") or 0)), kyc.get(int(m.get("mid") or 0)), int(m.get("mid") or 0) in haric)
+        for m in musteriler
+    ]
+
+
+def liste_satirlari():
+    return liste_derle(aday_kayitlari())
+
+
+def _karttan_oku(mid: int) -> dict:
+    for k in aday_kayitlari():
+        if int(k.get("mid") or 0) != int(mid):
+            continue
+        if str(k.get("durum") or "") == "pasif":
+            return {"tel": "", "yetkili": ""}
+        return {"tel": k.get("tel") or "", "yetkili": k.get("yetkili") or ""}
+    return {"tel": "", "yetkili": ""}
+
+
 def kart_telefon(mid: int, oku=None) -> dict:
     if oku is None:
-        from db import fetch_one
-        oku = fetch_one
+        return _karttan_oku(int(mid))
     try:
         row = oku(
             """
@@ -894,14 +1098,14 @@ def taslak_kaydet(sablon, tavan, kid=None, uid=None) -> dict:
     return {"ok": True, "id": int(yeni.get("id")), "test_ok": False, "durum": "taslak"}
 
 
-def onizleme_istegi(kid: int) -> dict:
+def onizleme_istegi(kid: int, midler=None) -> dict:
     ensure_tablolar()
     row = _kampanya_oku(int(kid))
     if not row:
         return {"ok": False, "neden": "yok"}
-    sinif = aday_sinifla(aday_satirlari(), row.get("sablon") or "")
+    sinif = secilen_uygula(aday_kayitlari(), midler or [], row.get("sablon") or "")
     govde = onizleme_govde({**sinif, **sure_tahmin(sinif["alici"], row.get("gunluk_tavan"))})
-    return {"ok": True, **govde}
+    return {"ok": True, **govde, "atilan": int(sinif.get("atilan") or 0)}
 
 
 def _test_yaz(kid: int, anahtar: str, test_ok: bool) -> dict:
@@ -966,7 +1170,7 @@ def test_sonuc_istegi(kid: int, anahtar: str) -> dict:
     return sonuc
 
 
-def baslat_istegi(kid: int) -> dict:
+def baslat_istegi(kid: int, midler=None, kayitlar=None) -> dict:
     from db import execute
 
     ensure_tablolar()
@@ -978,9 +1182,10 @@ def baslat_istegi(kid: int) -> dict:
     karar = baslat_izin(bool(row.get("test_ok")), _acik_baska(int(kid)))
     if karar != "tamam":
         return {"ok": False, "neden": karar}
-    sinif = aday_sinifla(aday_satirlari(), row.get("sablon") or "")
+    kaynak = kayitlar if kayitlar is not None else aday_kayitlari()
+    sinif = secilen_uygula(kaynak, midler or [], row.get("sablon") or "")
     if not sinif["uygun"]:
-        return {"ok": False, "neden": "alici_yok"}
+        return {"ok": False, "neden": "alici_yok", "atilan": int(sinif.get("atilan") or 0)}
     execute(
         "DELETE FROM wa_kampanya_alici WHERE kampanya_id = %s",
         (int(kid),),
@@ -1007,7 +1212,7 @@ def baslat_istegi(kid: int) -> dict:
     except Exception:
         return {"ok": False, "neden": "acik_var"}
     guvenli_log("baslat", kampanya_id=int(kid), alici=sinif["alici"])
-    return {"ok": True, "alici": sinif["alici"]}
+    return {"ok": True, "alici": sinif["alici"], "atilan": int(sinif.get("atilan") or 0)}
 
 
 def durdur_istegi(kid: int) -> dict:

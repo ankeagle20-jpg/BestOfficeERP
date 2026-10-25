@@ -352,7 +352,6 @@ window.setActiveTab = function(tabId) {
       <a href="{{ url_for('musteriler.export_excel') }}" class="ml-btn excel"><i class="fa fa-file-excel"></i> Excel İndir</a>
       <a href="{{ url_for('musteriler.import_excel') }}" class="ml-btn excel-upload"><i class="fa fa-upload"></i> Excel Yükle</a>
       <a href="#" id="btn-musteri-ekle-giris" class="ml-btn ekle"><i class="fa fa-plus"></i> Müşteri Ekle</a>
-      {% if wa_toplu_kampanya %}<button type="button" id="btn-toplu-mesaj" class="ml-btn back">Toplu Mesaj</button>{% endif %}
     </div>
   </div>
 
@@ -2408,29 +2407,6 @@ document.getElementById('btn-bulk-save').addEventListener('click', function() { 
 document.getElementById('btn-hepsini-kayde').addEventListener('click', function() { mlRunBulkSave(this); });
 </script>
 {% if wa_toplu_kampanya %}
-<div id="wtModal" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;align-items:center;justify-content:center">
-  <div style="background:#0d1520;color:#e8f1ff;border:1px solid rgba(0,200,255,.25);border-radius:10px;padding:16px;width:min(440px,92vw);font-size:13px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <strong>Toplu Mesaj</strong>
-      <button type="button" id="wtKapat" class="ml-btn back">Kapat</button>
-    </div>
-    <label>Şablon <textarea id="wtSablon" maxlength="1000" rows="5" style="width:100%;margin-top:4px"></textarea></label>
-    <label style="display:block;margin-top:8px">Günlük tavan
-      <input id="wtTavan" type="number" min="50" max="250" value="150" style="width:80px;margin-left:6px">
-    </label>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
-      <button type="button" id="wtOnizle" class="ml-btn back">Önizleme</button>
-      <button type="button" id="wtBaslat" class="ml-btn ekle" disabled>Başlat</button>
-      <button type="button" id="wtDurdur" class="ml-btn back">Durdur</button>
-      <button type="button" id="wtDevam" class="ml-btn back">Devam</button>
-      <button type="button" id="wtBitir" class="ml-btn back">Bitir</button>
-    </div>
-    <p id="wtOnizleme" style="min-height:2.4em;color:#9bd"></p>
-    <label>Test numarası <input id="wtTestNo" type="tel" autocomplete="off" style="width:160px;margin-left:6px"></label>
-    <button type="button" id="wtTest" class="ml-btn back" style="margin-left:6px">Test gönder</button>
-    <p id="wtTestSonuc" style="min-height:1.2em;color:#9bd"></p>
-  </div>
-</div>
 <script src="{{ url_for('static', filename='js/wa-toplu.js') }}"></script>
 {% endif %}
 {% endblock %}

@@ -247,6 +247,7 @@ def test_rol_403():
         ("POST", "/whatsapp/api/toplu-devam"),
         ("GET", "/whatsapp/api/toplu-haric"),
         ("POST", "/whatsapp/api/toplu-haric"),
+        ("GET", "/whatsapp/api/toplu-liste"),
     ]
     try:
         for ad in ("personel", "muhasebe"):
@@ -262,6 +263,8 @@ def test_rol_403():
         check("bayrak 404", r.status_code == 404)
         r = client.post("/whatsapp/api/toplu-baslat", json={"id": 1})
         check("bayrak baslat 404", r.status_code == 404)
+        r = client.get("/whatsapp/api/toplu-liste")
+        check("bayrak liste 404", r.status_code == 404 and "no-store" not in (r.headers.get("Cache-Control") or ""))
     finally:
         os.environ["WA_TOPLU_KAMPANYA"] = "0"
 
@@ -376,9 +379,9 @@ def test_giris_butonu_ayni():
     modul = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     kart = modul[modul.find("def kart_telefon"): modul.find("def _kuyruk_bir")]
-    check("giris fn", "function girisMusteriWhatsAppAc" in giris and "wa-toplu.js" not in giris)
+    check("giris fn", "function girisMusteriWhatsAppAc" in giris and "wa-toplu.js" in giris and "wa_toplu_kampanya" in giris)
     check("gecikme uc", "function whatsappSeciliGonder" in giris and "/whatsapp/api/gonder" in giris)
-    check("liste buton", 'id="btn-toplu-mesaj"' in liste and "wa_toplu_kampanya" in liste)
+    check("liste buton", 'id="btn-toplu-mesaj"' in giris and "wa_toplu_kampanya" in giris and "wa_toplu_kampanya" in liste and "wt-haric" in liste)
     check("tel2 yok", "tel2" not in kart and "whatsapp_geciken_haric" not in modul)
     check("js metin yok", "GIZLI_METIN" not in js and "data-phone" not in js)
     i = app.find('id="wa_toplu_kampanya"')
@@ -395,7 +398,7 @@ def test_bitir_kilit():
     wa.bitir_uygula(t, [])
     check("test kilit", t["durum"] == "bitti" and not wa.kilit_acik(t["durum"]))
     js = (ROOT / "static" / "js" / "wa-toplu.js").read_text(encoding="utf-8")
-    html = (ROOT / "templates" / "musteriler" / "index.html").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     check("onay sayi", 'Bekleyen " + n + " alıcı iptal edilecek' in js and 'id="wtBitir"' in html)
 
 
@@ -537,6 +540,94 @@ def test_okuma_zamani_belirsiz():
     m["bekleyen"] = [ayni]
     ikinci = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
     check("tekrar yok", ikinci["eylem"] == "mukerrer" and n["v"] == 1 and m["kampanya"]["seri"] == 2)
+
+
+def _secim_kart(mid, durum="aktif", tel="", haric=False):
+    return {
+        "mid": mid,
+        "durum": durum,
+        "haric": haric,
+        "tel": tel,
+        "yetkili": "",
+        "ad": "AdayGizli",
+        "adaylar": ([{"telefon": tel, "etiket": "Kart telefonu"}] if tel else []),
+    }
+
+
+def test_secilen_disi():
+    rows = [_secim_kart(1, tel=_tel(1)), _secim_kart(2, tel=_tel(2))]
+    s = wa.secilen_uygula(rows, [1], "Merhaba")
+    check("disari yok", s["alici"] == 1 and [u["mid"] for u in s["uygun"]] == [1] and s["atilan"] == 0)
+
+
+def test_secilen_atilan():
+    rows = [
+        _secim_kart(1, durum="pasif", tel=_tel(1)),
+        _secim_kart(2, haric=True, tel=_tel(2)),
+        _secim_kart(3, tel=""),
+    ]
+    s = wa.secilen_uygula(rows, [1, 2, 3], "Merhaba")
+    check(
+        "sunucu atar",
+        s["alici"] == 0 and s["atilan"] == 3 and s["pasif"] == 1 and s["haric"] == 1 and s["numarasiz"] == 1,
+    )
+
+
+def test_secilen_tenant():
+    rows = [_secim_kart(1, tel=_tel(1))]
+    s = wa.secilen_uygula(rows, [1, 999001], "Merhaba")
+    check("baska tenant", s["alici"] == 1 and s["atilan"] == 1 and s["uygun"][0]["mid"] == 1)
+
+
+def test_secilen_mukerrer():
+    rows = [_secim_kart(1, tel=_tel(3)), _secim_kart(2, tel=_tel(3))]
+    s = wa.secilen_uygula(rows, [1, 2], "Merhaba")
+    ekran = wa.liste_derle(rows)
+    check("tek numara", s["alici"] == 1 and s["atilan"] == 1 and s["uygun"][0]["mid"] == 1)
+    check("rozet", ekran[0]["mukerrer"] is False and ekran[1]["mukerrer"] is True and ekran[1]["sebep"] == "")
+
+
+def test_liste_log_nostore():
+    kayit = logging.getLogger("wa_kampanya")
+    satirlar = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            satirlar.append(record.getMessage())
+
+    handler = _H()
+    kayit.addHandler(handler)
+    kayit.setLevel(logging.INFO)
+    try:
+        wa.liste_derle([_secim_kart(1, tel=_tel(4))])
+        birlesik = "\n".join(satirlar)
+        check("liste log", "AdayGizli" not in birlesik and _tel(4) not in birlesik)
+    finally:
+        kayit.removeHandler(handler)
+    check("no-store", wa.liste_yanit_baslik().get("Cache-Control") == "no-store")
+    src = (ROOT / "routes" / "whatsapp_routes.py").read_text(encoding="utf-8")
+    i = src.find("def api_toplu_liste")
+    parca = src[i:src.find("def api_toplu_durum", i)]
+    check("yanit baslik", "liste_yanit_baslik" in parca and "guvenli_log" not in parca and "logger" not in parca)
+
+
+def test_baslik_dugme():
+    giris = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    bas = giris.find('<div class="giris-buttons">')
+    cubuk = giris.find('id="giris-secili-musteri-toolbar"')
+    baslik = giris[bas:cubuk]
+    kollar = baslik.split("{% else %}")
+    check("baslik acik", len(kollar) == 2 and 'id="btn-toplu-mesaj"' in kollar[0] and "girisMusteriWhatsAppAc" not in kollar[0])
+    check("baslik kapali", "girisMusteriWhatsAppAc()" in kollar[1])
+    form_i = giris.find("musteri-form-btn-whatsapp", cubuk)
+    arac = giris[cubuk:form_i]
+    check(
+        "cubuk form ayni",
+        form_i > cubuk and arac.count("girisMusteriWhatsAppAc()") == 1
+        and "girisMusteriWhatsAppAc()" in giris[form_i:form_i + 180],
+    )
+    js = (ROOT / "static" / "js" / "wa-toplu.js").read_text(encoding="utf-8")
+    check("onay metin", "kişiye, yaklaşık " in js and "saatte/" in js and "günde gönderilecek" in js)
 
 
 def _calistir(adlar):
