@@ -243,6 +243,7 @@ def test_rol_403():
         ("GET", "/whatsapp/api/toplu-test-sonuc"),
         ("POST", "/whatsapp/api/toplu-baslat"),
         ("POST", "/whatsapp/api/toplu-durdur"),
+        ("POST", "/whatsapp/api/toplu-bitir"),
         ("POST", "/whatsapp/api/toplu-devam"),
         ("GET", "/whatsapp/api/toplu-haric"),
         ("POST", "/whatsapp/api/toplu-haric"),
@@ -368,6 +369,159 @@ def test_giris_butonu_ayni():
     i = app.find('id="wa_toplu_kampanya"')
     parca = app[max(0, i - 500): i + 40]
     check("job tek", i > 0 and "max_instances=1" in parca and "minutes=1" in parca)
+
+
+def test_bitir_kilit():
+    k = {"durum": "durduruldu"}
+    r = wa.bitir_uygula(k, [])
+    check("kilit kalkti", r.get("ok") is True and k["durum"] == "bitti" and not wa.kilit_acik(k["durum"]))
+    check("yeni acilir", wa.baslat_izin(True, wa.kilit_acik(k["durum"])) == "tamam")
+    t = {"durum": "test_bekliyor"}
+    wa.bitir_uygula(t, [])
+    check("test kilit", t["durum"] == "bitti" and not wa.kilit_acik(t["durum"]))
+    js = (ROOT / "static" / "js" / "wa-toplu.js").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "musteriler" / "index.html").read_text(encoding="utf-8")
+    check("onay sayi", 'Bekleyen " + n + " alıcı iptal edilecek' in js and 'id="wtBitir"' in html)
+
+
+def test_bitir_calisiyor_red():
+    k = {"durum": "calisiyor"}
+    satirlar = [{"durum": "bekliyor"}, {"durum": "gonderildi"}]
+    r = wa.bitir_uygula(k, satirlar)
+    check(
+        "calisiyor red",
+        r.get("ok") is False and r.get("neden") == "durum"
+        and k["durum"] == "calisiyor" and satirlar[0]["durum"] == "bekliyor"
+        and satirlar[1]["durum"] == "gonderildi",
+    )
+
+
+def test_bitir_alici():
+    k = {"durum": "taslak"}
+    satirlar = [
+        {"durum": "bekliyor"},
+        {"durum": "bekliyor"},
+        {"durum": "gonderildi"},
+        {"durum": "belirsiz"},
+    ]
+    r = wa.bitir_uygula(k, satirlar)
+    check(
+        "iptal ve koru",
+        r.get("iptal") == 2 and k["durum"] == "bitti"
+        and satirlar[0]["durum"] == "iptal" and satirlar[1]["durum"] == "iptal"
+        and satirlar[2]["durum"] == "gonderildi" and satirlar[3]["durum"] == "belirsiz",
+    )
+    modul = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
+    govde = modul[modul.find("def bitir_istegi"): modul.find("def devam_istegi")]
+    check("sql silmez", "DELETE" not in govde and "durum = 'iptal'" in govde and "bekliyor" in govde)
+
+
+def test_bitir_rol():
+    from flask import Flask
+    from auth import User, login_manager
+    from routes import whatsapp_routes
+
+    rol = {"v": "personel"}
+    os.environ["WA_TOPLU_KAMPANYA"] = "1"
+
+    @login_manager.user_loader
+    def _load(_uid):
+        return User(id=1, username="t", full_name="T", role=rol["v"],
+                    aktif_mi=True, security_stamp="test-stamp")
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    login_manager.init_app(app)
+
+    @app.route("/")
+    def index():
+        return "home"
+
+    app.register_blueprint(whatsapp_routes.bp)
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = "1"
+        s["_fresh"] = True
+    try:
+        for ad in ("personel", "muhasebe"):
+            rol["v"] = ad
+            r = client.post("/whatsapp/api/toplu-bitir", json={"id": 1})
+            check(ad + " bitir 403", r.status_code == 403)
+        rol["v"] = "admin"
+        os.environ["WA_TOPLU_KAMPANYA"] = "0"
+        r = client.post("/whatsapp/api/toplu-bitir", json={"id": 1})
+        check("bitir bayrak 404", r.status_code == 404)
+    finally:
+        os.environ["WA_TOPLU_KAMPANYA"] = "0"
+
+
+def _kuyruk_raise(exc):
+    import requests
+
+    eski = requests.post
+
+    def _post(*_a, **_k):
+        raise exc
+
+    requests.post = _post
+    try:
+        return wa._kuyruk_bir("1", "a", wa.yeni_anahtar())
+    finally:
+        requests.post = eski
+
+
+def test_baglanti_deneme():
+    import requests
+
+    bag = _kuyruk_raise(requests.exceptions.ConnectionError("yok"))
+    zaman = _kuyruk_raise(requests.exceptions.ConnectTimeout("yok"))
+    check("baglanti sinif", bag.get("durum") == "baglanti" and zaman.get("durum") == "baglanti")
+    n = {"v": 0}
+
+    def kuyruk(_tel, _mesaj, _anahtar):
+        n["v"] += 1
+        raise requests.exceptions.ConnectionError("yok")
+
+    m = _model(1, seri=0)
+    ilk = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    ikinci = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    ucuncu = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    dort = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    satir = m["dokunulan"][-1]
+    check(
+        "uc deneme",
+        ilk["eylem"] == "baglanti" and ikinci["eylem"] == "baglanti"
+        and satir["durum"] == "basarisiz" and satir["deneme"] == 3
+        and m["kampanya"]["seri"] == 3 and m["kampanya"]["durum"] == "durduruldu"
+        and ucuncu["eylem"] == "basarisiz" and dort["eylem"] == "yok" and n["v"] == 3,
+    )
+
+
+def test_okuma_zamani_belirsiz():
+    import requests
+
+    oku = _kuyruk_raise(requests.exceptions.ReadTimeout("yok"))
+    check("okuma belirsiz", oku.get("durum") == "belirsiz" and oku.get("durum") != "baglanti")
+    n = {"v": 0}
+
+    def kuyruk(_tel, _mesaj, _anahtar):
+        n["v"] += 1
+        raise requests.exceptions.ReadTimeout("yok")
+
+    m = _model(1, seri=2)
+    sonuc = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    check(
+        "seri girmez",
+        sonuc["eylem"] == "belirsiz" and m["kampanya"]["seri"] == 2
+        and m["kampanya"]["durum"] == "calisiyor" and m["dokunulan"][0]["durum"] == "belirsiz",
+    )
+    ayni = {
+        "id": 1, "mid": m["dokunulan"][0]["mid"], "tel": _tel(1),
+        "hash": m["giden_hash"][0], "yetkili": "Kisi", "durum": "bekliyor",
+    }
+    m["bekleyen"] = [ayni]
+    ikinci = wa.tur_uygula(m, kuyruk, _yok, 0.9, _an(10))
+    check("tekrar yok", ikinci["eylem"] == "mukerrer" and n["v"] == 1 and m["kampanya"]["seri"] == 2)
 
 
 def _calistir(adlar):

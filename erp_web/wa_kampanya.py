@@ -30,7 +30,8 @@ HATA_SERI = 3
 BELIRSIZ_SAAT = 2
 YEDEK_HITAP = "Değerli müşterimiz"
 ACIK_DURUMLAR = ("calisiyor", "durduruldu", "test_bekliyor")
-GIDEN_DURUM = ("kuyrukta", "gonderildi", "belirsiz", "hata", "mukerrer")
+GIDEN_DURUM = ("kuyrukta", "gonderildi", "belirsiz", "hata", "basarisiz", "mukerrer")
+BITIR_DURUM = ("taslak", "test_bekliyor", "durduruldu")
 _SEMA_RE = re.compile(r"tenant_[a-z0-9_]+")
 _ANAHTAR_RE = re.compile(
     r"^szwa:d:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -210,6 +211,39 @@ def baslat_izin(test_ok, acik_baska) -> str:
     return "tamam"
 
 
+def kilit_acik(durum) -> bool:
+    return str(durum or "") in ACIK_DURUMLAR
+
+
+def bitir_uygula(kampanya: dict, alicilar) -> dict:
+    """Taslak, test veya durdurulmuş kampanyayı kapatır. Gönderilmiş satır silinmez."""
+    durum = str((kampanya or {}).get("durum") or "")
+    if durum == "calisiyor" or durum not in BITIR_DURUM:
+        return {"ok": False, "neden": "durum", "iptal": 0}
+    iptal = 0
+    for satir in alicilar or []:
+        if str((satir or {}).get("durum") or "") == "bekliyor":
+            satir["durum"] = "iptal"
+            iptal += 1
+    kampanya["durum"] = "bitti"
+    return {"ok": True, "durum": "bitti", "iptal": iptal}
+
+
+def sinifla_istek_hatasi(exc) -> dict:
+    """Bağlantı hatası ile okuma zaman aşımını ayırır.
+
+    ConnectTimeout, ConnectionError alt sınıfıdır; Timeout'tan önce bakılır.
+    Okuma zaman aşımı belirsizdir: mesaj gitmiş olabilir.
+    """
+    import requests
+
+    if isinstance(exc, (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError)):
+        return {"durum": "baglanti"}
+    if isinstance(exc, requests.exceptions.Timeout):
+        return {"durum": "belirsiz"}
+    return {"durum": "belirsiz"}
+
+
 def poll_karar(servis_durum, yas_asildi: bool) -> str:
     d = str(servis_durum or "")
     if d == "gonderildi":
@@ -245,6 +279,8 @@ def _uygula_sonuc(model: dict, satir: dict, kod: str) -> None:
         k["seri"] = seri
         if seri >= HATA_SERI:
             k["durum"] = "durduruldu"
+    elif kod == "basarisiz":
+        satir["durum"] = "basarisiz"
     else:
         satir["durum"] = kod
     if satir.get("durum") != "kuyrukta":
@@ -308,23 +344,52 @@ def tur_uygula(model, kuyruk, sonuc_oku, rastgele, simdi) -> dict:
     model["giden_hash"] = list(giden) + [ozet]
     try:
         paket = kuyruk(norm, metin, anahtar) or {}
-    except Exception:
-        paket = {"durum": "belirsiz"}
+    except Exception as exc:
+        paket = sinifla_istek_hatasi(exc)
     model["kuyruk_cagri"] = int(model.get("kuyruk_cagri") or 0) + 1
-    model["bugun"] = int(model.get("bugun") or 0) + 1
     d = str(paket.get("durum") or "kuyrukta")
-    if d == "gonderildi":
-        _uygula_sonuc(model, aday, "gonderildi")
-    elif d == "belirsiz":
-        _uygula_sonuc(model, aday, "belirsiz")
-    elif d == "hata":
-        _uygula_sonuc(model, aday, "hata")
+    if d == "baglanti":
+        d = _baglanti_uygula(model, aday, ozet)
     else:
-        d = "kuyrukta"
+        model["bugun"] = int(model.get("bugun") or 0) + 1
+        if d == "gonderildi":
+            _uygula_sonuc(model, aday, "gonderildi")
+        elif d == "belirsiz":
+            _uygula_sonuc(model, aday, "belirsiz")
+        elif d == "hata":
+            _uygula_sonuc(model, aday, "hata")
+        else:
+            d = "kuyrukta"
     guvenli_log(
         "tur", eylem=d, mid=aday.get("mid"), kampanya_id=k.get("id"), maske=norm,
     )
     return {"eylem": d}
+
+
+def _baglanti_uygula(model: dict, aday: dict, ozet: str) -> str:
+    """Mesaj gitmedi. Satır en fazla 3 deneme sonra basarisiz olur; seri artar."""
+    k = model.get("kampanya") or {}
+    deneme = int(aday.get("deneme") or 0) + 1
+    aday["deneme"] = deneme
+    aday["deneme_artti"] = True
+    seri = int(k.get("seri") or 0) + 1
+    k["seri"] = seri
+    if seri >= HATA_SERI:
+        k["durum"] = "durduruldu"
+    giden = [h for h in (model.get("giden_hash") or []) if h != ozet]
+    model["ucus"] = None
+    if deneme >= HATA_SERI:
+        aday["durum"] = "basarisiz"
+        giden.append(ozet)
+        eylem = "basarisiz"
+    else:
+        aday["durum"] = "bekliyor"
+        aday["anahtar"] = None
+        model.setdefault("bekleyen", []).insert(0, aday)
+        eylem = "baglanti"
+    model["giden_hash"] = giden
+    model["kampanya"] = k
+    return eylem
 
 
 def test_gonder(telefon, sablon, kuyruk, anahtar_uret=None) -> dict:
@@ -597,9 +662,30 @@ def kart_telefon(mid: int, oku=None) -> dict:
 
 
 def _kuyruk_bir(telefon: str, mesaj: str, anahtar: str) -> dict:
-    import sozlesme_whatsapp as sw
+    """Kampanya kuyruğu. Bağlantı hatası ile okuma zaman aşımı ayrı döner.
 
-    return sw._kuyruk_varsayilan(telefon, mesaj, anahtar)
+    Sözleşme yolu _kuyruk_varsayilan'da kalır; orada her Timeout belirsizdir.
+    """
+    import requests
+    import sozlesme_whatsapp as sw
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    try:
+        r = requests.post(
+            _wa_url("kuyruk-toplu-ekle"),
+            json={"liste": sw._kuyruk_liste(telefon, mesaj, anahtar)},
+            headers=_wa_internal_headers(),
+            timeout=(3, 30),
+        )
+    except Exception as exc:
+        paket = sinifla_istek_hatasi(exc)
+        sw._kuyruk_log(0, "ulasilamadi" if paket.get("durum") == "baglanti" else "yanit_yok")
+        return paket
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    return sw._kuyruk_oku(int(r.status_code), body)
 
 
 def _sonuc_bir(anahtar: str) -> dict:
@@ -649,7 +735,7 @@ def _tur_db(sch, rastgele, simdi=None) -> None:
     if ucus is None and str(k.get("durum") or "") == "calisiyor":
         row = fetch_one(
             """
-            SELECT id, musteri_id, telefon_hash
+            SELECT id, musteri_id, telefon_hash, deneme
             FROM wa_kampanya_alici
             WHERE kampanya_id = %s AND durum = 'bekliyor'
             ORDER BY id
@@ -666,13 +752,14 @@ def _tur_db(sch, rastgele, simdi=None) -> None:
                 "tel": kart.get("tel") or "",
                 "yetkili": kart.get("yetkili") or "",
                 "durum": "bekliyor",
+                "deneme": int(row.get("deneme") or 0),
             })
     giden_rows = fetch_all(
         """
         SELECT telefon_hash
         FROM wa_kampanya_alici
         WHERE kampanya_id = %s
-          AND durum IN ('kuyrukta', 'gonderildi', 'belirsiz', 'hata', 'mukerrer')
+          AND durum IN ('kuyrukta', 'gonderildi', 'belirsiz', 'hata', 'basarisiz', 'mukerrer')
         """,
         (int(k["id"]),),
     ) or []
@@ -944,6 +1031,47 @@ def durdur_istegi(kid: int) -> dict:
     return {"ok": True, "durum": "durduruldu"}
 
 
+def bitir_istegi(kid: int) -> dict:
+    from db import execute, fetch_all
+
+    ensure_tablolar()
+    row = _kampanya_oku(int(kid))
+    if not row:
+        return {"ok": False, "neden": "yok"}
+    try:
+        alicilar = fetch_all(
+            """
+            SELECT id, durum
+            FROM wa_kampanya_alici
+            WHERE kampanya_id = %s
+            """,
+            (int(kid),),
+        ) or []
+    except Exception:
+        alicilar = []
+    sonuc = bitir_uygula({"durum": row.get("durum")}, [dict(a) for a in alicilar])
+    if not sonuc.get("ok"):
+        return sonuc
+    execute(
+        """
+        UPDATE wa_kampanya_alici
+        SET durum = 'iptal'
+        WHERE kampanya_id = %s AND durum = 'bekliyor'
+        """,
+        (int(kid),),
+    )
+    execute(
+        """
+        UPDATE wa_kampanya
+        SET durum = 'bitti', updated_at = NOW()
+        WHERE id = %s AND durum IN ('taslak', 'test_bekliyor', 'durduruldu')
+        """,
+        (int(kid),),
+    )
+    guvenli_log("bitir", kampanya_id=int(kid), iptal=int(sonuc.get("iptal") or 0))
+    return {"ok": True, "durum": "bitti", "iptal": int(sonuc.get("iptal") or 0)}
+
+
 def devam_istegi(kid: int) -> dict:
     from db import execute
 
@@ -980,6 +1108,19 @@ def durum_istegi() -> dict:
     )
     if not row:
         return {"ok": True, "kampanya": None}
+    bekleyen = 0
+    try:
+        say = fetch_one(
+            """
+            SELECT COUNT(*) AS n
+            FROM wa_kampanya_alici
+            WHERE kampanya_id = %s AND durum = 'bekliyor'
+            """,
+            (int(row.get("id")),),
+        ) or {}
+        bekleyen = int(say.get("n") or 0)
+    except Exception:
+        bekleyen = 0
     return {
         "ok": True,
         "kampanya": {
@@ -988,6 +1129,7 @@ def durum_istegi() -> dict:
             "tavan": int(row.get("gunluk_tavan") or TAVAN_VARSAYILAN),
             "test_ok": bool(row.get("test_ok")),
             "seri": int(row.get("ust_uste_hata") or 0),
+            "bekleyen": bekleyen,
         },
     }
 

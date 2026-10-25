@@ -962,7 +962,7 @@ def _toplu_json(sonuc, tamam=(200,)):
         kod = 404 if neden == "yok" else 409 if neden in ("acik_var", "test_yok", "durum", "alici_yok") else 400
         return jsonify({"ok": False, "neden": neden or "kayit"}), kod
     govde = {"ok": True}
-    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "mid", "kapali", "kampanya"):
+    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "mid", "kapali", "kampanya", "iptal"):
         if anahtar in sonuc:
             govde[anahtar] = sonuc[anahtar]
     return jsonify(govde), 200
@@ -1075,6 +1075,22 @@ def api_toplu_durdur():
     except (TypeError, ValueError):
         return jsonify({"ok": False, "neden": "gecersiz"}), 400
     return _toplu_json(wa_kampanya.durdur_istegi(kid))
+
+
+@bp.route('/api/toplu-bitir', methods=['POST'])
+@admin_gerekli
+def api_toplu_bitir():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    govde = request.get_json(silent=True) or {}
+    try:
+        kid = int(govde.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "neden": "gecersiz"}), 400
+    return _toplu_json(wa_kampanya.bitir_istegi(kid))
 
 
 @bp.route('/api/toplu-devam', methods=['POST'])

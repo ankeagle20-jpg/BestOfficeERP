@@ -10,6 +10,8 @@
   var testSonuc = document.getElementById("wtTestSonuc");
   var baslat = document.getElementById("wtBaslat");
   var kampanyaId = null;
+  var kampanyaDurum = "";
+  var bekleyenSayi = 0;
   var testOk = false;
   var ALAN = [
     ["alici", "Alıcı"],
@@ -45,6 +47,8 @@
 
   function baslatDurumu() {
     baslat.disabled = !testOk;
+    var bitirBtn = document.getElementById("wtBitir");
+    if (bitirBtn) bitirBtn.disabled = !kampanyaId || kampanyaDurum === "calisiyor";
   }
 
   function durumYukle() {
@@ -52,11 +56,15 @@
       var k = j && j.kampanya;
       if (!k) {
         kampanyaId = null;
+        kampanyaDurum = "";
+        bekleyenSayi = 0;
         testOk = false;
         baslatDurumu();
         return;
       }
       kampanyaId = k.id;
+      kampanyaDurum = k.durum || "";
+      bekleyenSayi = Number(k.bekleyen || 0);
       testOk = !!k.test_ok;
       if (k.tavan) tavan.value = String(k.tavan);
       baslatDurumu();
@@ -149,6 +157,13 @@
     });
   }
 
+  function bitir() {
+    if (!kampanyaId || kampanyaDurum === "calisiyor") return;
+    var n = Number(bekleyenSayi || 0);
+    if (!window.confirm("Bekleyen " + n + " alıcı iptal edilecek")) return;
+    komut("/whatsapp/api/toplu-bitir");
+  }
+
   function komut(url) {
     if (!kampanyaId) return;
     post(url, {id: kampanyaId}).then(function (r) {
@@ -199,5 +214,6 @@
   baslat.addEventListener("click", function () { komut("/whatsapp/api/toplu-baslat"); });
   document.getElementById("wtDurdur").addEventListener("click", function () { komut("/whatsapp/api/toplu-durdur"); });
   document.getElementById("wtDevam").addEventListener("click", function () { komut("/whatsapp/api/toplu-devam"); });
+  document.getElementById("wtBitir").addEventListener("click", bitir);
   baslatDurumu();
 })();
