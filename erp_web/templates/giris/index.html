@@ -1737,6 +1737,17 @@
 .giris-secili-toolbar button:hover {
     background: #00897b;
 }
+.giris-secili-toolbar .giris-btn-whatsapp {
+    background: #25d366;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.giris-secili-toolbar .giris-btn-whatsapp:hover {
+    background: #1da851;
+}
 .giris-secili-toolbar-actions {
     display: flex;
     align-items: center;
@@ -2955,6 +2966,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         <button type="button" class="giris-nav-prev" onclick="girisMusteriKomsuyaGit('onceki')">Önceki</button>
         <button type="button" class="giris-nav-next" onclick="girisMusteriKomsuyaGit('sonraki')">Sonraki</button>
         <button type="button" class="giris-cache-isit-btn" id="sozlesme-cache-isit-btn" onclick="sozlesmeAylikCacheIsit()"><i class="fa fa-bolt"></i> Cache'i ısıt (tümü)</button>
+        <button type="button" class="giris-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon ile WhatsApp’ta sohbet aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
         <button type="button" onclick="girisMusteriAramayiAc()">Müşteri değiştir</button>
     </div>
 </div>

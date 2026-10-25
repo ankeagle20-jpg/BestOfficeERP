@@ -354,6 +354,21 @@ def test_log_maske():
         kayit.removeHandler(handler)
 
 
+def test_giris_secili_toolbar_whatsapp():
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    i = html.find('id="giris-secili-musteri-toolbar"')
+    j = html.find('<div class="giris-container">', i)
+    cubuk = html[i:j]
+    check(
+        "cubuk dugme",
+        i > 0 and j > i
+        and 'class="giris-btn-whatsapp"' in cubuk
+        and 'onclick="girisMusteriWhatsAppAc()"' in cubuk
+        and "function girisMusteriWhatsAppAc" in html
+        and ".giris-secili-toolbar .giris-btn-whatsapp" in html,
+    )
+
+
 def test_giris_butonu_ayni():
     giris = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     liste = (ROOT / "templates" / "musteriler" / "index.html").read_text(encoding="utf-8")
