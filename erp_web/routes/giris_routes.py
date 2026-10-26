@@ -9175,6 +9175,224 @@ def _tahsilat_aciklama_aylik_okunabilir(text) -> str:
     return ", ".join(parts) if parts else (_tahsilat_aciklama_temizle(s) or s)
 
 
+def _ekstre_pay_parcalari(text) -> list[dict]:
+    """|AYLIK_PAY| parçaları. Boşsa []. Tutar bakiyeye yazılmaz."""
+    s = str(text or "")
+    if "|AYLIK_PAY|" not in s:
+        return []
+    out: list[dict] = []
+    for iso_raw, tut_raw in re.findall(
+        r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|",
+        s,
+    ):
+        try:
+            dd = datetime.strptime(str(iso_raw)[:10], "%Y-%m-%d").date()
+            tut = round(float(tut_raw), 2)
+        except (TypeError, ValueError):
+            continue
+        if tut <= 0 or dd.month < 1 or dd.month > 12:
+            continue
+        iso = date(dd.year, dd.month, 1).isoformat()
+        out.append(
+            {
+                "iso": iso,
+                "donem": f"{_AY_ADLARI[dd.month - 1]} {dd.year}",
+                "tutar": tut,
+            }
+        )
+    return out
+
+
+def _ekstre_iso_aybasi(val) -> str:
+    d = _aylik_grid_coerce_date(val)
+    if d is None:
+        return ""
+    return date(d.year, d.month, 1).isoformat()
+
+
+def _ekstre_donem_durum_etiket(prow) -> str:
+    """Panel aylık/tahsil/kalan → Ödendi / Kısmi / Açık. Tutar üretmez."""
+    if not isinstance(prow, dict):
+        return ""
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    try:
+        aylik = round(float(prow.get("aylik") or 0), 2)
+        tahsil = round(float(prow.get("tahsil") or 0), 2)
+        kalan = round(float(prow.get("kalan") or 0), 2)
+    except (TypeError, ValueError):
+        return ""
+    if not all(math.isfinite(x) for x in (aylik, tahsil, kalan)):
+        return ""
+    if aylik <= tol and tahsil <= tol:
+        return ""
+    if kalan <= tol and tahsil > tol:
+        return "Ödendi"
+    if tahsil > tol and kalan > tol:
+        return "Kısmi"
+    if aylik > tol or kalan > tol:
+        return "Açık"
+    return ""
+
+
+def _ekstre_gec_pay_notlari(tahsil_rows) -> dict[str, str]:
+    """Dönem ayından sonraki tahsilat: «60,00 ₺ sonradan ödendi (23.10.2026)»."""
+    import calendar
+
+    kovalar: dict[str, list[tuple[date, float]]] = {}
+    for r in tahsil_rows or []:
+        if not isinstance(r, dict):
+            continue
+        parcalar = _ekstre_pay_parcalari(r.get("aciklama"))
+        if not parcalar:
+            continue
+        odeme = _aylik_grid_coerce_date(r.get("tahsilat_tarihi"))
+        if odeme is None:
+            continue
+        for p in parcalar:
+            try:
+                iso = str(p.get("iso") or "")
+                yy = int(iso[:4])
+                mm = int(iso[5:7])
+                son = date(yy, mm, calendar.monthrange(yy, mm)[1])
+                tut = round(float(p.get("tutar") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if tut <= 0 or odeme <= son:
+                continue
+            kovalar.setdefault(iso, []).append((odeme, tut))
+    notlar: dict[str, str] = {}
+    for iso, items in kovalar.items():
+        parca = [
+            f"{_tutar_tr_goster(tut)} ₺ sonradan ödendi ({gun.strftime('%d.%m.%Y')})"
+            for gun, tut in items
+        ]
+        if parca:
+            notlar[iso] = "; ".join(parca)
+    return notlar
+
+
+def _ekstre_donem_durumu_uygula(rows, panel_by_iso, tahsil_rows=None) -> None:
+    """Gösterim alanları. borc, alacak ve bakiye yazılmaz.
+
+    panel_by_iso yoksa satırlara dokunulmaz (ekstre eskisi gibi).
+    """
+    if not isinstance(rows, list) or not rows:
+        return
+    if not isinstance(panel_by_iso, dict) or not panel_by_iso:
+        return
+    panel: dict[str, dict] = {}
+    for iso_raw, prow in panel_by_iso.items():
+        iso = _ekstre_iso_aybasi(iso_raw)
+        if iso and isinstance(prow, dict):
+            panel[iso] = prow
+    if not panel:
+        return
+    try:
+        notlar = _ekstre_gec_pay_notlari(tahsil_rows)
+    except Exception:
+        notlar = {}
+    makbuz: dict[int, tuple[float, str, list[dict]]] = {}
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    for r in tahsil_rows or []:
+        if not isinstance(r, dict):
+            continue
+        try:
+            rid = int(r.get("id") or 0)
+            tut = round(float(r.get("tutar") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if rid <= 0 or tut <= 0:
+            continue
+        alt = _ekstre_pay_parcalari(r.get("aciklama"))
+        if not alt:
+            continue
+        tarih = _aylik_grid_coerce_date(r.get("tahsilat_tarihi"))
+        if tarih is None:
+            continue
+        makbuz[rid] = (
+            tut,
+            tarih.isoformat(),
+            [{"donem": p["donem"], "tutar": p["tutar"]} for p in alt],
+        )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("tur") == "Tahsilat":
+            ids = row.get("tahsilat_ids") or []
+            if len(ids) != 1:
+                continue
+            try:
+                tid = int(ids[0] or 0)
+                alacak = round(float(row.get("alacak") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            pack = makbuz.get(tid)
+            if not pack or abs(alacak - pack[0]) > tol:
+                continue
+            if str(row.get("tarih") or "")[:10] != pack[1]:
+                continue
+            row["pay_alt"] = pack[2]
+            continue
+        if row.get("tur") != "Kira":
+            continue
+        iso = _ekstre_iso_aybasi(row.get("tarih"))
+        etiket = _ekstre_donem_durum_etiket(panel.get(iso))
+        if not etiket:
+            continue
+        row["donem_durum"] = etiket
+        notu = notlar.get(iso) or ""
+        if notu:
+            row["donem_not"] = notu
+
+
+def _ekstre_donem_panel_oku(musteri_id, tahsil_rows=None) -> dict | None:
+    """Kayıtlı panel by_iso. Yazmaz. Okunamazsa None."""
+    global _TAHSILAT_PANEL_DETAY_TABLE_READY
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    if mid <= 0:
+        return None
+    try:
+        row = fetch_one(
+            "SELECT by_iso FROM musteri_tahsilat_panel_detay WHERE musteri_id = %s",
+            (mid,),
+        )
+    except Exception:
+        return None
+    if not row or not row.get("by_iso") or row.get("by_iso") == "{}":
+        return None
+    flag = _TAHSILAT_PANEL_DETAY_TABLE_READY
+    panel = None
+    try:
+        _TAHSILAT_PANEL_DETAY_TABLE_READY = True
+        panel = _load_musteri_panel_by_iso(mid, tahsil_rows=tahsil_rows)
+    except Exception:
+        panel = None
+    finally:
+        _TAHSILAT_PANEL_DETAY_TABLE_READY = flag
+    if isinstance(panel, dict) and panel:
+        return panel
+    return None
+
+
+def _ekstre_donem_durumu_isle(musteri_id, rows, tahsil_rows=None) -> None:
+    """Ekstre satırlarına dönem durumu ekler. Tutar kolonlarına dokunmaz."""
+    try:
+        panel = _ekstre_donem_panel_oku(musteri_id, tahsil_rows)
+    except Exception:
+        return
+    if not panel:
+        return
+    try:
+        _ekstre_donem_durumu_uygula(rows, panel, tahsil_rows)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre donem durumu mid=%s", musteri_id
+        )
+
+
 def _ekstre_tahsilat_aciklama_goster(
     tah_aciklama_raw,
     odeme_turu,
@@ -13966,6 +14184,12 @@ def _cari_ekstre_hareketler(
     for r in rows:
         bakiye = bakiye + r["borc"] - r["alacak"]
         r["bakiye"] = round(bakiye, 2)
+    try:
+        _ekstre_donem_durumu_isle(int(musteri_id), rows, tahsil_rows_ek)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre donem durumu mid=%s", musteri_id
+        )
     return rows
 
 
@@ -14738,9 +14962,16 @@ def _cari_ekstre_workbook_bytes(payload, bas_iso, bit_iso):
 
     hareketler = payload.get("hareketler") or []
     row = header_row + 1
+    son_bakiye_row = None
     for h in hareketler:
+        acik = str(h.get("aciklama") or "")
+        if h.get("donem_durum"):
+            ek = "Dönem durumu: " + str(h.get("donem_durum"))
+            if h.get("donem_not"):
+                ek += " — " + str(h.get("donem_not"))
+            acik = (acik + " — " + ek) if acik else ek
         ws.cell(row=row, column=1, value=h.get("tarih") or "").font = arial
-        ws.cell(row=row, column=2, value=h.get("aciklama") or "").font = arial
+        ws.cell(row=row, column=2, value=acik).font = arial
         bc = ws.cell(row=row, column=3, value=float(h.get("borc") or 0))
         bc.font = arial
         bc.number_format = "#,##0.00"
@@ -14750,9 +14981,16 @@ def _cari_ekstre_workbook_bytes(payload, bas_iso, bit_iso):
         kc = ws.cell(row=row, column=5, value=float(h.get("bakiye") or 0))
         kc.font = arial
         kc.number_format = "#,##0.00"
+        son_bakiye_row = row
         row += 1
+        for alt in h.get("pay_alt") or []:
+            if not isinstance(alt, dict):
+                continue
+            et = f"{alt.get('donem') or ''}: {_tutar_tr_goster(alt.get('tutar'))} ₺"
+            ws.cell(row=row, column=2, value=et).font = arial
+            row += 1
 
-    last_data_row = row - 1
+    last_data_row = son_bakiye_row if son_bakiye_row else (row - 1)
     if last_data_row >= header_row + 1:
         toplam_row = row + 1
         ws.cell(row=toplam_row, column=2, value="TOPLAM").font = arial_bold
@@ -14767,7 +15005,7 @@ def _cari_ekstre_workbook_bytes(payload, bas_iso, bit_iso):
         tk.number_format = "#,##0.00"
 
     ws.column_dimensions["A"].width = 12
-    ws.column_dimensions["B"].width = 45
+    ws.column_dimensions["B"].width = 62
     ws.column_dimensions["C"].width = 14
     ws.column_dimensions["D"].width = 14
     ws.column_dimensions["E"].width = 14

@@ -34150,7 +34150,24 @@ function cariEkstreSatirTr(h) {
         cls = ' class="cari-ekstre-row-doc"';
         dataAttr = ' data-tahsilat-ids="' + tids + '"';
     }
-    return '<tr' + cls + dataAttr + '><td>' + tarih + '</td><td>' + aciklama + '</td><td class="num">' + borc + '</td><td class="num">' + alacak + '</td><td class="num">' + bakiye + '</td>' + cariEkstreIslemHucre(h) + '</tr>';
+    var donemEk = '';
+    if (h.donem_durum) {
+        var dm = 'Dönem durumu: ' + String(h.donem_durum);
+        if (h.donem_not) dm += ' — ' + String(h.donem_not);
+        var renk = h.donem_durum === 'Ödendi' ? '#0d7a4f' : (h.donem_durum === 'Kısmi' ? '#b45309' : '#b42318');
+        donemEk = '<div class="cari-ekstre-donem-durum" style="margin-top:2px;font-size:12px;color:' + renk + '">' + cariEkstreEscAttr(dm) + '</div>';
+    }
+    var tr = '<tr' + cls + dataAttr + '><td>' + tarih + '</td><td>' + aciklama + donemEk + '</td><td class="num">' + borc + '</td><td class="num">' + alacak + '</td><td class="num">' + bakiye + '</td>' + cariEkstreIslemHucre(h) + '</tr>';
+    var alts = h.pay_alt;
+    if (alts && alts.length) {
+        for (var ai = 0; ai < alts.length; ai++) {
+            var alt = alts[ai] || {};
+            var tutAlt = (parseFloat(alt.tutar) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            var etAlt = cariEkstreEscAttr(String(alt.donem || ''));
+            tr += '<tr class="cari-ekstre-pay-alt"><td></td><td style="padding-left:18px;color:#475569;font-size:12px">' + etAlt + ': ' + tutAlt + ' ₺</td><td class="num"></td><td class="num"></td><td class="num"></td><td></td></tr>';
+        }
+    }
+    return tr;
 }
 function cariEkstreDuzenleModalKapat() {
     var ov = document.getElementById('cari_ekstre_duzenle_modal');
