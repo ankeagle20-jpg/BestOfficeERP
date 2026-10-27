@@ -591,6 +591,12 @@ def api_eslestirme_iptal():
                 logging.getLogger(__name__).exception(
                     "eslestirme_iptal tahsilat_degisti mid=%s", mid_iptal
                 )
+        if tid:
+            try:
+                from .giris_routes import _ekstre_api_cache_temizle
+                _ekstre_api_cache_temizle()
+            except Exception:
+                logging.getLogger(__name__).exception("eslestirme_iptal ekstre cache temizle")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
