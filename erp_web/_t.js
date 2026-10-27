@@ -11466,7 +11466,12 @@ function girisTahsilatYilAyPanelByIsoFromTahsilSatirlar(satirlar) {
     return byIso;
 }
 
-function sozlesmeAylikTahsilEt() {
+function girisTahsilFazlaTutarOnayMetni(j) {
+    if (!j || !j.onay_gerekli) return '';
+    return String(j.mesaj || 'Tutar ayın borcunu belirgin aşıyor. Yine de yazılsın mı?');
+}
+
+function sozlesmeAylikTahsilEt(onayFazla) {
     if (window.__aylikTahsilInFlight) {
         return;
     }
@@ -11514,6 +11519,7 @@ function sozlesmeAylikTahsilEt() {
         tahsilBtn.style.cursor = 'not-allowed';
         tahsilBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> İşleniyor...';
     }
+    var fazlaRetry = false;
     var tahsilAbort = new AbortController();
     var tahsilTimeoutId = setTimeout(function () {
         try { tahsilAbort.abort(); } catch (eAb) {}
@@ -11524,7 +11530,7 @@ function sozlesmeAylikTahsilEt() {
         credentials: 'same-origin',
         timeoutMs: 120000,
         signal: tahsilAbort.signal,
-        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale' })
+        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0 })
     }, 2).then(function (r) {
         return r.text().then(function (text) {
             var j = null;
@@ -11537,6 +11543,11 @@ function sozlesmeAylikTahsilEt() {
         });
     }).then(function (res) {
         if (!res.j || !res.j.ok) {
+            var fazlaMetin = girisTahsilFazlaTutarOnayMetni(res.j);
+            if (fazlaMetin && !onayFazla && confirm(fazlaMetin)) {
+                fazlaRetry = true;
+                return;
+            }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'İşlem başarısız.');
             return;
         }
@@ -11611,6 +11622,10 @@ function sozlesmeAylikTahsilEt() {
     }).finally(function () {
         clearTimeout(tahsilTimeoutId);
         window.__aylikTahsilInFlight = false;
+        if (fazlaRetry) {
+            sozlesmeAylikTahsilEt(true);
+            return;
+        }
         if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') {
             try { sozlesmelerAylikSecilebilirlikYenile(); } catch (_eSelFin) {}
         }
@@ -14660,7 +14675,7 @@ function girisTahsilatYilAyTamGridSenkron(yil, ay, brutKdv, tahsilKdv, isoTarih)
         }
     } catch (_eTamSyn) {}
 }
-function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
+function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, onayFazla) {
     var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? selectedId : null;
     if (!mid) {
         alert('Önce soldan bir müşteri seçin.');
@@ -14682,7 +14697,7 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         timeoutMs: 120000,
-        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale' })
+        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0 })
     }, 2).then(function (r) {
         return r.text().then(function (text) {
             var j = null;
@@ -14692,6 +14707,11 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
     }).then(function (res) {
         window.__tahsilatYilAyDbInFlight = false;
         if (!res.j || !res.j.ok) {
+            var fazlaMetin = girisTahsilFazlaTutarOnayMetni(res.j);
+            if (fazlaMetin && !onayFazla && confirm(fazlaMetin)) {
+                girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, true);
+                return;
+            }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kaydı başarısız.');
             if (doneCb) doneCb(false);
             return;
@@ -14914,6 +14934,7 @@ function girisTahsilatYilAyDbTahsildenCikar(satirlar, donemYil, doneCb) {
     }).then(function (res) {
         window.__tahsilatYilAyDbInFlight = false;
         if (!res.j || !res.j.ok) {
+            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kaldırılamadı.');
             if (doneCb) doneCb(false);
             return;
         }

@@ -207,6 +207,13 @@ def api_tahsilat_delete():
         from tahsilat_silme import tahsilatlari_sil
 
         tahsilatlari_sil(silme_yolu="tahsilat-delete", ids=[tid])
+        try:
+            from .giris_routes import _banka_tahsilat_id_bosalt
+            _banka_tahsilat_id_bosalt([tid])
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "api_tahsilat_delete banka bag mid=%s", mid
+            )
         if mid > 0:
             try:
                 from .giris_routes import resync_panel_and_grid_after_tahsil_change

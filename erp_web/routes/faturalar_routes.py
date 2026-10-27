@@ -5410,6 +5410,7 @@ def api_fatura_sil_toplu():
 
     silinen = []
     atlanan = []
+    tahsilat_mid: dict[int, list[int]] = {}
     for fid in ids:
         row = fetch_one(
             """SELECT id, fatura_no,
@@ -5431,11 +5432,19 @@ def api_fatura_sil_toplu():
             continue
         from tahsilat_silme import tahsilatlari_sil
 
-        tahsilatlari_sil(
+        tahsil_satir = tahsilatlari_sil(
             silme_yolu="fatura-toplu-sil-cascade",
             where_sql="fatura_id = %s",
             where_params=(fid,),
-        )
+        ) or []
+        for ts in tahsil_satir:
+            try:
+                tmid = int(ts.get("musteri_id") or ts.get("customer_id") or 0)
+                ttid = int(ts.get("id") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if tmid > 0 and ttid > 0:
+                tahsilat_mid.setdefault(tmid, []).append(ttid)
         rc = execute("DELETE FROM faturalar WHERE id = %s", (fid,))
         if rc:
             silinen.append({"id": fid, "fatura_no": row.get("fatura_no")})
@@ -5447,6 +5456,15 @@ def api_fatura_sil_toplu():
             _ekstre_api_cache_temizle()
         except Exception:
             logging.getLogger(__name__).exception("toplu fatura sil ekstre cache temizle")
+    if tahsilat_mid:
+        try:
+            from .giris_routes import tahsilat_degisti
+            for tmid, tid_list in tahsilat_mid.items():
+                tahsilat_degisti(
+                    tmid, tahsilat_ids=tid_list, banka_bagini_birak=True
+                )
+        except Exception:
+            logging.getLogger(__name__).exception("toplu fatura sil tahsilat senkron")
     msg = f"{len(silinen)} fatura silindi."
     if atlanan:
         msg += f" {len(atlanan)} kayıt atlandı (ETTN’li veya bulunamadı)."
@@ -10679,8 +10697,12 @@ def tahsilat_guncelle():
         try:
             mid = int((row or {}).get("musteri_id") or 0)
             if mid > 0:
-                from .giris_routes import resync_panel_and_grid_after_tahsil_change
+                from .giris_routes import (
+                    _cari_ekstre_cache_invalidate_musteri,
+                    resync_panel_and_grid_after_tahsil_change,
+                )
                 resync_panel_and_grid_after_tahsil_change(mid)
+                _cari_ekstre_cache_invalidate_musteri(mid)
         except Exception:
             logging.getLogger(__name__).exception(
                 "tahsilat_guncelle panel/grid resync musteri_id=%s",
@@ -10781,6 +10803,13 @@ def tahsilat_sil():
         )
         if not silinen:
             return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
+        try:
+            from .giris_routes import _banka_tahsilat_id_bosalt
+            _banka_tahsilat_id_bosalt([tahsilat_id])
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "tahsilat_sil banka bag mid=%s", mid
+            )
         if mid > 0:
             try:
                 from .giris_routes import resync_panel_and_grid_after_tahsil_change

@@ -441,6 +441,7 @@ def api_oto_eslestir():
         rows = fetch_all(sql, tuple(params) if params else None)
         musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name")
         eslesti = 0
+        senkron_mid = set()
         for h in rows or []:
             g = (h.get("gonderici") or "").strip().upper()
             a = (h.get("aciklama") or "").strip().upper()
@@ -471,7 +472,18 @@ def api_oto_eslestir():
                         (m["id"], row["id"], h["id"]),
                     )
                     eslesti += 1
+                    try:
+                        senkron_mid.add(int(m["id"]))
+                    except (TypeError, ValueError):
+                        pass
                 break
+        if senkron_mid:
+            try:
+                from .giris_routes import tahsilat_degisti
+                for smid in senkron_mid:
+                    tahsilat_degisti(smid)
+            except Exception:
+                logging.getLogger(__name__).exception("oto_eslestir tahsilat_degisti")
         return jsonify({"ok": True, "eslesti": eslesti})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
@@ -514,6 +526,13 @@ def api_eslestir():
             "UPDATE banka_hareketleri SET durum = 'eslesti', musteri_id = %s, tahsilat_id = %s WHERE id = %s",
             (musteri_id, row["id"], hareket_id),
         )
+        try:
+            from .giris_routes import tahsilat_degisti
+            tahsilat_degisti(musteri_id)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "eslestir tahsilat_degisti mid=%s", musteri_id
+            )
         return jsonify({"ok": True, "tahsilat_id": row["id"]})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
@@ -529,25 +548,49 @@ def api_eslestirme_iptal():
         if not hareket_id:
             return jsonify({"ok": False, "mesaj": "Hareket seçin"}), 400
         hareket_id = int(hareket_id)
-        h = fetch_one("SELECT id, tahsilat_id, durum FROM banka_hareketleri WHERE id = %s", (hareket_id,))
+        h = fetch_one(
+            "SELECT id, tahsilat_id, durum, musteri_id FROM banka_hareketleri WHERE id = %s",
+            (hareket_id,),
+        )
         if not h:
             return jsonify({"ok": False, "mesaj": "Hareket bulunamadı"}), 404
         if h.get("durum") != "eslesti":
             return jsonify({"ok": False, "mesaj": "Sadece eşleşmiş hareket iptal edilebilir"}), 400
         tid = h.get("tahsilat_id")
+        mid_iptal = 0
+        try:
+            mid_iptal = int(h.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            mid_iptal = 0
         if tid:
             from tahsilat_silme import tahsilatlari_sil
 
-            tahsilatlari_sil(silme_yolu="banka-eslestirme-iptal", ids=[tid])
-            try:
-                from .giris_routes import _ekstre_api_cache_temizle
-                _ekstre_api_cache_temizle()
-            except Exception:
-                logging.getLogger(__name__).exception("eslestirme_iptal ekstre cache temizle")
+            silinen_satir = tahsilatlari_sil(silme_yolu="banka-eslestirme-iptal", ids=[tid]) or []
+            if not mid_iptal and silinen_satir:
+                try:
+                    mid_iptal = int(
+                        silinen_satir[0].get("musteri_id")
+                        or silinen_satir[0].get("customer_id")
+                        or 0
+                    )
+                except (TypeError, ValueError, AttributeError):
+                    mid_iptal = 0
         execute(
             "UPDATE banka_hareketleri SET durum = 'bekleyen', musteri_id = NULL, tahsilat_id = NULL WHERE id = %s",
             (hareket_id,),
         )
+        if mid_iptal > 0:
+            try:
+                from .giris_routes import tahsilat_degisti
+                tahsilat_degisti(
+                    mid_iptal,
+                    tahsilat_ids=[tid] if tid else None,
+                    banka_bagini_birak=True,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "eslestirme_iptal tahsilat_degisti mid=%s", mid_iptal
+                )
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
@@ -1633,6 +1676,7 @@ def api_akbank_tahsilat_commit():
     geriye_donuk: list[dict] = []
     # Commit sonrası panel/cache (transaction dışında, manuel makbuz ile aynı).
     panel_sync_jobs: list[tuple[int, str, list[dict]]] = []
+    senkron_midler: set[int] = set()
     # Aynı istekte henüz commit edilmemiş satırlar (mid → PAY'li onceki; tarih artan sıra).
     batch_onceki: dict[int, list[dict]] = {}
     batch_sira = 0
@@ -1758,6 +1802,10 @@ def api_akbank_tahsilat_commit():
                 "banka_referans_no": ref,
             })
             eklendi += 1
+            try:
+                senkron_midler.add(int(mid))
+            except (TypeError, ValueError):
+                pass
             kayit = {
                 "tahsilat_id": int(tid),
                 "makbuz_no": str(mn or makbuz_no),
@@ -1840,6 +1888,15 @@ def api_akbank_tahsilat_commit():
                 _defer_aylik_grid_cache_rebuild(int(mid_s))
             except Exception:
                 pass
+
+    # Satır başına değil: ekstre bellek + son panel/grid hizası mid başına bir kez.
+    if senkron_midler:
+        try:
+            from routes.giris_routes import tahsilat_degisti
+            for smid in sorted(senkron_midler):
+                tahsilat_degisti(int(smid))
+        except Exception:
+            logging.getLogger(__name__).exception("akbank commit tahsilat_degisti")
 
     return jsonify({
         "ok": True,

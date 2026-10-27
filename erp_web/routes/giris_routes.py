@@ -921,6 +921,135 @@ def resync_panel_and_grid_after_plan_change(musteri_id: int) -> bool:
     return resync_panel_and_grid_after_tahsil_change(musteri_id)
 
 
+_tahsilat_degisti_icinde: set[int] = set()
+
+
+def _panel_by_iso_ham(musteri_id: int) -> dict:
+    """Kayıtlı JSON olduğu gibi. Ay anahtarları dışında __bayat da durabilir."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return {}
+    if mid <= 0:
+        return {}
+    _ensure_tahsilat_panel_detay_table()
+    row = fetch_one(
+        "SELECT by_iso FROM musteri_tahsilat_panel_detay WHERE musteri_id = %s",
+        (mid,),
+    )
+    if not row or not row.get("by_iso"):
+        return {}
+    try:
+        raw = row.get("by_iso")
+        obj = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _panel_bayat_isaretli_mi(musteri_id: int) -> bool:
+    return bool(_panel_by_iso_ham(musteri_id).get("__bayat"))
+
+
+def tahsilat_paneli_bayat_isaretle(musteri_id: int) -> bool:
+    """KYC/sözleşme sonrası ucuz işaret. Grid veya ekstre yeniden hesaplanmaz.
+
+    Panel satırı yoksa boş okuma zaten yeniden hesaplar; yazılmaz.
+    updated_at değişmez: tazelik imzası bu işareti para hareketi sanmasın.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    ham = _panel_by_iso_ham(mid)
+    if not ham:
+        return False
+    if ham.get("__bayat"):
+        return True
+    ham["__bayat"] = 1
+    execute(
+        """
+        UPDATE musteri_tahsilat_panel_detay
+        SET by_iso = %s
+        WHERE musteri_id = %s
+        """,
+        (json.dumps(ham, ensure_ascii=False), mid),
+    )
+    return True
+
+
+def _banka_tahsilat_id_bosalt(tahsilat_ids) -> int:
+    """Silinen tahsilata bağlı banka hareketinin tahsilat_id bağını bırakır."""
+    ids: list[int] = []
+    for x in tahsilat_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i > 0 and i not in ids:
+            ids.append(i)
+    if not ids:
+        return 0
+    try:
+        n = execute(
+            "UPDATE banka_hareketleri SET tahsilat_id = NULL WHERE tahsilat_id = ANY(%s)",
+            (ids,),
+        )
+        return int(n or 0)
+    except Exception:
+        logging.getLogger(__name__).exception("banka tahsilat_id bosalt ids=%s", ids)
+        return 0
+
+
+def tahsilat_degisti(
+    musteri_id: int,
+    *,
+    tahsilat_ids=None,
+    banka_bagini_birak: bool = False,
+) -> bool:
+    """Tahsilat yazma veya silme sonrası tek giriş. Sonuç idempotent.
+
+    Panel ve grid: resync_panel_and_grid_after_tahsil_change bir kez.
+    Ekstre bellek: yalnız bu mid (_ekstre_invalidate_after_change'in
+    önbellek adımı). Tam invalidate ikinci grid hesabı açtığı için
+    resync başarısızsa yedek olarak çağrılır.
+    Aynı mid için iç içe çağrı ikinci hesabı yapmaz.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    if mid in _tahsilat_degisti_icinde:
+        return True
+    _tahsilat_degisti_icinde.add(mid)
+    try:
+        if banka_bagini_birak:
+            _banka_tahsilat_id_bosalt(tahsilat_ids)
+        ok = bool(resync_panel_and_grid_after_tahsil_change(mid))
+        try:
+            _cari_ekstre_cache_invalidate_musteri(mid)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "tahsilat_degisti ekstre bellek mid=%s", mid
+            )
+        if not ok:
+            try:
+                _ekstre_invalidate_after_change(mid)
+                ok = True
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "tahsilat_degisti invalidate yedek mid=%s", mid
+                )
+                ok = False
+        return ok
+    finally:
+        _tahsilat_degisti_icinde.discard(mid)
+
+
 def apply_makbuz_dagitim_to_panel_db(
     musteri_id: int,
     dagitim_items: list | None,
@@ -15774,6 +15903,82 @@ def api_aylik_tutarlardan_borclandir():
     })
 
 
+def _istek_onay_fazla_tutar(data) -> bool:
+    v = (data or {}).get("onay_fazla_tutar")
+    return v in (True, 1, "1", "true", "True", "yes", "on")
+
+
+def _tahsil_fazla_esik(brut: float) -> float:
+    """Belirgin aşım: brüt×1,5 ile brüt+100'ün büyüğü."""
+    b = round(float(brut or 0), 2)
+    if b <= 0:
+        return 0.0
+    return round(max(b * 1.5, b + 100.0), 2)
+
+
+def _tahsil_fazla_tutar_ret(parsed, payload, onay: bool):
+    """None ise geç. Aşımda 400 gövdesi. Onay varsa tutar olduğu gibi kalır.
+
+    Brüt bilinmeyen ay reddedilmez. Kısmi ödeme ve brütün kendisi geçer.
+    """
+    if onay:
+        return None
+    asilan = []
+    for p in parsed or []:
+        if not isinstance(p, dict):
+            continue
+        brut = 0.0
+        if isinstance(payload, dict):
+            try:
+                brut = _month_brut_from_grid_payload(payload, p.get("yil"), p.get("ay"))
+            except Exception:
+                brut = 0.0
+        if brut <= 0.05:
+            continue
+        try:
+            tutar = round(float(p.get("tutar") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if tutar > _tahsil_fazla_esik(brut) + 0.001:
+            asilan.append(tutar)
+    if not asilan:
+        return None
+    from collections import Counter
+
+    ayni_yuksek = any(n >= 6 for n in Counter(asilan).values())
+    mesaj = (
+        f"{len(asilan)} ayda tahsilat, ayın KDV dahil brüt borcunu belirgin aşıyor."
+    )
+    if ayni_yuksek:
+        mesaj += " Yıllık tutarı aylara bölmeyi unutmuş olabilirsiniz."
+    return {
+        "ok": False,
+        "mesaj": mesaj,
+        "asilan_ay": len(asilan),
+        "onay_gerekli": True,
+    }
+
+
+_TAHSIL_MAKBUZ_KAYNAK = frozenset({"manuel_makbuz", "banka_import", "odeme_linki"})
+_TAHSILDEN_CIKAR_MAKBUZ_MESAJ = (
+    "Bu tahsilat bir makbuzun parçası; makbuzu ekstre veya tahsilat raporundan silin"
+)
+
+
+def _tahsilden_cikar_makbuz_parcasi(row) -> bool:
+    """Manuel / banka / ödeme linki veya birden fazla |AYLIK_PAY| silinmez.
+
+    Kaynağı boş eski satır bu kurala girmez; onay_eski_kayit yolu ayrı kalır.
+    """
+    if not isinstance(row, dict):
+        return False
+    kaynak = str(row.get("kaynak") or "").strip().lower()
+    if kaynak in _TAHSIL_MAKBUZ_KAYNAK:
+        return True
+    ac = str(row.get("aciklama") or "")
+    return len(re.findall(r"\|AYLIK_PAY\|[0-9]{4}-[0-9]{2}-[0-9]{2}=", ac)) > 1
+
+
 @bp.route('/api/aylik-tutarlardan-tahsil-et', methods=['POST'])
 @giris_gerekli
 def api_aylik_tutarlardan_tahsil_et():
@@ -15852,12 +16057,26 @@ def api_aylik_tutarlardan_tahsil_et():
             "tahsilat_tarihi": tahsil_tarih_row,
         })
 
+    onay_fazla = _istek_onay_fazla_tutar(data)
+    payload_cap = None
+    try:
+        payload_cap = _read_aylik_grid_cache_payload(musteri_id)
+        if not payload_cap:
+            payload_cap = _build_aylik_grid_cache_payload(
+                musteri_id, tufe_map=_tufe_map_by_year_month_cached()
+            )
+    except Exception:
+        payload_cap = None
+    fazla_ret = _tahsil_fazla_tutar_ret(parsed, payload_cap, onay_fazla)
+    if fazla_ret:
+        return jsonify(fazla_ret), 400
+
     caplanan = []
     try:
         kyc_cap = _musteri_kyc_grup_for_aylik_grid(musteri_id)
     except Exception:
         kyc_cap = None
-    if kyc_cap and bool(kyc_cap.get("kira_nakit")):
+    if (not onay_fazla) and kyc_cap and bool(kyc_cap.get("kira_nakit")):
         try:
             payload_cap = _read_aylik_grid_cache_payload(musteri_id)
             if not payload_cap:
@@ -16244,6 +16463,24 @@ def api_aylik_tutarlardan_tahsilden_cikar():
     if not aylar:
         return jsonify({"ok": False, "mesaj": "En az bir ay seçin (geçerli yıl/ay)."}), 400
 
+    for yil, ay in aylar:
+        iso = date(yil, ay, 1).isoformat()
+        pat = f"%|AYLIK_TAH|{iso}|%"
+        aday = fetch_all(
+            """
+            SELECT id, COALESCE(kaynak, '') AS kaynak, COALESCE(aciklama, '') AS aciklama
+            FROM tahsilatlar
+            WHERE (musteri_id = %s OR customer_id = %s)
+              AND COALESCE(aciklama, '') LIKE %s
+            """,
+            (musteri_id, musteri_id, pat),
+        ) or []
+        for aday_row in aday:
+            if _tahsilden_cikar_makbuz_parcasi(aday_row):
+                return jsonify(
+                    {"ok": False, "mesaj": _TAHSILDEN_CIKAR_MAKBUZ_MESAJ}
+                ), 409
+
     silinen = []
     atlanan = []
 
@@ -16275,6 +16512,8 @@ def api_aylik_tutarlardan_tahsilden_cikar():
                     atlanan.append({"neden": "kayit_yok", "yil": yil, "ay": ay})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": f"Tahsilat silinemedi: {e}"}), 500
+
+    _banka_tahsilat_id_bosalt([s.get("id") for s in silinen])
 
     borc_satirlar = []
     raw_satirlar = data.get("satirlar")
@@ -18729,6 +18968,9 @@ def api_tahsilat_panel_detay():
     if not musteri_id:
         return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
+    # KYC işareti: formül aynı, yalnız bu okumada mevcut resync çalışır.
+    if _panel_bayat_isaretli_mi(mid):
+        tahsilat_degisti(mid)
     by_iso = _load_musteri_panel_by_iso(mid)
     if by_iso:
         return _json_no_cache({"ok": True, "by_iso": by_iso, "musteri_id": mid})
@@ -19116,6 +19358,7 @@ def api_ekstre_tahsilat_sil():
     )
     if not silinen:
         return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
+    _banka_tahsilat_id_bosalt([tid])
     _ekstre_invalidate_after_change(
         musteri_id, [affected_iso] if affected_iso else None
     )

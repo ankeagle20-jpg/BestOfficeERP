@@ -2978,6 +2978,9 @@ def api_kyc_kaydet():
                     _delete_aylik_grid_cache_guarded(int(musteri_id))
                 else:
                     _defer_aylik_grid_cache_rebuild(int(musteri_id))
+                # Panel: tam hesap yok. İşaret, sonraki panel okumasında yenilenir.
+                from routes.giris_routes import tahsilat_paneli_bayat_isaretle
+                tahsilat_paneli_bayat_isaretle(int(musteri_id))
             except Exception:
                 pass
         # Opsiyonel: hiyerarşik grup ataması (mevcut update akışına ek alan olarak)

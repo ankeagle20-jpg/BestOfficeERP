@@ -489,11 +489,11 @@ def _pdf_ve_cache(musteri_id: int, tahsilat_id: int) -> None:
     else:
         _pdf()
     try:
-        from routes.giris_routes import _cari_ekstre_cache_invalidate_musteri
+        from routes.giris_routes import tahsilat_degisti
 
-        _cari_ekstre_cache_invalidate_musteri(int(musteri_id))
+        tahsilat_degisti(int(musteri_id))
     except Exception:
-        logger.exception("odeme linki ekstre cache")
+        logger.exception("odeme linki tahsilat_degisti")
 
 
 def callback_olnk(merchant_oid: str, status: str, total_amount: str) -> None:
