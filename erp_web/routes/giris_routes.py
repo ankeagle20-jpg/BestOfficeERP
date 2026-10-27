@@ -17728,6 +17728,254 @@ def api_musteri_kart_bundle():
     return _json_no_cache(out)
 
 
+def _reel_para(v):
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        return round(float(v), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _reel_para_ayni(a, b) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) < 0.01
+
+
+def _reel_kullanici_id() -> str:
+    try:
+        uid = getattr(current_user, "id", None)
+        if uid in (None, ""):
+            return ""
+        return str(int(uid))
+    except Exception:
+        return ""
+
+
+def _reel_satir_ani(row, musteri_id, donem_yil) -> dict:
+    kaynak = row or {}
+    return {
+        "musteri_id": int(musteri_id),
+        "donem_yil": int(donem_yil),
+        "tutar_kdv_dahil": _reel_para(kaynak.get("tutar_kdv_dahil")),
+        "giris_tip": (kaynak.get("giris_tip") or "") or None,
+        "giris_tutar": _reel_para(kaynak.get("giris_tutar")),
+        "hibrit_toplam": _reel_para(kaynak.get("hibrit_toplam")),
+        "hibrit_net": _reel_para(kaynak.get("hibrit_net")),
+        "hibrit_banka": _reel_para(kaynak.get("hibrit_banka")),
+    }
+
+
+def _reel_donem_satir_oku(musteri_id: int, donem_yil: int):
+    return fetch_one(
+        """
+        SELECT tutar_kdv_dahil, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
+        FROM musteri_reel_donem_tutar
+        WHERE musteri_id = %s AND donem_yil = %s
+        """,
+        (int(musteri_id), int(donem_yil)),
+    )
+
+
+def _reel_donem_audit(olay: str, eski: dict, yeni: dict | None, musteri_id: int, donem_yil: int) -> bool:
+    """Tutar alanları ve kullanıcı id. Ad, telefon, TC yazılmaz."""
+    try:
+        from audit_log import audit_yaz
+    except Exception:
+        logging.getLogger(__name__).exception("reel audit import")
+        return False
+
+    def _calistir(sql, params=None):
+        execute(sql, params or ())
+
+    return audit_yaz(
+        _calistir,
+        olay=olay,
+        varlik="musteri_reel_donem_tutar",
+        kayit_id=int(donem_yil),
+        musteri_id=int(musteri_id),
+        kullanici=_reel_kullanici_id(),
+        anlik=eski or {},
+        yeni=yeni or {},
+        eski_yaz=bool(eski),
+    )
+
+
+_REEL_HIBRIT_DAGITIM_MESAJ = "Bu yıl nakit/banka dağılımlı; dağılımı güncelleyin"
+
+
+def _reel_upsert_karar(eski, giris_tip, tutar, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka):
+    """('yaz', alanlar) | ('oldugu_gibi', None) | ('ret_409', mesaj)."""
+    tip = (giris_tip or "dahil").strip().lower()
+    eski_hibrit = bool(eski) and str((eski or {}).get("giris_tip") or "").strip().lower() == "hibrit"
+    if tip == "hibrit" and (
+        hibrit_net is None or hibrit_banka is None or hibrit_net <= 0 or hibrit_banka <= 0
+    ):
+        if eski_hibrit:
+            return "ret_409", _REEL_HIBRIT_DAGITIM_MESAJ
+        tip = "dahil"
+    if eski_hibrit and tip != "hibrit":
+        if not _reel_para_ayni(_reel_para((eski or {}).get("tutar_kdv_dahil")), _reel_para(tutar)):
+            return "ret_409", _REEL_HIBRIT_DAGITIM_MESAJ
+        return "oldugu_gibi", None
+    alanlar = {
+        "tutar_kdv_dahil": _reel_para(tutar),
+        "giris_tip": tip,
+        "giris_tutar": _reel_para(giris_tutar),
+        "hibrit_toplam": _reel_para(hibrit_toplam) if tip == "hibrit" else None,
+        "hibrit_net": _reel_para(hibrit_net) if tip == "hibrit" else None,
+        "hibrit_banka": _reel_para(hibrit_banka) if tip == "hibrit" else None,
+    }
+    if eski_hibrit and tip == "hibrit":
+        ayni = _reel_para_ayni(_reel_para(eski.get("tutar_kdv_dahil")), alanlar["tutar_kdv_dahil"])
+        for ad in ("hibrit_toplam", "hibrit_net", "hibrit_banka", "giris_tutar"):
+            ayni = ayni and _reel_para_ayni(_reel_para(eski.get(ad)), alanlar[ad])
+        if ayni and str(eski.get("giris_tip") or "").strip().lower() == "hibrit":
+            return "oldugu_gibi", None
+    return "yaz", alanlar
+
+
+def _reel_donem_tutar_uygula(
+    musteri_id: int,
+    donem_yil: int,
+    tutar: float,
+    giris_tip: str,
+    giris_tutar,
+    hibrit_toplam,
+    hibrit_net,
+    hibrit_banka,
+) -> tuple[int, dict]:
+    eski_row = _reel_donem_satir_oku(musteri_id, donem_yil)
+    karar, alanlar = _reel_upsert_karar(
+        eski_row, giris_tip, tutar, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
+    )
+    if karar == "ret_409":
+        return 409, {"ok": False, "mesaj": alanlar}
+    if karar == "oldugu_gibi":
+        return 200, {"ok": True, "korundu": True}
+    execute(
+        """
+        INSERT INTO musteri_reel_donem_tutar (
+            musteri_id, donem_yil, tutar_kdv_dahil, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (musteri_id, donem_yil) DO UPDATE SET
+            tutar_kdv_dahil = EXCLUDED.tutar_kdv_dahil,
+            giris_tip = EXCLUDED.giris_tip,
+            giris_tutar = EXCLUDED.giris_tutar,
+            hibrit_toplam = EXCLUDED.hibrit_toplam,
+            hibrit_net = EXCLUDED.hibrit_net,
+            hibrit_banka = EXCLUDED.hibrit_banka,
+            updated_at = NOW()
+        """,
+        (
+            musteri_id,
+            donem_yil,
+            alanlar["tutar_kdv_dahil"],
+            alanlar["giris_tip"],
+            alanlar["giris_tutar"],
+            alanlar["hibrit_toplam"],
+            alanlar["hibrit_net"],
+            alanlar["hibrit_banka"],
+        ),
+    )
+    _reel_donem_audit(
+        "reel_yazi",
+        _reel_satir_ani(eski_row, musteri_id, donem_yil) if eski_row else {"musteri_id": musteri_id, "donem_yil": donem_yil},
+        _reel_satir_ani(alanlar, musteri_id, donem_yil),
+        musteri_id,
+        donem_yil,
+    )
+    try:
+        _reel_tahsilat_esitle_calistir(musteri_id, sadece_donem_yil=donem_yil)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel_upsert esitle musteri_id=%s donem_yil=%s", musteri_id, donem_yil
+        )
+    return 200, {"ok": True, "korundu": False}
+
+
+def reel_hibrit_kdv_dahil_tutar(net: float, banka: float, kdv_oran: float) -> float:
+    oran = float(kdv_oran if kdv_oran is not None else 20)
+    if oran < 0:
+        oran = 20.0
+    return round(float(net) + float(banka) * (1.0 + oran / 100.0), 2)
+
+
+def reel_hibrit_alanlari_yaz(
+    musteri_id: int,
+    donem_yil: int,
+    hibrit_toplam: float,
+    hibrit_net: float,
+    hibrit_banka: float,
+    *,
+    kdv_oran: float | None = None,
+) -> dict:
+    """Yalnız hibrit kolonları ve giris_tip. Tahsilat eşitleme yok.
+
+    Mevcut tutar_kdv_dahil = net + banka × (1 + KDV) değilse yazmaz.
+    """
+    eski = _reel_donem_satir_oku(musteri_id, donem_yil)
+    if not eski:
+        return {"ok": False, "neden": "satir_yok"}
+    if kdv_oran is None:
+        kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id) or {}
+        try:
+            kdv_oran = float(kyc.get("kdv_oran") if kyc.get("kdv_oran") is not None else 20)
+        except (TypeError, ValueError):
+            kdv_oran = 20.0
+    net = _reel_para(hibrit_net)
+    banka = _reel_para(hibrit_banka)
+    toplam = _reel_para(hibrit_toplam)
+    if net is None or banka is None or toplam is None or net <= 0 or banka <= 0:
+        return {"ok": False, "neden": "tutar_uyusmuyor"}
+    if not _reel_para_ayni(toplam, round(net + banka, 2)):
+        return {"ok": False, "neden": "tutar_uyusmuyor", "beklenen_toplam": round(net + banka, 2)}
+    beklenen = reel_hibrit_kdv_dahil_tutar(net, banka, kdv_oran)
+    kayitli = _reel_para(eski.get("tutar_kdv_dahil"))
+    if not _reel_para_ayni(kayitli, beklenen):
+        return {
+            "ok": False,
+            "neden": "tutar_uyusmuyor",
+            "tutar_kdv_dahil": kayitli,
+            "beklenen": beklenen,
+        }
+    execute(
+        """
+        UPDATE musteri_reel_donem_tutar
+        SET giris_tip = 'hibrit',
+            hibrit_toplam = %s,
+            hibrit_net = %s,
+            hibrit_banka = %s,
+            updated_at = NOW()
+        WHERE musteri_id = %s AND donem_yil = %s
+        """,
+        (toplam, net, banka, int(musteri_id), int(donem_yil)),
+    )
+    yeni = _reel_satir_ani(eski, musteri_id, donem_yil)
+    yeni["giris_tip"] = "hibrit"
+    yeni["hibrit_toplam"] = toplam
+    yeni["hibrit_net"] = net
+    yeni["hibrit_banka"] = banka
+    _reel_donem_audit(
+        "reel_hibrit_geri",
+        _reel_satir_ani(eski, musteri_id, donem_yil),
+        yeni,
+        musteri_id,
+        donem_yil,
+    )
+    try:
+        tahsilat_degisti(int(musteri_id))
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel hibrit geri yenile mid=%s", musteri_id
+        )
+    return {"ok": True, "yazildi": True, "tutar_kdv_dahil": kayitli}
+
+
 @bp.route("/api/reel-donem-tutar", methods=["POST"])
 @giris_gerekli
 def api_reel_donem_tutar_upsert():
@@ -17786,29 +18034,13 @@ def api_reel_donem_tutar_upsert():
                 "mesaj": "İlk sözleşme yılı için reel tutar girilemez.",
             }), 400
     _ensure_musteri_reel_donem_tutar_table()
-    execute(
-        """
-        INSERT INTO musteri_reel_donem_tutar (
-            musteri_id, donem_yil, tutar_kdv_dahil, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (musteri_id, donem_yil) DO UPDATE SET
-            tutar_kdv_dahil = EXCLUDED.tutar_kdv_dahil,
-            giris_tip = EXCLUDED.giris_tip,
-            giris_tutar = EXCLUDED.giris_tutar,
-            hibrit_toplam = EXCLUDED.hibrit_toplam,
-            hibrit_net = EXCLUDED.hibrit_net,
-            hibrit_banka = EXCLUDED.hibrit_banka,
-            updated_at = NOW()
-        """,
-        (musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka),
+    durum, sonuc = _reel_donem_tutar_uygula(
+        musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
     )
-    try:
-        _reel_tahsilat_esitle_calistir(musteri_id, sadece_donem_yil=donem_yil)
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "reel_upsert esitle musteri_id=%s donem_yil=%s", musteri_id, donem_yil
-        )
+    if durum != 200:
+        return jsonify(sonuc), durum
+    if sonuc.get("korundu"):
+        return jsonify(sonuc)
     guncel_grid = None
     guncel_panel = None
     guncel_grid_hata = False
@@ -18142,10 +18374,19 @@ def api_reel_donem_tutar_delete():
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     _ensure_musteri_reel_donem_tutar_table()
+    eski_reel = _reel_donem_satir_oku(musteri_id, donem_yil)
     n = execute(
         "DELETE FROM musteri_reel_donem_tutar WHERE musteri_id = %s AND donem_yil = %s",
         (musteri_id, donem_yil),
     )
+    if n > 0 and eski_reel:
+        _reel_donem_audit(
+            "reel_sil",
+            _reel_satir_ani(eski_reel, musteri_id, donem_yil),
+            {"musteri_id": musteri_id, "donem_yil": donem_yil, "silindi": True},
+            musteri_id,
+            donem_yil,
+        )
     if n <= 0:
         return jsonify({"ok": False, "mesaj": "Reel dönem kaydı bulunamadı."}), 404
     try:
