@@ -17970,7 +17970,8 @@ def _reel_para_ayni(a, b) -> bool:
         return True
     if a is None or b is None:
         return False
-    return abs(float(a) - float(b)) < 0.01
+    # ≤ 0,01 TL aynı sayılır (yıl tablosu Kaydet dahil → hibrit 409 eşiği).
+    return abs(float(a) - float(b)) <= 0.01
 
 
 def _reel_kullanici_id() -> str:
