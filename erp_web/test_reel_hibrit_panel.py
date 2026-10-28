@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Borçlandırma paneli hibrit yılı kayıtlı net/banka ile gösterir. Ağ yok."""
+"""Yıl tablosu eski sütun düzeni + kayıtlı hibrit nakiti. Ağ yok."""
 import json
 import subprocess
 import sys
@@ -46,7 +46,6 @@ NAMES = [
     "girisAylikSatirBaslangicYili",
     "girisAylikSatirYilHibritDetay",
     "girisAylikSatirYilHesapla",
-    "girisAylikSatirYilDbGovde",
     "girisAylikSatirYilKayitDbdenUygula",
     "girisAylikSatirYilKayitKey",
     "girisAylikSatirYilKayitYukle",
@@ -86,6 +85,11 @@ function girisFetchAgKopmasinaKarsi(url, opt) {
 }
 function near(a, b) { return Math.abs((parseFloat(a) || 0) - (parseFloat(b) || 0)) <= 0.02; }
 """ + blok + r"""
+function satir(y, row) {
+  window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
+  window.__aylikSatirYilDetay[String(y)] = row;
+  return girisAylikSatirYilHesapla(y);
+}
 setEl('sozlesme_baslangic', '2022-03-01');
 setEl('aylik_kira', '12500');
 setEl('kdv_oran', '20');
@@ -93,24 +97,25 @@ setEl('kira_nakit', '', true);
 setEl('kira_banka', '', true);
 setEl('kira_nakit_tutar', '2500');
 setEl('kira_banka_tutar', '10000');
-window.__musteriReelDonemDbMap = { '2025': 75250, '2026': 109600 };
+var t1 = satir(2031, { aylik: 10000, nakit: 0 });
+var t2 = satir(2032, { aylik: 10000, nakit: 5000 });
+var t3 = satir(2033, { aylik: 600, nakit: 0 });
+var t4 = satir(2034, { nakit: 5000, reel: 11000, __reel_aktif: true });
+window.__musteriReelDonemDbMap = { '2025': 75250, '2026': 100000 };
 window.__musteriReelDonemDetaylari = {
   '2025': { tip: 'dahil', hibrit_net: null, hibrit_banka: null, hibrit_toplam: null },
-  '2026': { tip: 'hibrit', hibrit_net: 52000, hibrit_banka: 48000, hibrit_toplam: 100000 }
+  '2026': { tip: 'hibrit', hibrit_net: 52000, hibrit_banka: 40000, hibrit_toplam: 92000 }
 };
 mem[girisAylikSatirYilKayitKey()] = JSON.stringify({
   _ts: Date.now(),
   data: {
     '2025': { nakit: 2500, banka: 0, aylik: 0, reel: 75250, reel_aktif: true },
-    '2026': { nakit: 2500, banka: 0, aylik: 0, reel: 109600, reel_aktif: true }
+    '2026': { nakit: 2500, banka: 0, aylik: 0, reel: 100000, reel_aktif: true }
   }
 });
 girisAylikSatirYilKayitYukle();
-var y2026 = window.__aylikSatirYilDetay['2026'];
-var y2025 = window.__aylikSatirYilDetay['2025'];
-var h2026 = girisAylikSatirYilHesapla(2026);
+var h5 = girisAylikSatirYilHesapla(2026);
 var h2025 = girisAylikSatirYilHesapla(2025);
-var govde = girisAylikSatirYilDbGovde(2026, 109600).govde;
 setEl('sozlesmeler-reel-tutar-tip', 'hibrit');
 setEl('sozlesmeler-reel-hibrit-net', '52000');
 setEl('sozlesmeler-reel-hibrit-banka', '40000');
@@ -119,43 +124,13 @@ setEl('sozlesmeler-reel-hibrit-banka-dahil', '');
 setEl('sozlesmeler-reel-hibrit-odeme', '');
 sozlesmelerReelHibritKdvGuncelle();
 var out = {
-  yuk2026nakit: y2026 && y2026.nakit,
-  yuk2026banka: y2026 && y2026.banka,
-  yuk2025nakit: y2025 && y2025.nakit,
-  h2026nakit: h2026.nakit,
-  h2026banka: h2026.banka,
-  h2026toplam: h2026.toplam,
-  h2026kdv: h2026.kdv_dahil,
-  h2025nakit: h2025.nakit,
-  govde: govde,
+  t1: t1, t2: t2, t3: t3, t4: t4, h5: h5,
+  y2025nakit: h2025.nakit,
   bankaDahil: els['sozlesmeler-reel-hibrit-banka-dahil'].value,
   odeme: els['sozlesmeler-reel-hibrit-odeme'].value,
   onay: sozlesmelerReelHibritKayitOnayMetni(100000)
 };
-girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
-  out.atlandi = !!(j && j.atlandi);
-  out.posts0 = posts.length;
-  window.__aylikSatirYilDetay['2026'].__kullanici_degistirdi = true;
-  window.__aylikSatirYilDetay['2026'].nakit = 50000;
-  window.__aylikSatirYilDetay['2026'].banka = 50000;
-  return girisAylikSatirYilDbKaydetTek(2026);
-}).then(function () {
-  out.posts1 = posts.length;
-  out.son = posts[0] || null;
-  window.__musteriReelDonemDbMap['2026'] = 100000;
-  window.__musteriReelDonemDetaylari['2026'] = { tip: 'hibrit', hibrit_net: 52000, hibrit_banka: 40000, hibrit_toplam: 92000 };
-  window.__aylikSatirYilDetay['2026'] = { nakit: 2500, banka: 0, reel: 100000, __reel_aktif: true };
-  var hFix = girisAylikSatirYilHesapla(2026);
-  out.fixNakit = hFix.nakit;
-  out.fixBanka = hFix.banka;
-  out.fixKdv = hFix.kdv_dahil;
-  out.fixToplam = hFix.toplam;
-  console.log(JSON.stringify(out));
-}).catch(function (e) {
-  out.hata = String(e && e.stack || e);
-  console.log(JSON.stringify(out));
-  process.exitCode = 1;
-});
+console.log(JSON.stringify(out));
 """
     js_path.write_text(harness, encoding="utf-8", newline="\n")
     try:
@@ -164,25 +139,21 @@ girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
         run = subprocess.run(["node", str(js_path)], capture_output=True, text=True, encoding="utf-8")
         check("node calisti", run.returncode == 0, run.stderr or run.stdout)
         data = json.loads(run.stdout.strip().splitlines()[-1]) if run.stdout.strip() else {}
-        check("2026 nakit 52000", abs(float(data.get("h2026nakit") or 0) - 52000) < 0.02, data)
-        check("2026 banka 48000", abs(float(data.get("h2026banka") or 0) - 48000) < 0.02, data)
-        check("2026 toplam 109600", abs(float(data.get("h2026toplam") or 0) - 109600) < 0.02, data)
-        check("yukleme kart nakitini ezdi", abs(float(data.get("yuk2026nakit") or 0) - 52000) < 0.02, data)
-        check("2025 dahil kart nakiti", abs(float(data.get("yuk2025nakit") or 0) - 2500) < 0.02, data)
-        check("2025 hesap kart nakiti", abs(float(data.get("h2025nakit") or 0) - 2500) < 0.02, data)
-        g = data.get("govde") or {}
-        check("govde hibrit", g.get("giris_tip") == "hibrit" and g.get("hibrit_net") == 52000 and g.get("hibrit_banka") == 48000, g)
-        check("degismeyen kaydet atlandi", data.get("atlandi") is True and data.get("posts0") == 0, data)
-        son = data.get("son") or {}
-        check(
-            "degisen kaydet hibrit gonderir",
-            data.get("posts1") == 1 and son.get("giris_tip") == "hibrit" and son.get("hibrit_net") == 50000,
-            son,
-        )
-        check("dogru nakit 52000", abs(float(data.get("fixNakit") or 0) - 52000) < 0.02, data)
-        check("dogru banka 40000", abs(float(data.get("fixBanka") or 0) - 40000) < 0.02, data)
-        check("dogru kdv dahil 48000", abs(float(data.get("fixKdv") or 0) - 48000) < 0.02, data)
-        check("dogru odeme 100000", abs(float(data.get("fixToplam") or 0) - 100000) < 0.02, data)
+        t1, t2, t3, t4, h5 = data.get("t1") or {}, data.get("t2") or {}, data.get("t3") or {}, data.get("t4") or {}, data.get("h5") or {}
+        check("1 kdv banka toplam 12000", abs(t1.get("kdv_dahil") - 12000) < 0.02 and abs(t1.get("banka") - 12000) < 0.02 and abs(t1.get("toplam") - 12000) < 0.02, t1)
+        check("2 banka kdv 6000 toplam 11000", abs(t2.get("banka") - 6000) < 0.02 and abs(t2.get("kdv_dahil") - 6000) < 0.02 and abs(t2.get("toplam") - 11000) < 0.02, t2)
+        check("3 kdv banka toplam 720", abs(t3.get("kdv_dahil") - 720) < 0.02 and abs(t3.get("banka") - 720) < 0.02 and abs(t3.get("toplam") - 720) < 0.02, t3)
+        reel3 = t3.get("reel") if t3.get("reel") else t3.get("toplam")
+        check("3 reel 720", abs(float(reel3 or 0) - 720) < 0.02, t3)
+        check("4 reel 11000", abs(t4.get("banka") - 6000) < 0.02 and abs(t4.get("kdv_dahil") - 6000) < 0.02 and abs(t4.get("aylik") - 10000) < 0.02 and abs(t4.get("toplam") - 11000) < 0.02, t4)
+        check("5 nakit 52000", abs(h5.get("nakit") - 52000) < 0.02, h5)
+        check("5 banka kdv 48000", abs(h5.get("banka") - 48000) < 0.02 and abs(h5.get("kdv_dahil") - 48000) < 0.02, h5)
+        check("5 toplam 100000 aylik 92000", abs(h5.get("toplam") - 100000) < 0.02 and abs(h5.get("aylik") - 92000) < 0.02, h5)
+        check("2025 dahil kart nakiti", abs(float(data.get("y2025nakit") or 0) - 2500) < 0.02, data)
+        baslik = "<div>Yıl</div><div>Aylık</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div>"
+        check("6 basliklar", baslik in html and "Aylık (net)</div>" not in html)
+        for cls in ("aylik-yil-aylik", "aylik-yil-kdv", "aylik-yil-toplam", "aylik-yil-nakit", "aylik-yil-banka", "aylik-yil-reel", "aylik-yil-reel-aktif"):
+            check("6 id/class " + cls, cls in html)
         check("onizleme banka dahil", data.get("bankaDahil") == "48000", data.get("bankaDahil"))
         check("onizleme odeme", data.get("odeme") == "100000", data.get("odeme"))
         check("kayit onay metni", "Müşteri ödemesi" in str(data.get("onay") or "") and "100" in str(data.get("onay")), data.get("onay"))

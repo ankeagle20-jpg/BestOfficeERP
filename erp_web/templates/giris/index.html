@@ -23640,35 +23640,6 @@ function girisAylikSatirYilHesapla(y) {
     var yStart = girisAylikSatirBaslangicYili();
     var yyNum = parseInt(y, 10);
     var ilkYil = !isNaN(yStart) && !isNaN(yyNum) && yyNum === yStart;
-    var detH = (typeof girisAylikSatirYilHibritDetay === 'function') ? girisAylikSatirYilHibritDetay(y) : null;
-    if (detH && !ilkYil) {
-        var netH = parseFloat(detH.hibrit_net);
-        var banH = parseFloat(detH.hibrit_banka);
-        var topH = parseFloat(detH.hibrit_toplam);
-        if (row.__kullanici_degistirdi) {
-            var girilen = parseFloat(row.nakit);
-            if (!isNaN(girilen) && girilen >= 0) netH = girilen;
-            if (!isNaN(topH) && topH > 0 && netH > topH) netH = topH;
-            banH = (!isNaN(topH) && topH > 0) ? Math.round((topH - netH) * 100) / 100 : banH;
-        }
-        if (netH > 0 && banH > 0) {
-            nakit = Math.round(netH * 100) / 100;
-            banka = Math.round(banH * 100) / 100;
-            kdvDahil = Math.round(banka * kdvMult * 100) / 100;
-            aylik = Math.round((nakit + banka) * 100) / 100;
-            if (!row.__kullanici_degistirdi && reel > 0) {
-                toplam = Math.round(reel * 100) / 100;
-            } else {
-                toplam = Math.round((nakit + kdvDahil) * 100) / 100;
-                reel = toplam;
-            }
-            window.__aylikSatirYilDetay[k] = Object.assign({}, row, {
-                aylik: aylik, nakit: nakit, banka: banka, kdv_dahil: kdvDahil, toplam: toplam, reel: reel,
-                __hibrit_db: true, __reel_aktif: true
-            });
-            return window.__aylikSatirYilDetay[k];
-        }
-    }
     if (reelAktif && reel > 0 && !ilkYil) {
         if (nakit > reel) nakit = reel;
         toplam = Math.round(reel * 100) / 100;
@@ -23816,7 +23787,6 @@ function girisAylikSatirYilSatirDegisti(y, alan, val) {
     var cur = window.__aylikSatirYilDetay[k] || {};
     var n = parseFloat(String(val || '').replace(/\s/g, '').replace(',', '.'));
     cur[alan] = isNaN(n) || n < 0 ? 0 : n;
-    cur.__kullanici_degistirdi = true;
     if (alan === 'aylik') cur.__manual_aylik = true;
     if (alan === 'reel') {
         if (n > 0) {
@@ -24267,60 +24237,6 @@ function girisAylikSatirYilHibritDetay(y) {
     if (isNaN(net) || isNaN(ban) || !(net > 0) || !(ban > 0)) return null;
     return d;
 }
-function girisAylikSatirYilDbGovde(y, tutar) {
-    var row = (window.__aylikSatirYilDetay || {})[String(y)] || {};
-    var det = (typeof girisAylikSatirYilHibritDetay === 'function') ? girisAylikSatirYilHibritDetay(y) : null;
-    var nakit = parseFloat(row.nakit);
-    var banka = parseFloat(row.banka);
-    if (isNaN(nakit) || nakit < 0) nakit = 0;
-    if (isNaN(banka) || banka < 0) banka = 0;
-    var kdvEl = document.getElementById('kdv_oran');
-    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
-    if (isNaN(kdv) || kdv < 0) kdv = 20;
-    var mult = 1 + kdv / 100;
-    var hibritSatir = !!det || !!row.__hibrit_db;
-    if (!hibritSatir && row.__kullanici_degistirdi && nakit > 0 && banka > 0 && mult > 0) {
-        banka = Math.round((banka / mult) * 100) / 100;
-        hibritSatir = banka > 0;
-    }
-    if (hibritSatir && nakit > 0 && banka > 0) {
-        if (!row.__kullanici_degistirdi && det) {
-            nakit = Math.round(parseFloat(det.hibrit_net) * 100) / 100;
-            banka = Math.round(parseFloat(det.hibrit_banka) * 100) / 100;
-        }
-        var top = parseFloat(det && det.hibrit_toplam);
-        if (!(!row.__kullanici_degistirdi && det && !isNaN(top) && top > 0)) top = nakit + banka;
-        top = Math.round(top * 100) / 100;
-        var tut = Math.round((nakit + banka * mult) * 100) / 100;
-        if (!row.__kullanici_degistirdi) {
-            var map = window.__musteriReelDonemDbMap || window.__musteriReelDonemTutarlari || {};
-            var sakli = parseFloat(map[String(y)] != null ? map[String(y)] : map[y]);
-            if (!isNaN(sakli) && sakli > 0) tut = Math.round(sakli * 100) / 100;
-        }
-        return {
-            govde: {
-                donem_yil: parseInt(y, 10),
-                tutar_kdv_dahil: tut,
-                giris_tip: 'hibrit',
-                giris_tutar: null,
-                hibrit_toplam: top,
-                hibrit_net: nakit,
-                hibrit_banka: banka
-            }
-        };
-    }
-    return {
-        govde: {
-            donem_yil: parseInt(y, 10),
-            tutar_kdv_dahil: tutar,
-            giris_tip: 'dahil',
-            giris_tutar: tutar,
-            hibrit_toplam: null,
-            hibrit_net: null,
-            hibrit_banka: null
-        }
-    };
-}
 function girisAylikSatirYilKayitDbdenUygula() {
     // SADECE DB kayıtları - TÜFE fallback yok
     var map = (typeof window !== 'undefined' && window.__musteriReelDonemDbMap) ? window.__musteriReelDonemDbMap : {};
@@ -24341,13 +24257,8 @@ function girisAylikSatirYilKayitDbdenUygula() {
         var det = detMap[String(yy)] || null;
         if (det && String(det.tip || '').toLowerCase() === 'hibrit') {
             var hn = parseFloat(det.hibrit_net);
-            var hb = parseFloat(det.hibrit_banka);
-            var ht = parseFloat(det.hibrit_toplam);
             if (!isNaN(hn) && hn >= 0) cur.nakit = Math.round(hn * 100) / 100;
-            if (!isNaN(hb) && hb >= 0) cur.banka = Math.round(hb * 100) / 100;
-            if (!isNaN(ht) && ht > 0) cur.aylik = Math.round(ht * 100) / 100;
             cur.__hibrit_db = true;
-            cur.__kullanici_degistirdi = false;
         }
         window.__aylikSatirYilDetay[String(yy)] = cur;
     });
@@ -24419,29 +24330,18 @@ function girisAylikSatirYilDbKaydetTek(y) {
     var t = girisAylikSatirYilKaydetTutarAl(y);
     if (isNaN(t) || t <= 0) return Promise.reject(new Error('Toplam tutar girin.'));
     t = Math.round(t * 100) / 100;
-    var paket = girisAylikSatirYilDbGovde(y, t);
-    var govde = paket.govde;
-    govde.musteri_id = parseInt(mid, 10);
-    var rowAyni = (window.__aylikSatirYilDetay || {})[String(y)] || {};
-    if (!rowAyni.__kullanici_degistirdi) {
-        var mapA = window.__musteriReelDonemDbMap || {};
-        var sakA = parseFloat(mapA[String(y)] != null ? mapA[String(y)] : mapA[parseInt(y, 10)]);
-        var detAyni = (typeof girisAylikSatirYilHibritDetay === 'function') ? girisAylikSatirYilHibritDetay(y) : null;
-        if (!isNaN(sakA) && Math.abs(sakA - govde.tutar_kdv_dahil) < 0.02) {
-            if (!detAyni && govde.giris_tip === 'dahil') return Promise.resolve({ ok: true, atlandi: true });
-            if (detAyni && govde.giris_tip === 'hibrit'
-                && Math.abs(parseFloat(detAyni.hibrit_net) - govde.hibrit_net) < 0.02
-                && Math.abs(parseFloat(detAyni.hibrit_banka) - govde.hibrit_banka) < 0.02) {
-                return Promise.resolve({ ok: true, atlandi: true });
-            }
-        }
-    }
     var fetchFn = (typeof girisFetchAgKopmasinaKarsi === 'function') ? girisFetchAgKopmasinaKarsi : function (u, o) { return fetch(u, o); };
     return fetchFn('/giris/api/reel-donem-tutar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify(govde)
+        body: JSON.stringify({
+            musteri_id: parseInt(mid, 10),
+            donem_yil: parseInt(y, 10),
+            tutar_kdv_dahil: t,
+            giris_tip: 'dahil',
+            giris_tutar: t
+        })
     }, 3).then(function (r) {
         return r.json().then(function (j) {
             if (!r.ok || !j || !j.ok) throw new Error((j && j.mesaj) ? j.mesaj : 'Veritabanına kaydedilemedi.');
@@ -24860,8 +24760,7 @@ function girisAylikSatirYilKaydet(y) {
         if (typeof sozlesmelerAylikNormGridKartTutarlariniYenile === 'function') sozlesmelerAylikNormGridKartTutarlariniYenile();
     } catch (_eGridOnKay) {}
     try { girisAylikSatirYilEkstreSenkron(); } catch (_eEkOnKay) {}
-    girisAylikSatirYilDbKaydetTek(y).then(function (jKay) {
-        if (jKay && jKay.atlandi) return jKay;
+    girisAylikSatirYilDbKaydetTek(y).then(function () {
         return girisAylikSatirYilDbSonrasi(midKay);
     }).catch(function (err) {
         alert((err && err.message) ? err.message : 'Veritabanına kaydedilemedi.');
@@ -25452,7 +25351,7 @@ function girisAylikSatirYilPanelDoldur() {
             + '<button type="button" class="btn-aylik-sec" onclick="girisAylikSatirYilTumunuVazgec(event)">Vazgeç</button>'
             + '</div>';
         html = tb + '<div style="display:grid;grid-template-columns:52px 92px 92px 92px 92px 92px 108px 168px;gap:6px;padding:2px 2px 6px 2px;color:#90a4ae;font-size:11px;">'
-            + '<div>Yıl</div><div>Aylık (net)</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
+            + '<div>Yıl</div><div>Aylık</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
     }
     panel.innerHTML = html;
     panel.querySelectorAll('.aylik-yil-reel').forEach(function (reelIn) {
