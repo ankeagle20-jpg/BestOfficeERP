@@ -2032,6 +2032,218 @@ def _kyc_karma_kira_paylari(kyc, aylik_net: float):
     return True, n, b, r_n, r_b
 
 
+def kira_nakit_oranli_artis_aktif() -> bool:
+    """KIRA_NAKIT_ORANLI_ARTIS varsayılan 0: kapalıyken nakit her yıl karttaki gibi kalır."""
+    raw = os.environ.get("KIRA_NAKIT_ORANLI_ARTIS", "0")
+    return str(raw or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def kira_round2(val) -> float:
+    """JS Math.round(x*100)/100 ile aynı (pozitif tutarlar)."""
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(x):
+        return 0.0
+    return math.floor(x * 100.0 + 0.5) / 100.0
+
+
+def kira_ay_brut_pozitif_korunur(brut, tol=0.02) -> bool:
+    """Önbellekte pozitif brütü olan ay yeniden yazılmaz."""
+    try:
+        b = float(brut if brut is not None else 0)
+    except (TypeError, ValueError):
+        return False
+    try:
+        t = float(tol)
+    except (TypeError, ValueError):
+        t = 0.02
+    return math.isfinite(b) and b > t
+
+
+def kira_yil_sutunlari(aylik, nakit, kdv_oran, reel=None) -> dict:
+    """Yıl tablosu sütunları. Banka ve KDV Dahil, banka payının KDV dahil tutarıdır."""
+    try:
+        kdv = float(kdv_oran if kdv_oran is not None else 20)
+    except (TypeError, ValueError):
+        kdv = 20.0
+    if not math.isfinite(kdv) or kdv < 0:
+        kdv = 20.0
+    mult = 1.0 + kdv / 100.0
+    aylik_n = kira_round2(aylik)
+    nakit_n = kira_round2(nakit)
+    if nakit_n < 0:
+        nakit_n = 0.0
+    reel_n = None
+    if reel is not None and reel != "":
+        try:
+            reel_n = kira_round2(reel)
+        except (TypeError, ValueError):
+            reel_n = None
+        if reel_n is not None and reel_n <= 0:
+            reel_n = None
+    if reel_n is not None:
+        if nakit_n > reel_n:
+            nakit_n = reel_n
+        kdv_dahil = kira_round2(max(0.0, reel_n - nakit_n))
+        net_banka = kira_round2(kdv_dahil / mult) if kdv_dahil > 0 and mult > 0 else 0.0
+        return {
+            "aylik": kira_round2(nakit_n + net_banka),
+            "nakit": nakit_n,
+            "banka_matrah": net_banka,
+            "banka": kdv_dahil,
+            "kdv_dahil": kdv_dahil,
+            "toplam": reel_n,
+            "reel": reel_n,
+            "belirsiz": False,
+        }
+    if aylik_n > 0 and nakit_n > aylik_n:
+        nakit_n = aylik_n
+    if aylik_n > 0:
+        banka_net = kira_round2(max(0.0, aylik_n - nakit_n)) if nakit_n > 0 else aylik_n
+        banka = kira_round2(banka_net * mult) if banka_net > 0 else 0.0
+    else:
+        banka_net = 0.0
+        banka = 0.0
+    toplam = kira_round2(banka + nakit_n)
+    return {
+        "aylik": aylik_n,
+        "nakit": nakit_n,
+        "banka_matrah": banka_net,
+        "banka": banka,
+        "kdv_dahil": banka,
+        "toplam": toplam,
+        "reel": toplam,
+        "belirsiz": False,
+    }
+
+
+def kira_yil_oranli_adim(aylik, nakit, oran_yuzde, kdv_oran) -> dict:
+    """Sonraki yıl: aylık ve nakit aynı oranla, sonra sütunlar."""
+    try:
+        oran = float(oran_yuzde or 0)
+    except (TypeError, ValueError):
+        oran = 0.0
+    if not math.isfinite(oran) or oran <= 0:
+        carpan = 1.0
+    else:
+        carpan = 1.0 + oran / 100.0
+    aylik2 = kira_round2(float(aylik or 0) * carpan)
+    nakit2 = kira_round2(float(nakit or 0) * carpan)
+    if nakit2 > aylik2:
+        nakit2 = aylik2
+    return kira_yil_sutunlari(aylik2, nakit2, kdv_oran)
+
+
+def _kira_reel_detay_oku(musteri_id) -> dict:
+    """Reel satırının tipi ve hibrit payı. Bayrak kapalıyken çağrılmaz."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return {}
+    try:
+        rows = fetch_all(
+            """
+            SELECT donem_yil, giris_tip, tutar_kdv_dahil, hibrit_net, hibrit_banka
+            FROM musteri_reel_donem_tutar
+            WHERE musteri_id = %s
+            """,
+            (mid,),
+        )
+    except Exception:
+        return {}
+    out = {}
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        try:
+            y = int(r.get("donem_yil"))
+        except (TypeError, ValueError):
+            continue
+        out[y] = {
+            "tip": r.get("giris_tip"),
+            "tutar": r.get("tutar_kdv_dahil"),
+            "hibrit_net": r.get("hibrit_net"),
+            "hibrit_banka": r.get("hibrit_banka"),
+        }
+    return out
+
+
+def kira_yil_zinciri(y_start, y_end, aylik0, nakit0, kdv_oran, oran_fn, detay=None) -> dict:
+    """İlk yıl kart tabanı. Kayıtlı hibrit/reel yıl sonraki yılların tabanı olur.
+
+    'dahil' satırında nakit payı yoksa önceki zincirin nakiti kullanılır (toplamı aşamaz);
+    bu yıllar belirsiz=True döner.
+    """
+    detay = detay or {}
+    try:
+        y0 = int(y_start)
+        y1 = int(y_end)
+    except (TypeError, ValueError):
+        return {}
+    aylik = kira_round2(aylik0)
+    nakit = kira_round2(nakit0)
+    out = {}
+    for y in range(y0, y1 + 1):
+        if y == y0:
+            sut = kira_yil_sutunlari(aylik, nakit, kdv_oran)
+        else:
+            try:
+                oran = float(oran_fn(y) or 0)
+            except (TypeError, ValueError):
+                oran = 0.0
+            adim = kira_yil_oranli_adim(aylik, nakit, oran, kdv_oran)
+            d = detay.get(y) or detay.get(str(y)) or {}
+            tip = str(d.get("tip") or d.get("giris_tip") or "").lower()
+            try:
+                net_n = float(d.get("hibrit_net"))
+                ban_n = float(d.get("hibrit_banka"))
+            except (TypeError, ValueError):
+                net_n = ban_n = 0.0
+            tutar = d.get("tutar")
+            if tutar is None:
+                tutar = d.get("tutar_kdv_dahil")
+            try:
+                tutar_n = float(tutar) if tutar is not None else None
+            except (TypeError, ValueError):
+                tutar_n = None
+            if tip == "hibrit" and net_n > 0 and ban_n > 0:
+                sut = kira_yil_sutunlari(net_n + ban_n, net_n, kdv_oran)
+            elif tutar_n is not None and tutar_n > 0:
+                nakit_c = adim["nakit"]
+                if nakit_c > tutar_n:
+                    nakit_c = tutar_n
+                sut = kira_yil_sutunlari(adim["aylik"], nakit_c, kdv_oran, reel=tutar_n)
+                sut["belirsiz"] = True
+            else:
+                sut = adim
+        out[y] = sut
+        aylik = sut["aylik"]
+        nakit = sut["nakit"]
+    return out
+
+
+def _kira_yil_zinciri_harita(kyc, tufe_map, y_start, y_end, artis_month) -> dict:
+    kyc = kyc or {}
+    if "_kira_reel_detay" in kyc:
+        detay = kyc.get("_kira_reel_detay") or {}
+    else:
+        mid = kyc.get("id") or kyc.get("musteri_id")
+        detay = _kira_reel_detay_oku(mid) if mid else {}
+    aylik = _aylik_grid_coerce_money(kyc.get("aylik_kira"))
+    nakit = _aylik_grid_coerce_money(kyc.get("kira_nakit_tutar"))
+    try:
+        kdv = float(kyc.get("kdv_oran") if kyc.get("kdv_oran") is not None else 20)
+    except (TypeError, ValueError):
+        kdv = 20.0
+
+    def _oran(y):
+        return _reel_tufe_oran_yillik_gecis(tufe_map or {}, int(y), int(artis_month), int(y_start))
+
+    return kira_yil_zinciri(y_start, y_end, aylik, nakit, kdv, _oran, detay)
+
+
 def _aylik_grid_contract_core(kyc, tufe_map):
     """
     KYC + TÜFE ile sözleşme ufku ve yıllık KDV dahil tutar haritası.
@@ -2135,8 +2347,13 @@ def _aylik_grid_contract_core(kyc, tufe_map):
     except Exception:
         artis_month = bas.month
     yillik_map = {}
+    oranli_map = None
+    if kira_nakit_oranli_artis_aktif() and _aylik_grid_coerce_money(kyc.get("kira_nakit_tutar")) > 0:
+        oranli_map = _kira_yil_zinciri_harita(kyc, tufe_map, start_year, max_year, artis_month)
     for yil in range(start_year, max_year + 1):
-        if split_ok:
+        if oranli_map is not None and yil in oranli_map:
+            yillik_map[yil] = round(float(oranli_map[yil]["toplam"]), 2)
+        elif split_ok:
             nak_kisim = round(current * r_n, 2)
             ban_kisim = round(current - nak_kisim, 2)
             yillik_map[yil] = round(nak_kisim + ban_kisim * kdv_mult, 2)
@@ -2144,7 +2361,7 @@ def _aylik_grid_contract_core(kyc, tufe_map):
             yillik_map[yil] = round(current * 1.0, 2)
         else:
             yillik_map[yil] = round(current * kdv_mult, 2)
-        if yil < max_year:
+        if oranli_map is None and yil < max_year:
             sonraki = yil + 1
             inner = tufe_map.get(sonraki) or {}
             if not isinstance(inner, dict):
@@ -3743,7 +3960,7 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
         # Kritik: flat'te dolu (pozitif) ayları değiştirme.
         if nk in reel_map and brut_cur > tol:
             continue
-        if brut_cur > tol:
+        if kira_ay_brut_pozitif_korunur(brut_cur, tol):
             continue
         if nk not in chain_map:
             continue
@@ -5872,6 +6089,7 @@ def index():
         sozlesme_wa_js_surum=wa_surum,
         tahsilat_wa_js_surum=tahsilat_wa_surum,
         tufe_borc_tahsil_acik=tufe_borc_tahsil_acik(),
+        kira_nakit_oranli_artis=kira_nakit_oranli_artis_aktif(),
     )
 
 
@@ -9875,6 +10093,16 @@ def _reel_donem_effective_yillik_for_ekstre(
                 last_explicit = y
                 continue
         if last_explicit is not None and y > last_explicit and prev_eff and prev_eff > 0:
+            nakit_kart = _aylik_grid_coerce_money((kyc or {}).get("kira_nakit_tutar")) if kyc else 0.0
+            if kira_nakit_oranli_artis_aktif() and nakit_kart > 0:
+                kv_o = kart.get(y) if isinstance(kart, dict) else None
+                try:
+                    kvf = float(kv_o) if kv_o is not None else 0.0
+                except (TypeError, ValueError):
+                    kvf = 0.0
+                if math.isfinite(kvf) and kvf > 0:
+                    out[y] = round(kvf, 2)
+                    continue
             prev_f = float(prev_eff)
             oran = _reel_tufe_oran_yillik_gecis(tufe_map, y, artis_month, y_start)
             if oran > 0:
