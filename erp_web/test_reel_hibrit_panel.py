@@ -53,6 +53,10 @@ NAMES = [
     "girisAylikSatirYilKaydetTutarAl",
     "girisAylikSatirYilDomOku",
     "girisAylikSatirYilDbKaydetTek",
+    "_sozlesmelerReelHibritParseEl",
+    "_sozlesmelerReelKdvOranOku",
+    "sozlesmelerReelHibritKayitOnayMetni",
+    "sozlesmelerReelHibritKdvGuncelle",
 ]
 
 
@@ -107,6 +111,13 @@ var y2025 = window.__aylikSatirYilDetay['2025'];
 var h2026 = girisAylikSatirYilHesapla(2026);
 var h2025 = girisAylikSatirYilHesapla(2025);
 var govde = girisAylikSatirYilDbGovde(2026, 109600).govde;
+setEl('sozlesmeler-reel-tutar-tip', 'hibrit');
+setEl('sozlesmeler-reel-hibrit-net', '52000');
+setEl('sozlesmeler-reel-hibrit-banka', '40000');
+setEl('sozlesmeler-reel-hibrit-kdv', '');
+setEl('sozlesmeler-reel-hibrit-banka-dahil', '');
+setEl('sozlesmeler-reel-hibrit-odeme', '');
+sozlesmelerReelHibritKdvGuncelle();
 var out = {
   yuk2026nakit: y2026 && y2026.nakit,
   yuk2026banka: y2026 && y2026.banka,
@@ -116,7 +127,10 @@ var out = {
   h2026toplam: h2026.toplam,
   h2026kdv: h2026.kdv_dahil,
   h2025nakit: h2025.nakit,
-  govde: govde
+  govde: govde,
+  bankaDahil: els['sozlesmeler-reel-hibrit-banka-dahil'].value,
+  odeme: els['sozlesmeler-reel-hibrit-odeme'].value,
+  onay: sozlesmelerReelHibritKayitOnayMetni(100000)
 };
 girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
   out.atlandi = !!(j && j.atlandi);
@@ -128,6 +142,14 @@ girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
 }).then(function () {
   out.posts1 = posts.length;
   out.son = posts[0] || null;
+  window.__musteriReelDonemDbMap['2026'] = 100000;
+  window.__musteriReelDonemDetaylari['2026'] = { tip: 'hibrit', hibrit_net: 52000, hibrit_banka: 40000, hibrit_toplam: 92000 };
+  window.__aylikSatirYilDetay['2026'] = { nakit: 2500, banka: 0, reel: 100000, __reel_aktif: true };
+  var hFix = girisAylikSatirYilHesapla(2026);
+  out.fixNakit = hFix.nakit;
+  out.fixBanka = hFix.banka;
+  out.fixKdv = hFix.kdv_dahil;
+  out.fixToplam = hFix.toplam;
   console.log(JSON.stringify(out));
 }).catch(function (e) {
   out.hata = String(e && e.stack || e);
@@ -137,9 +159,9 @@ girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
 """
     js_path.write_text(harness, encoding="utf-8", newline="\n")
     try:
-        chk = subprocess.run(["node", "--check", str(js_path)], capture_output=True, text=True)
+        chk = subprocess.run(["node", "--check", str(js_path)], capture_output=True, text=True, encoding="utf-8")
         check("node --check", chk.returncode == 0, chk.stderr)
-        run = subprocess.run(["node", str(js_path)], capture_output=True, text=True)
+        run = subprocess.run(["node", str(js_path)], capture_output=True, text=True, encoding="utf-8")
         check("node calisti", run.returncode == 0, run.stderr or run.stdout)
         data = json.loads(run.stdout.strip().splitlines()[-1]) if run.stdout.strip() else {}
         check("2026 nakit 52000", abs(float(data.get("h2026nakit") or 0) - 52000) < 0.02, data)
@@ -157,6 +179,13 @@ girisAylikSatirYilDbKaydetTek(2026).then(function (j) {
             data.get("posts1") == 1 and son.get("giris_tip") == "hibrit" and son.get("hibrit_net") == 50000,
             son,
         )
+        check("dogru nakit 52000", abs(float(data.get("fixNakit") or 0) - 52000) < 0.02, data)
+        check("dogru banka 40000", abs(float(data.get("fixBanka") or 0) - 40000) < 0.02, data)
+        check("dogru kdv dahil 48000", abs(float(data.get("fixKdv") or 0) - 48000) < 0.02, data)
+        check("dogru odeme 100000", abs(float(data.get("fixToplam") or 0) - 100000) < 0.02, data)
+        check("onizleme banka dahil", data.get("bankaDahil") == "48000", data.get("bankaDahil"))
+        check("onizleme odeme", data.get("odeme") == "100000", data.get("odeme"))
+        check("kayit onay metni", "Müşteri ödemesi" in str(data.get("onay") or "") and "100" in str(data.get("onay")), data.get("onay"))
     finally:
         js_path.unlink(missing_ok=True)
     if FAILS:

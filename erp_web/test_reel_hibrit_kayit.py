@@ -145,12 +145,59 @@ def test_geri_yaz_kasa_dokunmaz():
     check("dry-run tutarsiz yazmaz", plan.get("ok") is False and not sqls, plan)
     plan_ok = reel_hibrit_geri_yaz(883, 2026, 100000, 52000, 48000, apply=False)
     check("dry-run tutarli yazmaz", plan_ok.get("ok") is True and plan_ok.get("dry_run") is True and not sqls, plan_ok)
+    check(
+        "dry-run eski yeni fark",
+        plan_ok.get("eski_tutar_kdv_dahil") == 109600.0
+        and plan_ok.get("yeni_tutar_kdv_dahil") == 109600.0
+        and plan_ok.get("aylik_borc_farki") == 0,
+        plan_ok,
+    )
+
+
+def test_dogru_odeme_yuzbin():
+    sqls, calls = _kur(HIBRIT)
+    yaz = gr.reel_hibrit_alanlari_yaz(883, 2026, 92000, 52000, 40000, kdv_oran=20)
+    guncel = [s for s in sqls if s[0].startswith("UPDATE musteri_reel_donem_tutar")]
+    check("eski 109600 yeni 100000", yaz.get("ok") is True and yaz.get("yeni_tutar_kdv_dahil") == 100000.0 and yaz.get("eski_tutar_kdv_dahil") == 109600.0, yaz)
+    check("aylik fark -9600", yaz.get("aylik_borc_farki") == -9600.0, yaz)
+    check("formul tutar yazildi", bool(guncel) and guncel[0][1][0] == 100000.0 and guncel[0][1][1:4] == (92000.0, 52000.0, 40000.0), guncel[:1])
+    check("dogru yazim kasa yok", calls["esitle"] == 0 and not any("tahsilat" in s[0].lower() for s in sqls))
+    sqls, calls = _kur(HIBRIT)
+    from reel_hibrit_geri import reel_hibrit_geri_yaz
+    plan = reel_hibrit_geri_yaz(883, 2026, 92000, 52000, 40000, apply=False)
+    check(
+        "dry-run 100000 farki gosterir",
+        plan.get("ok") is True
+        and plan.get("eski_tutar_kdv_dahil") == 109600.0
+        and plan.get("yeni_tutar_kdv_dahil") == 100000.0
+        and plan.get("aylik_borc_farki") == -9600.0
+        and not sqls,
+        plan,
+    )
+
+
+def test_audit_yazimi_engellemez():
+    sqls, calls = _kur(HIBRIT)
+
+    def boom(*a, **k):
+        raise RuntimeError("audit")
+
+    gr._reel_donem_audit = boom
+    durum, sonuc = gr._reel_donem_tutar_uygula(883, 2026, 109600, "hibrit", None, 100000, 50000, 50000)
+    check(
+        "audit hatasi yazimi birakir",
+        durum == 200 and any("INSERT INTO musteri_reel_donem_tutar" in s[0] for s in sqls),
+        sonuc,
+    )
+    check("audit sonrasi esitle ayrica", calls["esitle"] == 1)
 
 
 def main():
     test_karar_409_ve_koru()
     test_acik_hibrit_ve_audit()
     test_geri_yaz_kasa_dokunmaz()
+    test_dogru_odeme_yuzbin()
+    test_audit_yazimi_engellemez()
     if FAILS:
         print("FAILS", ",".join(FAILS))
         return 1

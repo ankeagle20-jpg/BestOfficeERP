@@ -1530,23 +1530,43 @@ function _sozlesmelerReelKdvOranOku() {
     return kdv;
 }
 
+function sozlesmelerReelHibritKayitOnayMetni(tutar) {
+    var n = parseFloat(String(tutar == null ? '' : tutar).replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(n)) n = 0;
+    n = Math.round(n * 100) / 100;
+    var g = n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return 'Müşteri ödemesi ' + g + ' TL olarak kaydedilecek';
+}
 function sozlesmelerReelHibritKdvGuncelle() {
     var sel = document.getElementById('sozlesmeler-reel-tutar-tip');
     var kdvOut = document.getElementById('sozlesmeler-reel-hibrit-kdv');
     var bankaEl = document.getElementById('sozlesmeler-reel-hibrit-banka');
-    if (!kdvOut) return;
+    var dahilEl = document.getElementById('sozlesmeler-reel-hibrit-banka-dahil');
+    var odemeEl = document.getElementById('sozlesmeler-reel-hibrit-odeme');
+    function temiz() {
+        if (kdvOut) kdvOut.value = '';
+        if (dahilEl) dahilEl.value = '';
+        if (odemeEl) odemeEl.value = '';
+    }
     if (!sel || sel.value !== 'hibrit') {
-        kdvOut.value = '';
+        temiz();
         return;
     }
     var bankaNet = _sozlesmelerReelHibritParseEl(bankaEl);
     if (isNaN(bankaNet) || bankaNet <= 0) {
-        kdvOut.value = '';
+        temiz();
         return;
     }
     var kdv = _sozlesmelerReelKdvOranOku();
     var kdvTutar = Math.round((bankaNet * kdv / 100) * 100) / 100;
-    kdvOut.value = String(kdvTutar);
+    var bankaDahil = Math.round((bankaNet * (1 + kdv / 100)) * 100) / 100;
+    var netEl = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var netN = _sozlesmelerReelHibritParseEl(netEl);
+    var odeme = bankaDahil;
+    if (!isNaN(netN) && netN >= 0) odeme = Math.round((netN + bankaDahil) * 100) / 100;
+    if (kdvOut) kdvOut.value = String(kdvTutar);
+    if (dahilEl) dahilEl.value = String(bankaDahil);
+    if (odemeEl) odemeEl.value = String(odeme);
 }
 
 /** Toplam / net değişince banka = toplam (net yoksa) veya toplam − net (Aylık Kira satırı ile aynı). */
@@ -2812,6 +2832,16 @@ function sozlesmelerReelDonemTutarKaydet() {
         }
     }
     reelKaydetDurumTemizle();
+    var hibritKayit = null;
+    for (var hi = 0; hi < kayitlar.length; hi++) {
+        if (kayitlar[hi] && kayitlar[hi].giris_tip === 'hibrit') { hibritKayit = kayitlar[hi]; break; }
+    }
+    if (hibritKayit) {
+        var odemeMetin = (typeof sozlesmelerReelHibritKayitOnayMetni === 'function')
+            ? sozlesmelerReelHibritKayitOnayMetni(hibritKayit.tutar_kdv_dahil)
+            : ('Müşteri ödemesi ' + hibritKayit.tutar_kdv_dahil + ' TL olarak kaydedilecek');
+        if (!window.confirm(odemeMetin)) return;
+    }
     reelKaydetBtnYukleniyor();
     var zincir = Promise.resolve();
     kayitlar.forEach(function (it) {

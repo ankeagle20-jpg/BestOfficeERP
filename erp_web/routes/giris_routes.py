@@ -17882,13 +17882,18 @@ def _reel_donem_tutar_uygula(
             alanlar["hibrit_banka"],
         ),
     )
-    _reel_donem_audit(
-        "reel_yazi",
-        _reel_satir_ani(eski_row, musteri_id, donem_yil) if eski_row else {"musteri_id": musteri_id, "donem_yil": donem_yil},
-        _reel_satir_ani(alanlar, musteri_id, donem_yil),
-        musteri_id,
-        donem_yil,
-    )
+    try:
+        _reel_donem_audit(
+            "reel_yazi",
+            _reel_satir_ani(eski_row, musteri_id, donem_yil) if eski_row else {"musteri_id": musteri_id, "donem_yil": donem_yil},
+            _reel_satir_ani(alanlar, musteri_id, donem_yil),
+            musteri_id,
+            donem_yil,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel audit yazi musteri_id=%s donem_yil=%s", musteri_id, donem_yil
+        )
     try:
         _reel_tahsilat_esitle_calistir(musteri_id, sadece_donem_yil=donem_yil)
     except Exception:
@@ -17898,11 +17903,24 @@ def _reel_donem_tutar_uygula(
     return 200, {"ok": True, "korundu": False}
 
 
+_REEL_HIBRIT_TUTAR_TAVAN = 100_000_000.0
+
+
 def reel_hibrit_kdv_dahil_tutar(net: float, banka: float, kdv_oran: float) -> float:
     oran = float(kdv_oran if kdv_oran is not None else 20)
     if oran < 0:
         oran = 20.0
     return round(float(net) + float(banka) * (1.0 + oran / 100.0), 2)
+
+
+def _reel_hibrit_formul_makul(beklenen) -> bool:
+    try:
+        v = float(beklenen)
+    except (TypeError, ValueError):
+        return False
+    if v != v:
+        return False
+    return 0 < v <= _REEL_HIBRIT_TUTAR_TAVAN
 
 
 def reel_hibrit_alanlari_yaz(
@@ -17914,9 +17932,10 @@ def reel_hibrit_alanlari_yaz(
     *,
     kdv_oran: float | None = None,
 ) -> dict:
-    """Yalnız hibrit kolonları ve giris_tip. Tahsilat eşitleme yok.
+    """Hibrit kolonları ve tutar_kdv_dahil. Tahsilat eşitleme yok.
 
-    Mevcut tutar_kdv_dahil = net + banka × (1 + KDV) değilse yazmaz.
+    tutar_kdv_dahil = net + banka × (1 + KDV). Eski toplama eşit olması gerekmez.
+    hibrit_toplam = net + banka olmalı; formül sonucu pozitif ve tavanın altında olmalı.
     """
     eski = _reel_donem_satir_oku(musteri_id, donem_yil)
     if not eski:
@@ -17930,50 +17949,70 @@ def reel_hibrit_alanlari_yaz(
     net = _reel_para(hibrit_net)
     banka = _reel_para(hibrit_banka)
     toplam = _reel_para(hibrit_toplam)
-    if net is None or banka is None or toplam is None or net <= 0 or banka <= 0:
-        return {"ok": False, "neden": "tutar_uyusmuyor"}
-    if not _reel_para_ayni(toplam, round(net + banka, 2)):
-        return {"ok": False, "neden": "tutar_uyusmuyor", "beklenen_toplam": round(net + banka, 2)}
-    beklenen = reel_hibrit_kdv_dahil_tutar(net, banka, kdv_oran)
     kayitli = _reel_para(eski.get("tutar_kdv_dahil"))
-    if not _reel_para_ayni(kayitli, beklenen):
+    if net is None or banka is None or toplam is None or net <= 0 or banka <= 0:
+        return {"ok": False, "neden": "tutar_uyusmuyor", "eski_tutar_kdv_dahil": kayitli}
+    if not _reel_para_ayni(toplam, round(net + banka, 2)):
         return {
             "ok": False,
             "neden": "tutar_uyusmuyor",
-            "tutar_kdv_dahil": kayitli,
+            "eski_tutar_kdv_dahil": kayitli,
+            "beklenen_toplam": round(net + banka, 2),
+        }
+    beklenen = reel_hibrit_kdv_dahil_tutar(net, banka, kdv_oran)
+    if not _reel_hibrit_formul_makul(beklenen):
+        return {
+            "ok": False,
+            "neden": "tutar_uyusmuyor",
+            "eski_tutar_kdv_dahil": kayitli,
             "beklenen": beklenen,
         }
+    fark = round(beklenen - (kayitli or 0), 2)
     execute(
         """
         UPDATE musteri_reel_donem_tutar
         SET giris_tip = 'hibrit',
+            tutar_kdv_dahil = %s,
             hibrit_toplam = %s,
             hibrit_net = %s,
             hibrit_banka = %s,
             updated_at = NOW()
         WHERE musteri_id = %s AND donem_yil = %s
         """,
-        (toplam, net, banka, int(musteri_id), int(donem_yil)),
+        (beklenen, toplam, net, banka, int(musteri_id), int(donem_yil)),
     )
     yeni = _reel_satir_ani(eski, musteri_id, donem_yil)
     yeni["giris_tip"] = "hibrit"
+    yeni["tutar_kdv_dahil"] = beklenen
     yeni["hibrit_toplam"] = toplam
     yeni["hibrit_net"] = net
     yeni["hibrit_banka"] = banka
-    _reel_donem_audit(
-        "reel_hibrit_geri",
-        _reel_satir_ani(eski, musteri_id, donem_yil),
-        yeni,
-        musteri_id,
-        donem_yil,
-    )
+    try:
+        _reel_donem_audit(
+            "reel_hibrit_geri",
+            _reel_satir_ani(eski, musteri_id, donem_yil),
+            yeni,
+            musteri_id,
+            donem_yil,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel hibrit geri audit mid=%s", musteri_id
+        )
     try:
         tahsilat_degisti(int(musteri_id))
     except Exception:
         logging.getLogger(__name__).exception(
             "reel hibrit geri yenile mid=%s", musteri_id
         )
-    return {"ok": True, "yazildi": True, "tutar_kdv_dahil": kayitli}
+    return {
+        "ok": True,
+        "yazildi": True,
+        "eski_tutar_kdv_dahil": kayitli,
+        "yeni_tutar_kdv_dahil": beklenen,
+        "tutar_kdv_dahil": beklenen,
+        "aylik_borc_farki": fark,
+    }
 
 
 @bp.route("/api/reel-donem-tutar", methods=["POST"])
@@ -18380,13 +18419,18 @@ def api_reel_donem_tutar_delete():
         (musteri_id, donem_yil),
     )
     if n > 0 and eski_reel:
-        _reel_donem_audit(
-            "reel_sil",
-            _reel_satir_ani(eski_reel, musteri_id, donem_yil),
-            {"musteri_id": musteri_id, "donem_yil": donem_yil, "silindi": True},
-            musteri_id,
-            donem_yil,
-        )
+        try:
+            _reel_donem_audit(
+                "reel_sil",
+                _reel_satir_ani(eski_reel, musteri_id, donem_yil),
+                {"musteri_id": musteri_id, "donem_yil": donem_yil, "silindi": True},
+                musteri_id,
+                donem_yil,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "reel audit sil musteri_id=%s donem_yil=%s", musteri_id, donem_yil
+            )
     if n <= 0:
         return jsonify({"ok": False, "mesaj": "Reel dönem kaydı bulunamadı."}), 404
     try:

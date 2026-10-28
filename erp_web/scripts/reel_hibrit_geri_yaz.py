@@ -35,6 +35,15 @@ def main():
     sonuc = reel_hibrit_geri_yaz(
         args.mid, args.yil, args.toplam, args.net, args.banka, apply=bool(args.apply)
     )
+    if sonuc.get("ok"):
+        print(
+            "eski_tutar_kdv_dahil=%s yeni_tutar_kdv_dahil=%s aylik_borc_farki=%s"
+            % (
+                sonuc.get("eski_tutar_kdv_dahil"),
+                sonuc.get("yeni_tutar_kdv_dahil"),
+                sonuc.get("aylik_borc_farki"),
+            )
+        )
     print(json.dumps({k: v for k, v in sonuc.items() if k != "eski"}, ensure_ascii=False, default=str))
     return 0 if sonuc.get("ok") else 2
 

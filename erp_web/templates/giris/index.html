@@ -4362,12 +4362,20 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                                 <input type="text" id="sozlesmeler-reel-hibrit-net" class="sozlesmeler-reel-tutar-input" placeholder="Nakit (KDV yok)" autocomplete="off" title="Elden / nakit payı (KDV uygulanmaz)" oninput="sozlesmelerReelHibritNetDegisti()" onchange="sozlesmelerReelHibritNetDegisti()">
                             </div>
                             <div class="sozlesmeler-reel-hibrit-field">
-                                <label for="sozlesmeler-reel-hibrit-banka">Banka</label>
+                                <label for="sozlesmeler-reel-hibrit-banka">Banka (KDV hariç)</label>
                                 <input type="text" id="sozlesmeler-reel-hibrit-banka" class="sozlesmeler-reel-tutar-input" placeholder="Banka (net)" autocomplete="off" title="Havale/EFT matrahı (net); KDV bu tutar üzerinden" oninput="sozlesmelerReelHibritKdvGuncelle()" onchange="sozlesmelerReelHibritKdvGuncelle()">
                             </div>
                             <div class="sozlesmeler-reel-hibrit-field">
                                 <label for="sozlesmeler-reel-hibrit-kdv">KDV</label>
                                 <input type="text" id="sozlesmeler-reel-hibrit-kdv" class="sozlesmeler-reel-tutar-input" placeholder="Banka KDV" autocomplete="off" title="Banka tutarı üzerinden otomatik KDV" readonly tabindex="-1">
+                            </div>
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-banka-dahil">Banka KDV dahil</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-banka-dahil" class="sozlesmeler-reel-tutar-input" autocomplete="off" readonly tabindex="-1">
+                            </div>
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-odeme">Müşteri ödemesi (nakit + banka KDV dahil)</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-odeme" class="sozlesmeler-reel-tutar-input" autocomplete="off" readonly tabindex="-1">
                             </div>
                         </div>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmelerReelDonemTutarUygula()"><i class="fa fa-check"></i> Uygula</button>
@@ -6576,23 +6584,43 @@ function _sozlesmelerReelKdvOranOku() {
     return kdv;
 }
 
+function sozlesmelerReelHibritKayitOnayMetni(tutar) {
+    var n = parseFloat(String(tutar == null ? '' : tutar).replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(n)) n = 0;
+    n = Math.round(n * 100) / 100;
+    var g = n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return 'Müşteri ödemesi ' + g + ' TL olarak kaydedilecek';
+}
 function sozlesmelerReelHibritKdvGuncelle() {
     var sel = document.getElementById('sozlesmeler-reel-tutar-tip');
     var kdvOut = document.getElementById('sozlesmeler-reel-hibrit-kdv');
     var bankaEl = document.getElementById('sozlesmeler-reel-hibrit-banka');
-    if (!kdvOut) return;
+    var dahilEl = document.getElementById('sozlesmeler-reel-hibrit-banka-dahil');
+    var odemeEl = document.getElementById('sozlesmeler-reel-hibrit-odeme');
+    function temiz() {
+        if (kdvOut) kdvOut.value = '';
+        if (dahilEl) dahilEl.value = '';
+        if (odemeEl) odemeEl.value = '';
+    }
     if (!sel || sel.value !== 'hibrit') {
-        kdvOut.value = '';
+        temiz();
         return;
     }
     var bankaNet = _sozlesmelerReelHibritParseEl(bankaEl);
     if (isNaN(bankaNet) || bankaNet <= 0) {
-        kdvOut.value = '';
+        temiz();
         return;
     }
     var kdv = _sozlesmelerReelKdvOranOku();
     var kdvTutar = Math.round((bankaNet * kdv / 100) * 100) / 100;
-    kdvOut.value = String(kdvTutar);
+    var bankaDahil = Math.round((bankaNet * (1 + kdv / 100)) * 100) / 100;
+    var netEl = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var netN = _sozlesmelerReelHibritParseEl(netEl);
+    var odeme = bankaDahil;
+    if (!isNaN(netN) && netN >= 0) odeme = Math.round((netN + bankaDahil) * 100) / 100;
+    if (kdvOut) kdvOut.value = String(kdvTutar);
+    if (dahilEl) dahilEl.value = String(bankaDahil);
+    if (odemeEl) odemeEl.value = String(odeme);
 }
 
 /** Toplam / net değişince banka = toplam (net yoksa) veya toplam − net (Aylık Kira satırı ile aynı). */
@@ -8135,6 +8163,16 @@ function sozlesmelerReelDonemTutarKaydet() {
         }
     }
     reelKaydetDurumTemizle();
+    var hibritKayit = null;
+    for (var hi = 0; hi < kayitlar.length; hi++) {
+        if (kayitlar[hi] && kayitlar[hi].giris_tip === 'hibrit') { hibritKayit = kayitlar[hi]; break; }
+    }
+    if (hibritKayit) {
+        var odemeMetin = (typeof sozlesmelerReelHibritKayitOnayMetni === 'function')
+            ? sozlesmelerReelHibritKayitOnayMetni(hibritKayit.tutar_kdv_dahil)
+            : ('Müşteri ödemesi ' + hibritKayit.tutar_kdv_dahil + ' TL olarak kaydedilecek');
+        if (!window.confirm(odemeMetin)) return;
+    }
     reelKaydetBtnYukleniyor();
     var zincir = Promise.resolve();
     kayitlar.forEach(function (it) {
@@ -25414,7 +25452,7 @@ function girisAylikSatirYilPanelDoldur() {
             + '<button type="button" class="btn-aylik-sec" onclick="girisAylikSatirYilTumunuVazgec(event)">Vazgeç</button>'
             + '</div>';
         html = tb + '<div style="display:grid;grid-template-columns:52px 92px 92px 92px 92px 92px 108px 168px;gap:6px;padding:2px 2px 6px 2px;color:#90a4ae;font-size:11px;">'
-            + '<div>Yıl</div><div>Aylık</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
+            + '<div>Yıl</div><div>Aylık (net)</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
     }
     panel.innerHTML = html;
     panel.querySelectorAll('.aylik-yil-reel').forEach(function (reelIn) {

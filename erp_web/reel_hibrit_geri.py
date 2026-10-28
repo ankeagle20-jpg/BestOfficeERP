@@ -14,6 +14,7 @@ def _plan(mid, yil, toplam, net, banka):
         _reel_para,
         _reel_para_ayni,
         _reel_satir_ani,
+        _reel_hibrit_formul_makul,
         reel_hibrit_kdv_dahil_tutar,
     )
 
@@ -39,18 +40,22 @@ def _plan(mid, yil, toplam, net, banka):
             "beklenen_toplam": round(net_p + banka_p, 2),
         }
     beklenen = reel_hibrit_kdv_dahil_tutar(net_p, banka_p, kdv)
-    if not _reel_para_ayni(kayitli, beklenen):
+    if not _reel_hibrit_formul_makul(beklenen):
         return {
             "ok": False,
             "neden": "tutar_uyusmuyor",
-            "tutar_kdv_dahil": kayitli,
-            "beklenen": beklenen,
+            "eski_tutar_kdv_dahil": kayitli,
+            "yeni_tutar_kdv_dahil": beklenen,
         }
+    fark = round(beklenen - (kayitli or 0), 2)
     return {
         "ok": True,
         "musteri_id": int(mid),
         "donem_yil": int(yil),
-        "tutar_kdv_dahil": kayitli,
+        "eski_tutar_kdv_dahil": kayitli,
+        "yeni_tutar_kdv_dahil": beklenen,
+        "aylik_borc_farki": fark,
+        "tutar_kdv_dahil": beklenen,
         "hibrit_toplam": toplam_p,
         "hibrit_net": net_p,
         "hibrit_banka": banka_p,
@@ -60,7 +65,7 @@ def _plan(mid, yil, toplam, net, banka):
 
 
 def reel_hibrit_geri_yaz(mid, yil, toplam, net, banka, *, apply=False):
-    """dry-run varsayılan. apply yalnız hibrit kolonlarını yazar, kasa eşitlemez."""
+    """dry-run varsayılan. apply hibrit kolonlarını ve formüldeki tutar_kdv_dahil değerini yazar. Kasa eşitlemez."""
     plan = _plan(mid, yil, toplam, net, banka)
     plan["dry_run"] = not apply
     if not plan.get("ok") or not apply:
