@@ -26,6 +26,18 @@
     });
   }
 
+  function wtSureMetin(o) {
+    var sure = Number((o && o.sure_dk) || 0);
+    var gun = Number((o && o.gun) || 0);
+    var gunGoster = !!(o && o.gun_goster);
+    if (!(sure > 0)) return "";
+    var metin = sure < 60
+      ? ("yaklaşık " + sure + " dakika")
+      : ("yaklaşık " + Math.ceil(sure / 60) + " saat");
+    if (gunGoster && gun > 1) metin += " / " + gun + " günde";
+    return metin;
+  }
+
   function wtOzet(numaralar, tavan) {
     var gorulen = {};
     var n = 0;
@@ -39,7 +51,28 @@
     if (!(cap >= 50 && cap <= 250)) cap = 150;
     var sure = n <= 0 ? 0 : Math.ceil(n / 0.75);
     var gun = n <= 0 ? 0 : Math.ceil(n / cap);
-    return { secili: (numaralar || []).length, alici: n, sure_dk: sure, saat: sure <= 0 ? 0 : Math.ceil(sure / 60), gun: gun };
+    var gunGoster = gun > 1;
+    var o = {
+      secili: (numaralar || []).length,
+      alici: n,
+      sure_dk: sure,
+      saat: sure <= 0 ? 0 : Math.ceil(sure / 60),
+      gun: gun,
+      gun_goster: gunGoster
+    };
+    o.sure_metin = wtSureMetin(o);
+    return o;
+  }
+
+  function wtTaslakNedenMetin(neden) {
+    if (neden === "gecersiz") {
+      return "Mesaj boş veya 1000 karakteri aşıyor / tavan 50–250 dışında";
+    }
+    if (neden === "durum") {
+      return "Açık kampanya var (çalışıyor/durduruldu). Önce Bitir'e bas, sonra yeni şablonu kaydet";
+    }
+    if (neden === "yok") return "Kampanya bulunamadı";
+    return "Şablon kaydedilemedi";
   }
 
   function bagla() {
@@ -111,11 +144,26 @@
       return wtOzet(nolar, tavan ? tavan.value : 150);
     }
 
+    function kampanyaDurumYaz() {
+      var el = document.getElementById("wtKampanyaDurum");
+      if (!el) return;
+      if (kampanyaDurum === "calisiyor" || kampanyaDurum === "durduruldu") {
+        var etiket = kampanyaDurum === "calisiyor" ? "çalışıyor" : "durduruldu";
+        // durumYukle yalnız bekleyen verir; X/Y yok — yeni uç yok
+        el.textContent = "Açık kampanya: " + etiket + ", bekleyen " + Number(bekleyenSayi || 0);
+        el.hidden = false;
+      } else {
+        el.textContent = "";
+        el.hidden = true;
+      }
+    }
+
     function ozetYaz() {
       var o = hesap();
       if (ozet) {
+        var sure = o.sure_metin || wtSureMetin(o);
         ozet.textContent = "Seçili: " + o.secili + " · Alıcı: " + o.alici +
-          " · Tahmini dakika: " + o.sure_dk + " · Saat: " + o.saat + " · Gün: " + o.gun;
+          (sure ? (" · " + sure) : "");
       }
       if (tumunu) {
         var gor = satirlar.filter(function (s) { return gorunurMu(s) && !s.sebep; });
@@ -192,6 +240,7 @@
           kampanyaDurum = "";
           bekleyenSayi = 0;
           testOk = false;
+          kampanyaDurumYaz();
           baslatDurumu();
           return;
         }
@@ -200,6 +249,7 @@
         bekleyenSayi = Number(k.bekleyen || 0);
         testOk = !!k.test_ok;
         if (k.tavan && tavan) tavan.value = String(k.tavan);
+        kampanyaDurumYaz();
         baslatDurumu();
       }).catch(function () {
         if (testSonuc) testSonuc.textContent = "İstek başarısız";
@@ -239,12 +289,30 @@
         if (!r.govde.ok) {
           testOk = false;
           baslatDurumu();
-          return null;
+          return { ok: false, neden: (r.govde && r.govde.neden) || "kayit" };
         }
         kampanyaId = r.govde.id;
         testOk = false;
         baslatDurumu();
+        return { ok: true, id: kampanyaId, govde: r.govde };
+      });
+    }
+
+    function taslakHataYaz(neden) {
+      if (testSonuc) testSonuc.textContent = wtTaslakNedenMetin(neden);
+    }
+
+    function sablonKaydet() {
+      if (testSonuc) testSonuc.textContent = "";
+      return taslak().then(function (r) {
+        if (!r || !r.ok) {
+          taslakHataYaz(r && r.neden);
+          return r;
+        }
+        if (testSonuc) testSonuc.textContent = "Şablon kaydedildi";
         return r;
+      }).catch(function () {
+        if (testSonuc) testSonuc.textContent = "İstek başarısız";
       });
     }
 
@@ -257,7 +325,11 @@
       if (testNo) testNo.value = "";
       if (testSonuc) testSonuc.textContent = "";
       taslak().then(function (r) {
-        if (!r || !kampanyaId) {
+        if (!r || !r.ok) {
+          taslakHataYaz(r && r.neden);
+          return;
+        }
+        if (!kampanyaId) {
           if (testSonuc) testSonuc.textContent = "Önce şablonu kaydedin";
           return;
         }
@@ -309,7 +381,8 @@
     function baslatKomut() {
       var o = hesap();
       if (!testOk || o.alici < 1) return;
-      var metin = o.alici + " kişiye, yaklaşık " + o.saat + " saatte/" + o.gun + " günde gönderilecek";
+      var sure = o.sure_metin || wtSureMetin(o) || "süre hesaplanamadı";
+      var metin = o.alici + " kişiye, " + sure + " gönderilecek";
       if (!window.confirm(metin)) return;
       var midler = seciliMidler();
       post("/whatsapp/api/toplu-baslat", { id: kampanyaId, midler: midler }).then(function (r) {
@@ -368,6 +441,8 @@
     });
     if (btnGecikme) btnGecikme.addEventListener("click", function () { altSekmeAktif("gecikme"); });
     if (btnToplu) btnToplu.addEventListener("click", function () { altSekmeAktif("toplu"); });
+    var kaydetBtn = document.getElementById("wtKaydet");
+    if (kaydetBtn) kaydetBtn.addEventListener("click", function () { sablonKaydet(); });
     var yenileBtn = document.getElementById("wtYenile");
     if (yenileBtn) yenileBtn.addEventListener("click", function () {
       durumYukle();
@@ -416,5 +491,12 @@
     }).catch(function () {});
   }
 
-  return { wtNorm: wtNorm, wtSecimUygula: wtSecimUygula, wtOzet: wtOzet, bagla: bagla };
+  return {
+    wtNorm: wtNorm,
+    wtSecimUygula: wtSecimUygula,
+    wtOzet: wtOzet,
+    wtSureMetin: wtSureMetin,
+    wtTaslakNedenMetin: wtTaslakNedenMetin,
+    bagla: bagla
+  };
 });

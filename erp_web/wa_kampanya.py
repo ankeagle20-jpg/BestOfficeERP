@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Europe/Istanbul")
 BAYRAK = "WA_TOPLU_KAMPANYA"
-JS_SURUM = 3
+JS_SURUM = 4
 SABLON_MAX = 1000
 TAVAN_MIN = 50
 TAVAN_MAX = 250
@@ -133,11 +133,22 @@ def gun_basi_utc(simdi: datetime) -> datetime:
 def sure_tahmin(alici: int, tavan: int) -> dict:
     n = max(int(alici or 0), 0)
     if n <= 0:
-        return {"sure_dk": 0, "gun": 0}
+        return {"sure_dk": 0, "gun": 0, "sure_metin": "", "gun_goster": False}
     cap = max(int(tavan or 0), 1)
+    sure_dk = int(math.ceil(n / (1 - ATLAMA)))
+    gun = int(math.ceil(n / cap))
+    gun_goster = gun > 1
+    if sure_dk < 60:
+        metin = f"yaklaşık {sure_dk} dakika"
+    else:
+        metin = f"yaklaşık {int(math.ceil(sure_dk / 60))} saat"
+    if gun_goster:
+        metin = f"{metin} / {gun} günde"
     return {
-        "sure_dk": int(math.ceil(n / (1 - ATLAMA))),
-        "gun": int(math.ceil(n / cap)),
+        "sure_dk": sure_dk,
+        "gun": gun,
+        "sure_metin": metin,
+        "gun_goster": gun_goster,
     }
 
 

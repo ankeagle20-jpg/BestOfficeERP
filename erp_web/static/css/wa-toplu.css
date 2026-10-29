@@ -65,6 +65,29 @@
   flex-wrap: wrap;
 }
 
+#wtPanel .wt-baslik-aksiyon {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#wtPanel .wt-baslik-aksiyon #wtKaydet {
+  background: #1e3a50;
+  color: #4fc3f7;
+  border: 1px solid #4fc3f7;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#wtPanel .wt-kampanya-durum {
+  min-height: 1.2em;
+  margin: 6px 0;
+  color: #ffb74d;
+  font-size: 12px;
+}
+
 #wtPanel .wt-ust #wtOzet {
   min-height: 1.4em;
   margin: 6px 0;

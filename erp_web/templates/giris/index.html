@@ -4304,8 +4304,12 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
             <div class="wt-ust">
               <div class="wt-baslik">
                 <strong>Toplu mesaj</strong>
-                <button type="button" id="wtYenile">Yenile</button>
+                <span class="wt-baslik-aksiyon">
+                  <button type="button" id="wtKaydet">Şablonu kaydet</button>
+                  <button type="button" id="wtYenile">Yenile</button>
+                </span>
               </div>
+              <p id="wtKampanyaDurum" class="wt-kampanya-durum" hidden></p>
               <p id="wtOzet"></p>
               <label>Mesaj
                 <textarea id="wtSablon" maxlength="1000" rows="4"></textarea>

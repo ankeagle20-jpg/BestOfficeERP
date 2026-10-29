@@ -43,7 +43,11 @@ def test_bayrak_acik_admin_render():
     # yalnızca wa_toplu if bloklarını + gecikme iskeletini kapsayan frag
     out = _render_frag(frag, wa_toplu_kampanya=True, wa_toplu_js_surum=3)
     check("alt sekme", 'id="wtAltSekmeBar"' in out and "Gecikme hatırlatma" in out and "Toplu mesaj" in out)
-    check("panel", 'id="wtPanel"' in out and 'id="wtSablon"' in out and 'id="wtYenile"' in out)
+    check(
+        "panel",
+        'id="wtPanel"' in out and 'id="wtSablon"' in out and 'id="wtYenile"' in out
+        and 'id="wtKaydet"' in out and 'id="wtKampanyaDurum"' in out,
+    )
     check("gecikme durur", "WhatsApp - Gecikme Hatırlatma" in out and "whatsappSeciliGonder" in out)
     check("assets", "wa-toplu.css" in out and "wa-toplu.js" in out and "v=3" in out)
 
@@ -75,7 +79,9 @@ def test_js_lazy_ve_tek_bagla():
     check("tek bagla", 'data-wt-bagli") === "1"' in js or "data-wt-bagli') === '1'" in js)
     check("lazy", "listeYuklendi" in js and "listeYukle(false)" in js and "listeYukle(true)" in js)
     check("yenile", 'getElementById("wtYenile")' in js)
-    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*3\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")) is not None)
+    check("kaydet", 'getElementById("wtKaydet")' in js and "sablonKaydet" in js)
+    check("neden metin", "wtTaslakNedenMetin" in js and "Açık kampanya var" in js)
+    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*4\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")) is not None)
 
 
 def _calistir(adlar):

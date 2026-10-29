@@ -73,6 +73,8 @@ def test_sablon_ve_surum():
     check("css link", "css/wa-toplu.css" in t12 and "wa_toplu_js_surum" in t12)
     check("js v", "js/wa-toplu.js" in t12 and "v=wa_toplu_js_surum" in t12)
     check("yenile", 'id="wtYenile"' in t12)
+    check("kaydet", 'id="wtKaydet"' in t12 and "Şablonu kaydet" in t12)
+    check("kampanya durum", 'id="wtKampanyaDurum"' in t12)
     check("kapat yok", 'id="wtKapat"' not in giris)
     check("btn-toplu yok", 'id="btn-toplu-mesaj"' not in giris)
     check("yapı sınıfları", all(x in t12 for x in (
@@ -81,7 +83,7 @@ def test_sablon_ve_surum():
         'id="wtSablon"', 'id="wtBaslat"', 'id="wtTest"',
     )))
     modul = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
-    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*3\s*$", modul) is not None)
+    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*4\s*$", modul) is not None)
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     inj = app[app.find("def inject_wa_toplu_kampanya"): app.find("def inject_globals")]
     check("inject surum", "wa_toplu_js_surum" in inj and "JS_SURUM" in inj)

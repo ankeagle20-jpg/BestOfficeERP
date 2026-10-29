@@ -633,7 +633,11 @@ def test_baslik_dugme():
         and "girisMusteriWhatsAppAc()" in giris[form_i:form_i + 180],
     )
     js = (ROOT / "static" / "js" / "wa-toplu.js").read_text(encoding="utf-8")
-    check("onay metin", "kişiye, yaklaşık " in js and "saatte/" in js and "günde gönderilecek" in js)
+    check(
+        "onay metin",
+        "kişiye, " in js and "gönderilecek" in js and "wtSureMetin" in js
+        and "saatte/" not in js,
+    )
 
 
 def _calistir(adlar):
