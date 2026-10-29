@@ -962,7 +962,10 @@ def _toplu_json(sonuc, tamam=(200,)):
         kod = 404 if neden == "yok" else 409 if neden in ("acik_var", "test_yok", "durum", "alici_yok") else 400
         return jsonify({"ok": False, "neden": neden or "kayit"}), kod
     govde = {"ok": True}
-    for anahtar in ("id", "durum", "test_ok", "anahtar", "alici", "atilan", "mid", "kapali", "kampanya", "iptal"):
+    for anahtar in (
+        "id", "durum", "test_ok", "test_atlandi", "anahtar", "alici", "atilan",
+        "mid", "kapali", "kampanya", "iptal", "telefon", "maske", "kayitli",
+    ):
         if anahtar in sonuc:
             govde[anahtar] = sonuc[anahtar]
     return jsonify(govde), 200
@@ -1058,6 +1061,20 @@ def api_toplu_test_sonuc():
     return _toplu_json(wa_kampanya.test_sonuc_istegi(kid, request.args.get("anahtar") or ""))
 
 
+@bp.route('/api/toplu-test-no', methods=['GET', 'POST'])
+@admin_gerekli
+def api_toplu_test_no():
+    kapali = _toplu_kapali()
+    if kapali:
+        return kapali
+    import wa_kampanya
+
+    if request.method == "GET":
+        return _toplu_json(wa_kampanya.test_telefon_istegi())
+    govde = request.get_json(silent=True) or {}
+    return _toplu_json(wa_kampanya.test_telefon_kaydet(govde.get("telefon")))
+
+
 @bp.route('/api/toplu-baslat', methods=['POST'])
 @admin_gerekli
 def api_toplu_baslat():
@@ -1072,7 +1089,8 @@ def api_toplu_baslat():
     except (TypeError, ValueError):
         return jsonify({"ok": False, "neden": "gecersiz"}), 400
     midler = govde.get("midler") if isinstance(govde.get("midler"), list) else []
-    return _toplu_json(wa_kampanya.baslat_istegi(kid, midler))
+    atla = govde.get("test_atlandi")
+    return _toplu_json(wa_kampanya.baslat_istegi(kid, midler, test_atlandi=atla))
 
 
 @bp.route('/api/toplu-durdur', methods=['POST'])

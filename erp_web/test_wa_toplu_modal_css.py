@@ -83,7 +83,7 @@ def test_sablon_ve_surum():
         'id="wtSablon"', 'id="wtBaslat"', 'id="wtTest"',
     )))
     modul = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
-    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*4\s*$", modul) is not None)
+    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", modul) is not None)
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     inj = app[app.find("def inject_wa_toplu_kampanya"): app.find("def inject_globals")]
     check("inject surum", "wa_toplu_js_surum" in inj and "JS_SURUM" in inj)

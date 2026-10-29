@@ -224,10 +224,11 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
             "anahtar": "kampanya",
             "seviye": "ok",
             "baslik": "Kampanya",
-            "aciklama": "Açık {0}. Bekleyen {1}. Durdurulan {2}.".format(
+            "aciklama": "Açık {0}. Bekleyen {1}. Durdurulan {2}. Test atlandı {3}.".format(
                 int(s.get("kampanya_acik") or 0),
                 int(s.get("kampanya_bekleyen") or 0),
                 int(s.get("kampanya_durdurulan") or 0),
+                int(s.get("kampanya_test_atlandi") or 0),
             ),
         })
     return kartlar
@@ -464,6 +465,7 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
             out["kampanya_acik"] = int(n.get("acik") or 0)
             out["kampanya_bekleyen"] = int(n.get("bekleyen") or 0)
             out["kampanya_durdurulan"] = int(n.get("durdurulan") or 0)
+            out["kampanya_test_atlandi"] = int(n.get("test_atlandi") or 0)
     except Exception:
         pass
     return out

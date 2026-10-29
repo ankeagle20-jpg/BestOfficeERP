@@ -4351,7 +4351,16 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                 <button type="button" id="wtDevam">Devam</button>
                 <button type="button" id="wtBitir">Bitir</button>
               </div>
-              <label>Kendime test <input id="wtTestNo" type="tel" autocomplete="off"></label>
+              <div class="wt-test-no-satir">
+                <label>Test numarası
+                  <input id="wtTestNo" type="tel" autocomplete="off" placeholder="05xx…">
+                </label>
+                <button type="button" id="wtTestNoKaydet">Kaydet</button>
+              </div>
+              <p id="wtTestNoIpucu" class="wt-test-no-ipucu"></p>
+              <label class="wt-test-atla-label">
+                <input id="wtTestAtla" type="checkbox"> Test göndermeden başlat
+              </label>
               <button type="button" id="wtTest">Test gönder</button>
               <p id="wtTestSonuc"></p>
             </div>

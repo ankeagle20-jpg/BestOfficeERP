@@ -189,6 +189,8 @@ def test_test_olmadan_baslamaz():
     check("test yok", wa.baslat_izin(False, False) == "test_yok")
     check("acik var", wa.baslat_izin(True, True) == "acik_var")
     check("test tamam", wa.baslat_izin(True, False) == "tamam")
+    check("test atla", wa.baslat_izin(False, False, True) == "tamam")
+    check("atla acik", wa.baslat_izin(False, True, True) == "acik_var")
     fn, kutu = _kuyruk("gonderildi")
     paket = wa.test_gonder("05551110022", "Merhaba {yetkili}", fn)
     check("test anahtar", paket.get("test_ok") is True and wa.anahtar_gecerli(paket.get("anahtar"))
@@ -322,11 +324,19 @@ def test_turda_bir_is():
 def test_saglik_kart_sayi():
     import wa_saglik
 
-    dolu = {"kampanya_acik": 2, "kampanya_bekleyen": 4, "kampanya_durdurulan": 1}
+    dolu = {
+        "kampanya_acik": 2,
+        "kampanya_bekleyen": 4,
+        "kampanya_durdurulan": 1,
+        "kampanya_test_atlandi": 1,
+    }
     kartlar = wa_saglik.kontrolleri_uret("ok", "hazir", dolu)
     kart = next((k for k in kartlar if k.get("anahtar") == "kampanya"), {})
-    check("kart sayi", kart.get("aciklama") == "Açık 2. Bekleyen 4. Durdurulan 1."
-          and kart.get("seviye") == "ok" and "kayit" not in kart)
+    check(
+        "kart sayi",
+        kart.get("aciklama") == "Açık 2. Bekleyen 4. Durdurulan 1. Test atlandı 1."
+        and kart.get("seviye") == "ok" and "kayit" not in kart,
+    )
     bos = wa_saglik.kontrolleri_uret("ok", "hazir", {"bekleyen": 0})
     check("bayraksiz kart yok", all(k.get("anahtar") != "kampanya" for k in bos))
     src = (ROOT / "wa_saglik.py").read_text(encoding="utf-8")

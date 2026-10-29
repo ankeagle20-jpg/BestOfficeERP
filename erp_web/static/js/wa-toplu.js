@@ -94,6 +94,8 @@
     var govde = document.getElementById("wtGovde");
     var ozet = document.getElementById("wtOzet");
     var testNo = document.getElementById("wtTestNo");
+    var testNoIpucu = document.getElementById("wtTestNoIpucu");
+    var testAtla = document.getElementById("wtTestAtla");
     var testSonuc = document.getElementById("wtTestSonuc");
     var baslat = document.getElementById("wtBaslat");
     var satirlar = [];
@@ -102,8 +104,10 @@
     var kampanyaDurum = "";
     var bekleyenSayi = 0;
     var testOk = false;
+    var kayitliTestNo = "";
     var listeYuklendi = false;
     var listeYukleniyor = false;
+    if (testAtla) testAtla.checked = false;
 
     function kac() {
       if (sayac && sablon) sayac.textContent = String((sablon.value || "").length) + "/1000";
@@ -119,9 +123,57 @@
       });
     }
 
+    function testAtlandiMi() {
+      return !!(testAtla && testAtla.checked);
+    }
+
+    function testNoIpucuYaz() {
+      if (!testNoIpucu) return;
+      if (kayitliTestNo) {
+        testNoIpucu.textContent = "Kayıtlı test numarası kullanılıyor";
+      } else {
+        testNoIpucu.textContent = "Kayıtlı numara yok — boşsa test için numara girin (ofis/elle)";
+      }
+    }
+
+    function testNoYukle() {
+      return fetch("/whatsapp/api/toplu-test-no", { cache: "no-store" }).then(function (r) {
+        return r.json();
+      }).then(function (j) {
+        kayitliTestNo = (j && j.kayitli && j.telefon) ? String(j.telefon) : "";
+        if (testNo) testNo.value = kayitliTestNo || "";
+        testNoIpucuYaz();
+      }).catch(function () {
+        kayitliTestNo = "";
+        testNoIpucuYaz();
+      });
+    }
+
+    function testNoKaydet() {
+      var ham = testNo ? testNo.value : "";
+      if (testSonuc) testSonuc.textContent = "";
+      return post("/whatsapp/api/toplu-test-no", { telefon: ham }).then(function (r) {
+        if (!r.govde || !r.govde.ok) {
+          if (testSonuc) {
+            testSonuc.textContent = (r.govde && r.govde.neden === "gecersiz")
+              ? "Geçersiz numara (05xx / 5xx / +90)"
+              : "Numara kaydedilemedi";
+          }
+          return;
+        }
+        kayitliTestNo = String(r.govde.telefon || "");
+        if (testNo) testNo.value = kayitliTestNo;
+        testNoIpucuYaz();
+        if (testSonuc) testSonuc.textContent = "Test numarası kaydedildi";
+      }).catch(function () {
+        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+      });
+    }
+
     function baslatDurumu() {
       var o = hesap();
-      if (baslat) baslat.disabled = !testOk || o.alici < 1;
+      var izin = (!!testOk || testAtlandiMi()) && o.alici >= 1 && !!kampanyaId;
+      if (baslat) baslat.disabled = !izin;
       var bitirBtn = document.getElementById("wtBitir");
       if (bitirBtn) bitirBtn.disabled = !kampanyaId || kampanyaDurum === "calisiyor";
     }
@@ -269,9 +321,12 @@
       if (panelGecikme) panelGecikme.hidden = !!toplu;
       panel.hidden = !toplu;
       if (toplu) {
+        if (testAtla) testAtla.checked = false;
         kac();
         durumYukle();
+        testNoYukle();
         listeYukle(false);
+        baslatDurumu();
       }
     }
 
@@ -321,8 +376,7 @@
     }
 
     function testGonder() {
-      var no = testNo ? testNo.value : "";
-      if (testNo) testNo.value = "";
+      var no = kayitliTestNo || (testNo ? testNo.value : "");
       if (testSonuc) testSonuc.textContent = "";
       taslak().then(function (r) {
         if (!r || !r.ok) {
@@ -380,19 +434,31 @@
 
     function baslatKomut() {
       var o = hesap();
-      if (!testOk || o.alici < 1) return;
-      var sure = o.sure_metin || wtSureMetin(o) || "süre hesaplanamadı";
-      var metin = o.alici + " kişiye, " + sure + " gönderilecek";
-      if (!window.confirm(metin)) return;
+      var atla = testAtlandiMi();
+      if ((!testOk && !atla) || o.alici < 1 || !kampanyaId) return;
+      if (atla && !testOk) {
+        if (!window.confirm("Test yapılmadı. Mesaj olduğu gibi tüm seçili alıcılara gidecek. Emin misin?")) {
+          return;
+        }
+      } else {
+        var sure = o.sure_metin || wtSureMetin(o) || "süre hesaplanamadı";
+        var metin = o.alici + " kişiye, " + sure + " gönderilecek";
+        if (!window.confirm(metin)) return;
+      }
       var midler = seciliMidler();
-      post("/whatsapp/api/toplu-baslat", { id: kampanyaId, midler: midler }).then(function (r) {
+      var govde = { id: kampanyaId, midler: midler };
+      if (atla) govde.test_atlandi = 1;
+      post("/whatsapp/api/toplu-baslat", govde).then(function (r) {
         if (!r) return;
         if (testSonuc) {
           testSonuc.textContent = r.govde && r.govde.ok
-            ? ("Alıcı: " + Number(r.govde.alici || 0) + " · Atılan: " + Number(r.govde.atilan || 0))
+            ? ("Alıcı: " + Number(r.govde.alici || 0) + " · Atılan: " + Number(r.govde.atilan || 0)
+              + (r.govde.test_atlandi ? " · test atlandı" : ""))
             : "İşlem olmadı";
         }
+        if (testAtla) testAtla.checked = false;
         durumYukle();
+        baslatDurumu();
       }).catch(function () {
         if (testSonuc) testSonuc.textContent = "İstek başarısız";
       });
@@ -446,8 +512,12 @@
     var yenileBtn = document.getElementById("wtYenile");
     if (yenileBtn) yenileBtn.addEventListener("click", function () {
       durumYukle();
+      testNoYukle();
       listeYukle(true);
     });
+    var testNoKaydetBtn = document.getElementById("wtTestNoKaydet");
+    if (testNoKaydetBtn) testNoKaydetBtn.addEventListener("click", function () { testNoKaydet(); });
+    if (testAtla) testAtla.addEventListener("change", function () { baslatDurumu(); });
     var testBtn = document.getElementById("wtTest");
     if (testBtn) testBtn.addEventListener("click", testGonder);
     if (baslat) baslat.addEventListener("click", baslatKomut);

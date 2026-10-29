@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Europe/Istanbul")
 BAYRAK = "WA_TOPLU_KAMPANYA"
-JS_SURUM = 4
+JS_SURUM = 5
 SABLON_MAX = 1000
 TAVAN_MIN = 50
 TAVAN_MAX = 250
@@ -30,6 +30,7 @@ ATLAMA = 0.25
 HATA_SERI = 3
 BELIRSIZ_SAAT = 2
 YEDEK_HITAP = "Değerli müşterimiz"
+TEST_NO_ANAHTAR = "test_telefon"
 ACIK_DURUMLAR = ("calisiyor", "durduruldu", "test_bekliyor")
 GIDEN_DURUM = ("kuyrukta", "gonderildi", "belirsiz", "hata", "basarisiz", "mukerrer")
 BITIR_DURUM = ("taslak", "test_bekliyor", "durduruldu")
@@ -215,12 +216,19 @@ def alici_ekle(tablo: list, satir: dict) -> str:
     return "tamam"
 
 
-def baslat_izin(test_ok, acik_baska) -> str:
-    if not test_ok:
+def baslat_izin(test_ok, acik_baska, test_atlandi=False) -> str:
+    if not test_ok and not test_atlandi:
         return "test_yok"
     if acik_baska:
         return "acik_var"
     return "tamam"
+
+
+def _test_atlandi_bayrak(ham) -> bool:
+    if ham is True or ham == 1:
+        return True
+    s = str(ham or "").strip().lower()
+    return s in ("1", "true", "evet", "on")
 
 
 def kilit_acik(durum) -> bool:
@@ -580,18 +588,86 @@ def ensure_tablolar() -> None:
         )
         """
     )
+    execute(
+        """
+        ALTER TABLE wa_kampanya
+        ADD COLUMN IF NOT EXISTS test_atlandi BOOLEAN NOT NULL DEFAULT FALSE
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS wa_toplu_ayar (
+            anahtar TEXT PRIMARY KEY,
+            deger TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+
+
+def test_telefon_oku() -> str:
+    from db import fetch_one
+
+    ensure_tablolar()
+    try:
+        row = fetch_one(
+            "SELECT deger FROM wa_toplu_ayar WHERE anahtar = %s",
+            (TEST_NO_ANAHTAR,),
+        ) or {}
+    except Exception:
+        return ""
+    return norm_telefon(row.get("deger"))
+
+
+def test_telefon_kaydet(ham) -> dict:
+    from db import execute
+
+    ensure_tablolar()
+    norm = norm_telefon(ham)
+    if not norm:
+        return {"ok": False, "neden": "gecersiz"}
+    execute(
+        """
+        INSERT INTO wa_toplu_ayar (anahtar, deger, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (anahtar) DO UPDATE
+        SET deger = EXCLUDED.deger, updated_at = NOW()
+        """,
+        (TEST_NO_ANAHTAR, norm),
+    )
+    guvenli_log("test_no_kaydet")
+    return {"ok": True, "telefon": norm, "maske": maske(norm), "kayitli": True}
+
+
+def test_telefon_istegi() -> dict:
+    ensure_tablolar()
+    tel = test_telefon_oku()
+    if not tel:
+        return {"ok": True, "telefon": "", "maske": "", "kayitli": False}
+    return {"ok": True, "telefon": tel, "maske": maske(tel), "kayitli": True}
+
+
+def test_hedef_telefon(istek_telefon) -> str:
+    """Kayıtlı numara varsa onu kullan; yoksa istekteki (eski davranış)."""
+    kayitli = test_telefon_oku()
+    if kayitli:
+        return kayitli
+    return norm_telefon(istek_telefon)
 
 
 def kampanya_sayilari(oku=None) -> dict:
     if oku is None:
         from db import fetch_one
         oku = fetch_one
-    bos = {"acik": 0, "bekleyen": 0, "durdurulan": 0}
+    bos = {"acik": 0, "bekleyen": 0, "durdurulan": 0, "test_atlandi": 0}
     try:
         k = oku(
             """
             SELECT COUNT(*) FILTER (WHERE durum = 'calisiyor') AS acik,
-                   COUNT(*) FILTER (WHERE durum = 'durduruldu') AS durdurulan
+                   COUNT(*) FILTER (WHERE durum = 'durduruldu') AS durdurulan,
+                   COUNT(*) FILTER (
+                     WHERE durum IN ('calisiyor', 'durduruldu') AND test_atlandi
+                   ) AS test_atlandi
             FROM wa_kampanya
             """
         ) or {}
@@ -610,6 +686,7 @@ def kampanya_sayilari(oku=None) -> dict:
         "acik": int(k.get("acik") or 0),
         "bekleyen": int(b.get("n") or 0),
         "durdurulan": int(k.get("durdurulan") or 0),
+        "test_atlandi": int(k.get("test_atlandi") or 0),
     }
 
 
@@ -1048,7 +1125,8 @@ def _kampanya_oku(kid: int):
 
     return fetch_one(
         """
-        SELECT id, durum, sablon, gunluk_tavan, ust_uste_hata, test_ok, test_anahtar
+        SELECT id, durum, sablon, gunluk_tavan, ust_uste_hata,
+               test_ok, test_anahtar, test_atlandi
         FROM wa_kampanya
         WHERE id = %s
         """,
@@ -1157,8 +1235,11 @@ def test_gonder_istegi(kid: int, telefon) -> dict:
         return {"ok": False, "neden": "durum"}
     if str(row.get("durum") or "") != "test_bekliyor" and _acik_baska(int(kid)):
         return {"ok": False, "neden": "acik_var"}
+    hedef = test_hedef_telefon(telefon)
+    if not hedef:
+        return {"ok": False, "neden": "gecersiz"}
     anahtar = yeni_anahtar()
-    sonuc = test_gonder(telefon, row.get("sablon") or "", _kuyruk_bir, lambda: anahtar)
+    sonuc = test_gonder(hedef, row.get("sablon") or "", _kuyruk_bir, lambda: anahtar)
     if sonuc.get("neden"):
         return sonuc
     yaz = _test_yaz(int(kid), sonuc.get("anahtar") or anahtar, bool(sonuc.get("test_ok")))
@@ -1182,7 +1263,7 @@ def test_sonuc_istegi(kid: int, anahtar: str) -> dict:
     return sonuc
 
 
-def baslat_istegi(kid: int, midler=None, kayitlar=None) -> dict:
+def baslat_istegi(kid: int, midler=None, kayitlar=None, test_atlandi=False) -> dict:
     from db import execute
 
     ensure_tablolar()
@@ -1191,7 +1272,8 @@ def baslat_istegi(kid: int, midler=None, kayitlar=None) -> dict:
         return {"ok": False, "neden": "yok"}
     if str(row.get("durum") or "") not in ("taslak", "test_bekliyor"):
         return {"ok": False, "neden": "durum"}
-    karar = baslat_izin(bool(row.get("test_ok")), _acik_baska(int(kid)))
+    atla = _test_atlandi_bayrak(test_atlandi)
+    karar = baslat_izin(bool(row.get("test_ok")), _acik_baska(int(kid)), atla)
     if karar != "tamam":
         return {"ok": False, "neden": karar}
     kaynak = kayitlar if kayitlar is not None else aday_kayitlari()
@@ -1215,16 +1297,30 @@ def baslat_istegi(kid: int, midler=None, kayitlar=None) -> dict:
         execute(
             """
             UPDATE wa_kampanya
-            SET durum = 'calisiyor', test_anahtar = NULL, updated_at = NOW()
-            WHERE id = %s AND test_ok = TRUE
+            SET durum = 'calisiyor',
+                test_atlandi = %s,
+                test_anahtar = NULL,
+                updated_at = NOW()
+            WHERE id = %s
               AND durum IN ('taslak', 'test_bekliyor')
+              AND (test_ok = TRUE OR %s)
             """,
-            (int(kid),),
+            (atla, int(kid), atla),
         )
     except Exception:
         return {"ok": False, "neden": "acik_var"}
-    guvenli_log("baslat", kampanya_id=int(kid), alici=sinif["alici"])
-    return {"ok": True, "alici": sinif["alici"], "atilan": int(sinif.get("atilan") or 0)}
+    guvenli_log(
+        "baslat",
+        kampanya_id=int(kid),
+        alici=sinif["alici"],
+        test_atlandi=1 if atla else 0,
+    )
+    return {
+        "ok": True,
+        "alici": sinif["alici"],
+        "atilan": int(sinif.get("atilan") or 0),
+        "test_atlandi": atla,
+    }
 
 
 def durdur_istegi(kid: int) -> dict:
@@ -1316,7 +1412,7 @@ def durum_istegi() -> dict:
     ensure_tablolar()
     row = fetch_one(
         """
-        SELECT id, durum, gunluk_tavan, test_ok, ust_uste_hata
+        SELECT id, durum, gunluk_tavan, test_ok, ust_uste_hata, test_atlandi
         FROM wa_kampanya
         WHERE durum IN ('taslak', 'test_bekliyor', 'calisiyor', 'durduruldu')
         ORDER BY id DESC
@@ -1345,6 +1441,7 @@ def durum_istegi() -> dict:
             "durum": row.get("durum"),
             "tavan": int(row.get("gunluk_tavan") or TAVAN_VARSAYILAN),
             "test_ok": bool(row.get("test_ok")),
+            "test_atlandi": bool(row.get("test_atlandi")),
             "seri": int(row.get("ust_uste_hata") or 0),
             "bekleyen": bekleyen,
         },

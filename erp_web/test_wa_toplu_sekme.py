@@ -81,7 +81,9 @@ def test_js_lazy_ve_tek_bagla():
     check("yenile", 'getElementById("wtYenile")' in js)
     check("kaydet", 'getElementById("wtKaydet")' in js and "sablonKaydet" in js)
     check("neden metin", "wtTaslakNedenMetin" in js and "Açık kampanya var" in js)
-    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*4\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")) is not None)
+    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")) is not None)
+    check("test no ui", 'id="wtTestNoKaydet"' in (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8"))
+    check("test atla ui", 'id="wtTestAtla"' in (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8"))
 
 
 def _calistir(adlar):

@@ -41,7 +41,7 @@ def test_taslak_neden_ve_kaydet_ui():
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     check("wtKaydet", 'id="wtKaydet"' in html and "Şablonu kaydet" in html)
     check("durum satir", 'id="wtKampanyaDurum"' in html)
-    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*4\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")))
+    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")))
 
 
 def test_taslak_gecersiz_ve_durum():

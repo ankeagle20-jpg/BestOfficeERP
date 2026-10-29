@@ -61,9 +61,11 @@ function el(id) {
 const store = {};
 ["wtPanel", "wtPanelGecikme", "wtAltGecikme", "wtAltToplu", "wtSablon", "wtSayac",
   "wtTavan", "wtAra", "wtDurum", "wtTumunu", "wtGovde", "wtOzet", "wtTestNo",
+  "wtTestNoIpucu", "wtTestNoKaydet", "wtTestAtla",
   "wtTestSonuc", "wtBaslat", "wtYenile", "wtKaydet", "wtKampanyaDurum",
   "wtTest", "wtDurdur", "wtDevam", "wtBitir"
 ].forEach(function (id) { store[id] = el(id); });
+store.wtTestAtla.checked = true; // bagla sifirlar
 
 let fetchSay = 0;
 let taslakSay = 0;
@@ -76,6 +78,12 @@ global.fetch = function (url, opts) {
   }
   if (u.indexOf("toplu-durum") >= 0) {
     return Promise.resolve({ json: function () { return Promise.resolve({}); } });
+  }
+  if (u.indexOf("toplu-test-no") >= 0) {
+    return Promise.resolve({
+      status: 200,
+      json: function () { return Promise.resolve({ ok: true, telefon: "", kayitli: false }); }
+    });
   }
   if (u.indexOf("toplu-taslak") >= 0) {
     taslakSay += 1;
@@ -105,6 +113,7 @@ global.document = {
 
 m.bagla();
 m.bagla();
+esit("test atla varsayilan kapali", store.wtTestAtla.checked === false);
 const clickToplu = store.wtAltToplu._listeners.filter(function (x) { return x.type === "click"; });
 esit("tek dinleyici", clickToplu.length === 1 && store.wtPanel.getAttribute("data-wt-bagli") === "1");
 

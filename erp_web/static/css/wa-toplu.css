@@ -163,6 +163,27 @@
   width: 160px;
 }
 
+#wtPanel .wt-test-no-satir {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+#wtPanel .wt-test-no-ipucu {
+  min-height: 1.1em;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #90a4ae;
+}
+
+#wtPanel .wt-test-atla-label {
+  display: block;
+  margin: 6px 0 8px;
+  color: #ffb74d;
+}
+
 @media (max-width: 480px) {
   #wtPanel .wt-kutu {
     max-height: calc(100vh - 8rem);
