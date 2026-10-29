@@ -1,11 +1,11 @@
-/* Toplu mesaj sekme paneli — yalnız #wtPanel / #wtAltSekmeBar (modal değil) */
+/* Toplu mesaj sekme paneli — kompakt 3 bar + flex liste */
 #wtAltSekmeBar {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   border-bottom: 1px solid #1e3a50;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 #wtAltSekmeBar .wt-alt-sekme {
@@ -29,17 +29,22 @@
   display: none;
   box-sizing: border-box;
   margin-top: 4px;
+  min-height: 0;
 }
 
 #wtPanel:not([hidden]) {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 12rem);
+  max-height: calc(100vh - 12rem);
 }
 
 #wtPanel .wt-kutu {
   background: #0d1520;
   color: #e8f1ff;
   width: 100%;
-  max-height: calc(100vh - 12rem);
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -50,80 +55,123 @@
   border: 1px solid #1e3a50;
 }
 
-#wtPanel .wt-ust {
+#wtPanel .wt-ust-bar,
+#wtPanel .wt-mesaj-alt-bar,
+#wtPanel .wt-filtre,
+#wtPanel .wt-alt-bar {
   flex: 0 0 auto;
-  padding: 16px 16px 8px;
-  border-bottom: 1px solid #1e3a50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 12px;
   background: #0d1520;
 }
 
-#wtPanel .wt-baslik {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+#wtPanel .wt-ust-bar {
+  border-bottom: 1px solid #1e3a50;
 }
 
-#wtPanel .wt-baslik-aksiyon {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+#wtPanel .wt-baslik-metin {
+  margin-right: 4px;
 }
 
-#wtPanel .wt-baslik-aksiyon #wtKaydet {
+#wtPanel .wt-ust-bar #wtKaydet {
   background: #1e3a50;
   color: #4fc3f7;
   border: 1px solid #4fc3f7;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 4px;
   cursor: pointer;
   font-weight: 600;
 }
 
-#wtPanel .wt-kampanya-durum {
-  min-height: 1.2em;
-  margin: 6px 0;
-  color: #ffb74d;
+#wtPanel .wt-ozet {
+  color: #90a4ae;
   font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42vw;
 }
 
-#wtPanel .wt-ust #wtOzet {
-  min-height: 1.4em;
-  margin: 6px 0;
+#wtPanel .wt-kampanya-durum {
+  color: #ffb74d;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 36vw;
 }
 
-#wtPanel .wt-ust textarea {
+#wtPanel .wt-mesaj-sarici {
+  flex: 0 0 auto;
+  padding: 4px 12px 0;
+}
+
+#wtPanel .wt-mesaj-sarici textarea {
   width: 100%;
   box-sizing: border-box;
+  min-height: 3.6em;
+  resize: vertical;
+  max-height: 9em;
+  font-size: 13px;
+  padding: 6px 8px;
+  background: #0a1929;
+  color: #e8f1ff;
+  border: 1px solid #2d4060;
+  border-radius: 4px;
+}
+
+#wtPanel .wt-mesaj-alt-bar {
+  border-bottom: 1px solid #1e3a50;
+  padding-top: 4px;
+  padding-bottom: 6px;
+}
+
+#wtPanel .wt-sayac {
+  color: #78909c;
+  font-size: 12px;
+  min-width: 3.5em;
 }
 
 #wtPanel .wt-sablon-btns {
-  display: flex;
-  gap: 6px;
+  display: inline-flex;
+  gap: 4px;
   flex-wrap: wrap;
-  margin: 8px 0;
 }
 
-#wtPanel .wt-ust label[for],
-#wtPanel .wt-ust > label {
-  display: block;
-  margin: 6px 0;
+#wtPanel .wt-sablon-btns button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+#wtPanel .wt-tavan-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: #90a4ae;
+}
+
+#wtPanel .wt-tavan-inline #wtTavan {
+  width: 64px;
 }
 
 #wtPanel .wt-filtre {
-  flex: 0 0 auto;
-  padding: 8px 16px;
-  background: #0d1520;
   border-bottom: 1px solid #1e3a50;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 #wtPanel .wt-filtre #wtAra {
-  margin-left: 8px;
+  margin-left: 0;
+  min-width: 8rem;
 }
 
 #wtPanel .wt-filtre #wtDurum {
-  margin-left: 8px;
+  margin-left: 0;
 }
 
 #wtPanel .wt-tablo-sarici {
@@ -131,7 +179,7 @@
   min-height: 0;
   overflow: auto;
   margin: 0;
-  padding: 8px 16px;
+  padding: 0 12px 4px;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -140,69 +188,103 @@
   border-collapse: collapse;
 }
 
-#wtPanel .wt-alt {
-  flex: 0 0 auto;
-  padding: 10px 16px 16px;
-  border-top: 1px solid #1e3a50;
+#wtPanel .wt-tablo thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: #0d1520;
-}
-
-#wtPanel .wt-alt-aksiyon {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-#wtPanel .wt-alt #wtTestSonuc {
-  min-height: 1.2em;
-  margin-top: 6px;
-}
-
-#wtPanel .wt-alt #wtTestNo {
-  width: 160px;
-}
-
-#wtPanel .wt-test-no-satir {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-  margin: 8px 0 4px;
-}
-
-#wtPanel .wt-test-no-ipucu {
-  min-height: 1.1em;
-  margin: 0 0 8px;
+  box-shadow: 0 1px 0 #1e3a50;
+  text-align: left;
+  padding: 6px 4px;
   font-size: 12px;
   color: #90a4ae;
 }
 
+#wtPanel .wt-tablo td {
+  padding: 4px;
+  border-top: 1px solid #1e3a50;
+  vertical-align: top;
+}
+
+#wtPanel .wt-alt-bar {
+  border-top: 1px solid #1e3a50;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
+#wtPanel .wt-alt-bar button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+#wtPanel .wt-test-no-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: #90a4ae;
+}
+
+#wtPanel .wt-test-no-inline #wtTestNo {
+  width: 120px;
+}
+
+#wtPanel .wt-kendime-etiket {
+  font-size: 11px;
+  color: #78909c;
+}
+
 #wtPanel .wt-test-atla-label {
-  display: block;
-  margin: 6px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
   color: #ffb74d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#wtPanel .wt-tek-satir-durum {
+  flex: 1 1 8rem;
+  min-width: 0;
+  max-width: 28vw;
+  font-size: 11px;
+  color: #90a4ae;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 480px) {
-  #wtPanel .wt-kutu {
+  #wtPanel:not([hidden]) {
+    height: calc(100vh - 8rem);
     max-height: calc(100vh - 8rem);
+  }
+
+  #wtPanel .wt-kutu {
     border-radius: 6px;
   }
 
-  #wtPanel .wt-ust,
+  #wtPanel .wt-ust-bar,
+  #wtPanel .wt-mesaj-alt-bar,
   #wtPanel .wt-filtre,
-  #wtPanel .wt-tablo-sarici,
-  #wtPanel .wt-alt {
-    padding-left: 12px;
-    padding-right: 12px;
+  #wtPanel .wt-alt-bar,
+  #wtPanel .wt-mesaj-sarici,
+  #wtPanel .wt-tablo-sarici {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  #wtPanel .wt-ozet,
+  #wtPanel .wt-kampanya-durum,
+  #wtPanel .wt-tek-satir-durum {
+    max-width: 100%;
   }
 
   #wtPanel .wt-filtre #wtAra,
   #wtPanel .wt-filtre #wtDurum {
-    margin-left: 0;
-    margin-top: 6px;
-    display: block;
     width: 100%;
     box-sizing: border-box;
   }

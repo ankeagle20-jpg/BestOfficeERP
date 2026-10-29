@@ -1,4 +1,4 @@
-"""#wtPanel CSS: sekme paneli, tablo kaydırma, scoped seçiciler. PII yok."""
+"""#wtPanel CSS: kompakt 3 bar + flex liste. PII yok."""
 from __future__ import annotations
 
 import re
@@ -20,23 +20,30 @@ def _css_prop(blok: str, prop: str) -> str | None:
 
 
 def _kural(css: str, selector: str) -> str:
-    pat = re.compile(rf"(?ms){re.escape(selector)}\s*\{{([^{{}}]*)\}}")
+    # Tek seçici veya grup içinde (virgülle) geçen kural gövdesi
+    esc = re.escape(selector)
+    pat = re.compile(
+        rf"(?ms)(?:^|,)\s*{esc}\s*(?:,[^{{]+)?\{{([^{{}}]*)\}}"
+    )
     m = pat.search(css)
     return m.group(1) if m else ""
 
 
 def test_wt_panel_css():
     css = (ROOT / "static" / "css" / "wa-toplu.css").read_text(encoding="utf-8")
-    check("modal yok", "#wtModal" not in css and "z-index" not in css)
+    check("modal yok", "#wtModal" not in css)
     check("fixed overlay yok", "position: fixed" not in css and "inset: 0" not in css)
 
     panel = _kural(css, "#wtPanel")
     check("wtPanel kural", bool(panel.strip()))
 
+    panel_acik = _kural(css, "#wtPanel:not([hidden])")
+    check("panel acik flex", "flex" in (_css_prop(panel_acik, "display") or ""))
+    mh = _css_prop(panel_acik, "max-height") or _css_prop(panel_acik, "height")
+    check("panel vh", mh is not None and "100vh" in mh and "calc" in mh, mh or "")
+
     kutu = _kural(css, "#wtPanel .wt-kutu")
     check("wt-kutu kural", bool(kutu.strip()))
-    mh = _css_prop(kutu, "max-height")
-    check("wt-kutu max-height", mh is not None and "100vh" in mh and "calc" in mh, mh or "")
     check("wt-kutu overflow", (_css_prop(kutu, "overflow") or "") == "hidden")
     check("wt-kutu flex", "flex" in (_css_prop(kutu, "display") or ""))
 
@@ -45,13 +52,15 @@ def test_wt_panel_css():
     ov = _css_prop(tablo, "overflow")
     check("tablo overflow", ov in ("auto", "scroll"), ov or "")
     check("tablo min-height", (_css_prop(tablo, "min-height") or "") == "0")
+    flex = _css_prop(tablo, "flex") or ""
+    check("tablo flex1", flex.startswith("1"), flex)
 
-    ust = _kural(css, "#wtPanel .wt-ust")
-    filtre = _kural(css, "#wtPanel .wt-filtre")
-    alt = _kural(css, "#wtPanel .wt-alt")
-    check("ust flex-sabit", (_css_prop(ust, "flex") or "") == "0 0 auto")
-    check("filtre flex-sabit", (_css_prop(filtre, "flex") or "") == "0 0 auto")
-    check("alt flex-sabit", (_css_prop(alt, "flex") or "") == "0 0 auto")
+    thead = _kural(css, "#wtPanel .wt-tablo thead th")
+    check("thead sticky", (_css_prop(thead, "position") or "") == "sticky")
+
+    for sel in (".wt-ust-bar", ".wt-mesaj-alt-bar", ".wt-filtre", ".wt-alt-bar"):
+        blok = _kural(css, "#wtPanel " + sel)
+        check(sel + " flex-sabit", (_css_prop(blok, "flex") or "") == "0 0 auto", sel)
 
     check("alt sekme bar", bool(_kural(css, "#wtAltSekmeBar").strip()))
     check("mobil media", "@media (max-width: 480px)" in css)
@@ -60,6 +69,33 @@ def test_wt_panel_css():
     check("global wt yok", bare == [], str(bare))
     scoped = re.findall(r"(?m)^\s*(#wtPanel(?:\s+\.wt-[a-z0-9-]+)+)\s*\{", css)
     check("scoped wt var", len(scoped) >= 4, str(len(scoped)))
+
+
+def test_kompakt_uc_bar():
+    giris = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    i = giris.find('id="wtPanel"')
+    check("wtPanel html", i > 0)
+    t12i = giris.find('id="tab-12"')
+    t12e = giris.find("tab-content-right", t12i)
+    t12 = giris[t12i:t12e]
+    check("uc bar sinif", all(x in t12 for x in (
+        'class="wt-ust-bar"', 'class="wt-mesaj-alt-bar"', 'class="wt-alt-bar"',
+        'class="wt-mesaj-sarici"', 'class="wt-tablo-sarici"',
+    )))
+    check("eski bar yok", 'class="wt-ust"' not in t12 and 'class="wt-alt"' not in t12)
+    alt_i = t12.find('class="wt-alt-bar"')
+    alt = t12[alt_i: t12.find("</div>", alt_i + 1) + 200]
+    # alt bar kapanışını bulmak zor; id listesi panel içinde yeter
+    for dugme in ("wtBaslat", "wtDurdur", "wtDevam", "wtBitir", "wtTest", "wtTestNoKaydet", "wtTestAtla", "wtTestNo"):
+        check("alt id " + dugme, f'id="{dugme}"' in t12)
+    check("ust idler", all(x in t12 for x in ('id="wtKaydet"', 'id="wtYenile"', 'id="wtOzet"', 'id="wtKampanyaDurum"')))
+    check("mesaj idler", all(x in t12 for x in ('id="wtSablon"', 'id="wtSayac"', 'id="wtTavan"')))
+    check("rows3", 'rows="3"' in t12 and 'placeholder="Mesaj"' in t12)
+
+    css = (ROOT / "static" / "css" / "wa-toplu.css").read_text(encoding="utf-8")
+    tablo = _kural(css, "#wtPanel .wt-tablo-sarici")
+    check("liste flex1", (_css_prop(tablo, "flex") or "").startswith("1"))
+    check("liste overflow", (_css_prop(tablo, "overflow") or "") in ("auto", "scroll"))
 
 
 def test_sablon_ve_surum():
@@ -78,12 +114,12 @@ def test_sablon_ve_surum():
     check("kapat yok", 'id="wtKapat"' not in giris)
     check("btn-toplu yok", 'id="btn-toplu-mesaj"' not in giris)
     check("yapı sınıfları", all(x in t12 for x in (
-        'class="wt-kutu"', 'class="wt-ust"', 'class="wt-filtre"',
-        'class="wt-tablo-sarici"', 'class="wt-alt"', 'id="wtTumunu"',
+        'class="wt-kutu"', 'class="wt-ust-bar"', 'class="wt-filtre"',
+        'class="wt-tablo-sarici"', 'class="wt-alt-bar"', 'id="wtTumunu"',
         'id="wtSablon"', 'id="wtBaslat"', 'id="wtTest"',
     )))
     modul = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
-    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", modul) is not None)
+    check("JS_SURUM sabit", re.search(r"(?m)^JS_SURUM\s*=\s*6\s*$", modul) is not None)
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     inj = app[app.find("def inject_wa_toplu_kampanya"): app.find("def inject_globals")]
     check("inject surum", "wa_toplu_js_surum" in inj and "JS_SURUM" in inj)

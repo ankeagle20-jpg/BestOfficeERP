@@ -38,10 +38,12 @@ def test_taslak_neden_ve_kaydet_ui():
     check("once id", "Önce şablonu kaydedin" in js)
     check("kaydet ok", "Şablon kaydedildi" in js)
     check("kaydet fn", "function sablonKaydet" in js)
+    check("ozet kompakt", 'ozet.textContent = "Seçili: "' in js and "ozet.title" in js)
+    check("durum title", "function durumSatirYaz" in js)
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     check("wtKaydet", 'id="wtKaydet"' in html and "Şablonu kaydet" in html)
     check("durum satir", 'id="wtKampanyaDurum"' in html)
-    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")))
+    check("JS_SURUM", re.search(r"(?m)^JS_SURUM\s*=\s*6\s*$", (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")))
 
 
 def test_taslak_gecersiz_ve_durum():

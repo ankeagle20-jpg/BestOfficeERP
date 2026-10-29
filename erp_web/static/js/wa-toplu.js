@@ -127,12 +127,19 @@
       return !!(testAtla && testAtla.checked);
     }
 
+    function durumSatirYaz(el, metin) {
+      if (!el) return;
+      var m = metin || "";
+      el.textContent = m;
+      el.title = m;
+    }
+
     function testNoIpucuYaz() {
       if (!testNoIpucu) return;
       if (kayitliTestNo) {
-        testNoIpucu.textContent = "Kayıtlı test numarası kullanılıyor";
+        durumSatirYaz(testNoIpucu, "Kayıtlı test numarası kullanılıyor");
       } else {
-        testNoIpucu.textContent = "Kayıtlı numara yok — boşsa test için numara girin (ofis/elle)";
+        durumSatirYaz(testNoIpucu, "Kayıtlı numara yok — boşsa test için numara girin (ofis/elle)");
       }
     }
 
@@ -151,22 +158,22 @@
 
     function testNoKaydet() {
       var ham = testNo ? testNo.value : "";
-      if (testSonuc) testSonuc.textContent = "";
+      durumSatirYaz(testSonuc, "");
       return post("/whatsapp/api/toplu-test-no", { telefon: ham }).then(function (r) {
         if (!r.govde || !r.govde.ok) {
           if (testSonuc) {
-            testSonuc.textContent = (r.govde && r.govde.neden === "gecersiz")
+            durumSatirYaz(testSonuc, (r.govde && r.govde.neden === "gecersiz")
               ? "Geçersiz numara (05xx / 5xx / +90)"
-              : "Numara kaydedilemedi";
+              : "Numara kaydedilemedi");
           }
           return;
         }
         kayitliTestNo = String(r.govde.telefon || "");
         if (testNo) testNo.value = kayitliTestNo;
         testNoIpucuYaz();
-        if (testSonuc) testSonuc.textContent = "Test numarası kaydedildi";
+        durumSatirYaz(testSonuc, "Test numarası kaydedildi");
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
@@ -202,10 +209,11 @@
       if (kampanyaDurum === "calisiyor" || kampanyaDurum === "durduruldu") {
         var etiket = kampanyaDurum === "calisiyor" ? "çalışıyor" : "durduruldu";
         // durumYukle yalnız bekleyen verir; X/Y yok — yeni uç yok
-        el.textContent = "Açık kampanya: " + etiket + ", bekleyen " + Number(bekleyenSayi || 0);
+        var metin = "Açık kampanya: " + etiket + ", bekleyen " + Number(bekleyenSayi || 0);
+        durumSatirYaz(el, metin);
         el.hidden = false;
       } else {
-        el.textContent = "";
+        durumSatirYaz(el, "");
         el.hidden = true;
       }
     }
@@ -214,8 +222,8 @@
       var o = hesap();
       if (ozet) {
         var sure = o.sure_metin || wtSureMetin(o);
-        ozet.textContent = "Seçili: " + o.secili + " · Alıcı: " + o.alici +
-          (sure ? (" · " + sure) : "");
+        ozet.textContent = "Seçili: " + o.secili + " · Alıcı: " + o.alici;
+        ozet.title = sure || "";
       }
       if (tumunu) {
         var gor = satirlar.filter(function (s) { return gorunurMu(s) && !s.sebep; });
@@ -278,7 +286,7 @@
         listeYuklendi = true;
         ciz();
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "Liste alınamadı";
+        durumSatirYaz(testSonuc, "Liste alınamadı");
       }).then(function () {
         listeYukleniyor = false;
       });
@@ -304,7 +312,7 @@
         kampanyaDurumYaz();
         baslatDurumu();
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
@@ -354,20 +362,20 @@
     }
 
     function taslakHataYaz(neden) {
-      if (testSonuc) testSonuc.textContent = wtTaslakNedenMetin(neden);
+      durumSatirYaz(testSonuc, wtTaslakNedenMetin(neden));
     }
 
     function sablonKaydet() {
-      if (testSonuc) testSonuc.textContent = "";
+      durumSatirYaz(testSonuc, "");
       return taslak().then(function (r) {
         if (!r || !r.ok) {
           taslakHataYaz(r && r.neden);
           return r;
         }
-        if (testSonuc) testSonuc.textContent = "Şablon kaydedildi";
+        durumSatirYaz(testSonuc, "Şablon kaydedildi");
         return r;
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
@@ -377,14 +385,14 @@
 
     function testGonder() {
       var no = kayitliTestNo || (testNo ? testNo.value : "");
-      if (testSonuc) testSonuc.textContent = "";
+      durumSatirYaz(testSonuc, "");
       taslak().then(function (r) {
         if (!r || !r.ok) {
           taslakHataYaz(r && r.neden);
           return;
         }
         if (!kampanyaId) {
-          if (testSonuc) testSonuc.textContent = "Önce şablonu kaydedin";
+          durumSatirYaz(testSonuc, "Önce şablonu kaydedin");
           return;
         }
         return post("/whatsapp/api/toplu-test", { id: kampanyaId, telefon: no });
@@ -394,21 +402,21 @@
         if (r.govde && r.govde.test_ok) {
           testOk = true;
           baslatDurumu();
-          if (testSonuc) testSonuc.textContent = "Test sonucu: gonderildi";
+          durumSatirYaz(testSonuc, "Test sonucu: gonderildi");
           return;
         }
         if (r.govde && r.govde.anahtar && d === "kuyrukta") return yokla(r.govde.anahtar, 0);
         testOk = false;
         baslatDurumu();
-        if (testSonuc) testSonuc.textContent = "Test sonucu: " + (d || (r.govde && r.govde.neden) || "hata");
+        durumSatirYaz(testSonuc, "Test sonucu: " + (d || (r.govde && r.govde.neden) || "hata"));
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
     function yokla(anahtar, deneme) {
       if (deneme > 8) {
-        if (testSonuc) testSonuc.textContent = "Test sonucu: bekleniyor";
+        durumSatirYaz(testSonuc, "Test sonucu: bekleniyor");
         return;
       }
       var url = "/whatsapp/api/toplu-test-sonuc?id=" + encodeURIComponent(kampanyaId) +
@@ -417,18 +425,18 @@
         if (j && j.test_ok) {
           testOk = true;
           baslatDurumu();
-          if (testSonuc) testSonuc.textContent = "Test sonucu: gonderildi";
+          durumSatirYaz(testSonuc, "Test sonucu: gonderildi");
           return;
         }
         if (j && j.durum && j.durum !== "kuyrukta") {
           testOk = false;
           baslatDurumu();
-          if (testSonuc) testSonuc.textContent = "Test sonucu: " + j.durum;
+          durumSatirYaz(testSonuc, "Test sonucu: " + j.durum);
           return;
         }
         setTimeout(function () { yokla(anahtar, deneme + 1); }, 2000);
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
@@ -451,16 +459,16 @@
       post("/whatsapp/api/toplu-baslat", govde).then(function (r) {
         if (!r) return;
         if (testSonuc) {
-          testSonuc.textContent = r.govde && r.govde.ok
+          durumSatirYaz(testSonuc, r.govde && r.govde.ok
             ? ("Alıcı: " + Number(r.govde.alici || 0) + " · Atılan: " + Number(r.govde.atilan || 0)
               + (r.govde.test_atlandi ? " · test atlandı" : ""))
-            : "İşlem olmadı";
+            : "İşlem olmadı");
         }
         if (testAtla) testAtla.checked = false;
         durumYukle();
         baslatDurumu();
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 
@@ -474,10 +482,10 @@
     function komut(url) {
       if (!kampanyaId) return;
       post(url, { id: kampanyaId }).then(function (r) {
-        if (testSonuc) testSonuc.textContent = r.govde && r.govde.ok ? (r.govde.durum || "tamam") : "İşlem olmadı";
+        durumSatirYaz(testSonuc, r.govde && r.govde.ok ? (r.govde.durum || "tamam") : "İşlem olmadı");
         durumYukle();
       }).catch(function () {
-        if (testSonuc) testSonuc.textContent = "İstek başarısız";
+        durumSatirYaz(testSonuc, "İstek başarısız");
       });
     }
 

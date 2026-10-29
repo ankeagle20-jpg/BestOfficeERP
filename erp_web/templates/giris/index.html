@@ -4301,27 +4301,25 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         </div>
         <div id="wtPanel" class="wt-panel" hidden>
           <div class="wt-kutu">
-            <div class="wt-ust">
-              <div class="wt-baslik">
-                <strong>Toplu mesaj</strong>
-                <span class="wt-baslik-aksiyon">
-                  <button type="button" id="wtKaydet">Şablonu kaydet</button>
-                  <button type="button" id="wtYenile">Yenile</button>
-                </span>
-              </div>
-              <p id="wtKampanyaDurum" class="wt-kampanya-durum" hidden></p>
-              <p id="wtOzet"></p>
-              <label>Mesaj
-                <textarea id="wtSablon" maxlength="1000" rows="4"></textarea>
-              </label>
-              <div><span id="wtSayac">0/1000</span></div>
-              <div class="wt-sablon-btns">
+            <div class="wt-ust-bar">
+              <strong class="wt-baslik-metin">Toplu mesaj</strong>
+              <button type="button" id="wtKaydet">Şablonu kaydet</button>
+              <button type="button" id="wtYenile">Yenile</button>
+              <span id="wtOzet" class="wt-ozet"></span>
+              <span id="wtKampanyaDurum" class="wt-kampanya-durum" hidden></span>
+            </div>
+            <div class="wt-mesaj-sarici">
+              <textarea id="wtSablon" maxlength="1000" rows="3" placeholder="Mesaj" aria-label="Mesaj"></textarea>
+            </div>
+            <div class="wt-mesaj-alt-bar">
+              <span id="wtSayac" class="wt-sayac">0/1000</span>
+              <span class="wt-sablon-btns">
                 <button type="button" data-wt-sablon="bayram">Bayram</button>
                 <button type="button" data-wt-sablon="tebrik">Tebrik</button>
                 <button type="button" data-wt-sablon="duyuru">Genel duyuru</button>
-              </div>
-              <label>Günlük tavan
-                <input id="wtTavan" type="number" min="50" max="250" value="150" style="width:80px">
+              </span>
+              <label class="wt-tavan-inline">Günlük tavan
+                <input id="wtTavan" type="number" min="50" max="250" value="150">
               </label>
             </div>
             <div class="wt-filtre">
@@ -4344,28 +4342,26 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                 <tbody id="wtGovde"></tbody>
               </table>
             </div>
-            <div class="wt-alt">
-              <div class="wt-alt-aksiyon">
-                <button type="button" id="wtBaslat" disabled>Başlat</button>
-                <button type="button" id="wtDurdur">Durdur</button>
-                <button type="button" id="wtDevam">Devam</button>
-                <button type="button" id="wtBitir">Bitir</button>
-              </div>
-              <div class="wt-test-no-satir">
-                <label>Test numarası
-                  <input id="wtTestNo" type="tel" autocomplete="off" placeholder="05xx…">
-                </label>
-                <button type="button" id="wtTestNoKaydet">Kaydet</button>
-              </div>
-              <p id="wtTestNoIpucu" class="wt-test-no-ipucu"></p>
+            <div class="wt-alt-bar">
+              <button type="button" id="wtBaslat" disabled>Başlat</button>
+              <button type="button" id="wtDurdur">Durdur</button>
+              <button type="button" id="wtDevam">Devam</button>
+              <button type="button" id="wtBitir">Bitir</button>
+              <label class="wt-test-no-inline">Test numarası
+                <input id="wtTestNo" type="tel" autocomplete="off" placeholder="05xx…">
+              </label>
+              <button type="button" id="wtTestNoKaydet">Kaydet</button>
+              <span class="wt-kendime-etiket">Kendime test</span>
+              <button type="button" id="wtTest">Test gönder</button>
               <label class="wt-test-atla-label">
                 <input id="wtTestAtla" type="checkbox"> Test göndermeden başlat
               </label>
-              <button type="button" id="wtTest">Test gönder</button>
-              <p id="wtTestSonuc"></p>
+              <span id="wtTestNoIpucu" class="wt-tek-satir-durum"></span>
+              <span id="wtTestSonuc" class="wt-tek-satir-durum"></span>
             </div>
           </div>
         </div>
+
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wa-toplu.css', v=wa_toplu_js_surum) }}">
 <script src="{{ url_for('static', filename='js/wa-toplu.js', v=wa_toplu_js_surum) }}"></script>
 {% endif %}

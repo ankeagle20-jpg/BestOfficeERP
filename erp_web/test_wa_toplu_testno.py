@@ -107,7 +107,7 @@ def test_kaynak_ve_uc():
     src = (ROOT / "wa_kampanya.py").read_text(encoding="utf-8")
     check("ddl ayar", "CREATE TABLE IF NOT EXISTS wa_toplu_ayar" in src)
     check("ddl kolon", "ADD COLUMN IF NOT EXISTS test_atlandi" in src)
-    check("JS5", re.search(r"(?m)^JS_SURUM\s*=\s*5\s*$", src) is not None)
+    check("JS6", re.search(r"(?m)^JS_SURUM\s*=\s*6\s*$", src) is not None)
     rt = (ROOT / "routes" / "whatsapp_routes.py").read_text(encoding="utf-8")
     check("uc test-no", "/api/toplu-test-no" in rt and "test_telefon_kaydet" in rt)
     check("uc baslat atla", "test_atlandi" in rt and "baslat_istegi" in rt)
