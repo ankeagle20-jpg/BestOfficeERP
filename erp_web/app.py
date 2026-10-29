@@ -738,15 +738,17 @@ def inject_module_access():
 @app.context_processor
 def inject_wa_toplu_kampanya():
     acik = False
+    surum = 2
     try:
-        from wa_kampanya import bayrak_acik
+        from wa_kampanya import JS_SURUM, bayrak_acik
+        surum = int(JS_SURUM)
         rol = None
         if getattr(current_user, "is_authenticated", False):
             rol = getattr(current_user, "role", None)
         acik = bool(bayrak_acik() and rol == "admin")
     except Exception:
         acik = False
-    return {"wa_toplu_kampanya": acik}
+    return {"wa_toplu_kampanya": acik, "wa_toplu_js_surum": surum}
 
 
 @app.context_processor

@@ -1,0 +1,147 @@
+/* Yalnız #wtModal — layout .header z-index:1000 üstü */
+#wtModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+#wtModal .wt-kutu {
+  background: #0d1520;
+  color: #e8f1ff;
+  width: min(960px, 100%);
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 0;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid #1e3a50;
+}
+
+#wtModal .wt-ust {
+  flex: 0 0 auto;
+  padding: 16px 16px 8px;
+  border-bottom: 1px solid #1e3a50;
+  background: #0d1520;
+}
+
+#wtModal .wt-baslik {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#wtModal .wt-ust #wtOzet {
+  min-height: 1.4em;
+  margin: 6px 0;
+}
+
+#wtModal .wt-ust textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#wtModal .wt-sablon-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+#wtModal .wt-ust label[for],
+#wtModal .wt-ust > label {
+  display: block;
+  margin: 6px 0;
+}
+
+#wtModal .wt-filtre {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  background: #0d1520;
+  border-bottom: 1px solid #1e3a50;
+}
+
+#wtModal .wt-filtre #wtAra {
+  margin-left: 8px;
+}
+
+#wtModal .wt-filtre #wtDurum {
+  margin-left: 8px;
+}
+
+#wtModal .wt-tablo-sarici {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#wtModal .wt-tablo {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#wtModal .wt-alt {
+  flex: 0 0 auto;
+  padding: 10px 16px 16px;
+  border-top: 1px solid #1e3a50;
+  background: #0d1520;
+}
+
+#wtModal .wt-alt-aksiyon {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+#wtModal .wt-alt #wtTestSonuc {
+  min-height: 1.2em;
+  margin-top: 6px;
+}
+
+#wtModal .wt-alt #wtTestNo {
+  width: 160px;
+}
+
+@media (max-width: 480px) {
+  #wtModal {
+    padding: 0.5rem;
+    align-items: stretch;
+  }
+
+  #wtModal .wt-kutu {
+    width: 100%;
+    max-height: calc(100vh - 1rem);
+    border-radius: 6px;
+  }
+
+  #wtModal .wt-ust,
+  #wtModal .wt-filtre,
+  #wtModal .wt-tablo-sarici,
+  #wtModal .wt-alt {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  #wtModal .wt-filtre #wtAra,
+  #wtModal .wt-filtre #wtDurum {
+    margin-left: 0;
+    margin-top: 6px;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
