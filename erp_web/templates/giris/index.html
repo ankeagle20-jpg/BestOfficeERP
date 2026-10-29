@@ -2944,11 +2944,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         <a href="/ayarlar" class="giris-btn-ayar" title="Sistem Ayarlar?" aria-label="Sistem Ayarlar?" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;margin-right:6px;border-radius:3px;background:#0f2744;color:#90caf9;text-decoration:none;font-size:16px;vertical-align:middle;"><i class="fa fa-cog" aria-hidden="true"></i></a>
         {% endif %}
         <button type="button" class="giris-btn-cogalt" onclick="girisMusteriCogalt()" title="Aynı bilgilerle form doldurulur; kayıt Kaydet ile yazılır"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
-{% if wa_toplu_kampanya %}
-        <button type="button" class="giris-btn-whatsapp" id="btn-toplu-mesaj" title="Toplu mesaj"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Toplu mesaj</button>
-        {% else %}
-        <button type="button" class="giris-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon ile WhatsApp’ta sohbet aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
-        {% endif %}
+<button type="button" class="giris-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon ile WhatsApp’ta sohbet aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
         <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>
         <button onclick="location.reload()">↺ Yenile</button>
     </div>
@@ -4209,6 +4205,14 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         </div>
         <div class="tab-content" id="tab-12">
     <div style="padding:16px;">
+{% if wa_toplu_kampanya %}
+        <div class="wt-alt-sekme-bar" id="wtAltSekmeBar" role="tablist">
+            <button type="button" class="wt-alt-sekme active" id="wtAltGecikme" data-wt-alt="gecikme" role="tab" aria-selected="true">Gecikme hatırlatma</button>
+            <button type="button" class="wt-alt-sekme" id="wtAltToplu" data-wt-alt="toplu" role="tab" aria-selected="false">Toplu mesaj</button>
+        </div>
+        <div id="wtPanelGecikme" class="wt-alt-panel" data-wt-alt-panel="gecikme">
+{% endif %}
+
         <h3 style="color:#e0f7fa;margin-bottom:12px;">
             WhatsApp - Gecikme Hatırlatma
         </h3>
@@ -4293,6 +4297,65 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                 Seçilenleri Gönder
             </button>
         </div>
+{% if wa_toplu_kampanya %}
+        </div>
+        <div id="wtPanel" class="wt-panel" hidden>
+          <div class="wt-kutu">
+            <div class="wt-ust">
+              <div class="wt-baslik">
+                <strong>Toplu mesaj</strong>
+                <button type="button" id="wtYenile">Yenile</button>
+              </div>
+              <p id="wtOzet"></p>
+              <label>Mesaj
+                <textarea id="wtSablon" maxlength="1000" rows="4"></textarea>
+              </label>
+              <div><span id="wtSayac">0/1000</span></div>
+              <div class="wt-sablon-btns">
+                <button type="button" data-wt-sablon="bayram">Bayram</button>
+                <button type="button" data-wt-sablon="tebrik">Tebrik</button>
+                <button type="button" data-wt-sablon="duyuru">Genel duyuru</button>
+              </div>
+              <label>Günlük tavan
+                <input id="wtTavan" type="number" min="50" max="250" value="150" style="width:80px">
+              </label>
+            </div>
+            <div class="wt-filtre">
+              <label><input id="wtTumunu" type="checkbox"> Tümünü seç</label>
+              <input id="wtAra" type="search" placeholder="Ara">
+              <select id="wtDurum" aria-label="Durum">
+                <option value="hepsi">Hepsi</option>
+                <option value="aktif">Aktif</option>
+                <option value="pasif">Pasif</option>
+              </select>
+            </div>
+            <div class="wt-tablo-sarici">
+              <table class="wt-tablo">
+                <thead>
+                  <tr>
+                    <th></th><th>Ad</th><th>Durum</th>
+                    <th>1. aday</th><th>2. aday</th><th>3. aday</th><th>4. aday</th>
+                  </tr>
+                </thead>
+                <tbody id="wtGovde"></tbody>
+              </table>
+            </div>
+            <div class="wt-alt">
+              <div class="wt-alt-aksiyon">
+                <button type="button" id="wtBaslat" disabled>Başlat</button>
+                <button type="button" id="wtDurdur">Durdur</button>
+                <button type="button" id="wtDevam">Devam</button>
+                <button type="button" id="wtBitir">Bitir</button>
+              </div>
+              <label>Kendime test <input id="wtTestNo" type="tel" autocomplete="off"></label>
+              <button type="button" id="wtTest">Test gönder</button>
+              <p id="wtTestSonuc"></p>
+            </div>
+          </div>
+        </div>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wa-toplu.css', v=wa_toplu_js_surum) }}">
+<script src="{{ url_for('static', filename='js/wa-toplu.js', v=wa_toplu_js_surum) }}"></script>
+{% endif %}
     </div>
 </div>
 
@@ -36464,62 +36527,5 @@ async function kiraBildirgesiWhatsApp() {
     </div>
   </div>
 </div>
-{% if wa_toplu_kampanya %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/wa-toplu.css', v=wa_toplu_js_surum) }}">
-<div id="wtModal" hidden>
-  <div class="wt-kutu">
-    <div class="wt-ust">
-      <div class="wt-baslik">
-        <strong>Toplu mesaj</strong>
-        <button type="button" id="wtKapat">Kapat</button>
-      </div>
-      <p id="wtOzet"></p>
-      <label>Mesaj
-        <textarea id="wtSablon" maxlength="1000" rows="4"></textarea>
-      </label>
-      <div><span id="wtSayac">0/1000</span></div>
-      <div class="wt-sablon-btns">
-        <button type="button" data-wt-sablon="bayram">Bayram</button>
-        <button type="button" data-wt-sablon="tebrik">Tebrik</button>
-        <button type="button" data-wt-sablon="duyuru">Genel duyuru</button>
-      </div>
-      <label>Günlük tavan
-        <input id="wtTavan" type="number" min="50" max="250" value="150" style="width:80px">
-      </label>
-    </div>
-    <div class="wt-filtre">
-      <label><input id="wtTumunu" type="checkbox"> Tümünü seç</label>
-      <input id="wtAra" type="search" placeholder="Ara">
-      <select id="wtDurum" aria-label="Durum">
-        <option value="hepsi">Hepsi</option>
-        <option value="aktif">Aktif</option>
-        <option value="pasif">Pasif</option>
-      </select>
-    </div>
-    <div class="wt-tablo-sarici">
-      <table class="wt-tablo">
-        <thead>
-          <tr>
-            <th></th><th>Ad</th><th>Durum</th>
-            <th>1. aday</th><th>2. aday</th><th>3. aday</th><th>4. aday</th>
-          </tr>
-        </thead>
-        <tbody id="wtGovde"></tbody>
-      </table>
-    </div>
-    <div class="wt-alt">
-      <div class="wt-alt-aksiyon">
-        <button type="button" id="wtBaslat" disabled>Başlat</button>
-        <button type="button" id="wtDurdur">Durdur</button>
-        <button type="button" id="wtDevam">Devam</button>
-        <button type="button" id="wtBitir">Bitir</button>
-      </div>
-      <label>Kendime test <input id="wtTestNo" type="tel" autocomplete="off"></label>
-      <button type="button" id="wtTest">Test gönder</button>
-      <p id="wtTestSonuc"></p>
-    </div>
-  </div>
-</div>
-<script src="{{ url_for('static', filename='js/wa-toplu.js', v=wa_toplu_js_surum) }}"></script>
-{% endif %}
+
 {% endblock %}

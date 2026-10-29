@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Europe/Istanbul")
 BAYRAK = "WA_TOPLU_KAMPANYA"
-JS_SURUM = 2
+JS_SURUM = 3
 SABLON_MAX = 1000
 TAVAN_MIN = 50
 TAVAN_MAX = 250

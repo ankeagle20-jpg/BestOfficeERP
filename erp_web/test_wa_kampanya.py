@@ -381,7 +381,14 @@ def test_giris_butonu_ayni():
     kart = modul[modul.find("def kart_telefon"): modul.find("def _kuyruk_bir")]
     check("giris fn", "function girisMusteriWhatsAppAc" in giris and "wa-toplu.js" in giris and "wa_toplu_kampanya" in giris)
     check("gecikme uc", "function whatsappSeciliGonder" in giris and "/whatsapp/api/gonder" in giris)
-    check("liste buton", 'id="btn-toplu-mesaj"' in giris and "wa_toplu_kampanya" in giris and "wa_toplu_kampanya" in liste and "wt-haric" in liste)
+    check(
+        "liste buton",
+        'id="btn-toplu-mesaj"' not in giris
+        and 'id="wtPanel"' in giris
+        and "wa_toplu_kampanya" in giris
+        and "wa_toplu_kampanya" in liste
+        and "wt-haric" in liste,
+    )
     check("tel2 yok", "tel2" not in kart and "whatsapp_geciken_haric" not in modul)
     check("js metin yok", "GIZLI_METIN" not in js and "data-phone" not in js)
     i = app.find('id="wa_toplu_kampanya"')
@@ -616,9 +623,8 @@ def test_baslik_dugme():
     bas = giris.find('<div class="giris-buttons">')
     cubuk = giris.find('id="giris-secili-musteri-toolbar"')
     baslik = giris[bas:cubuk]
-    kollar = baslik.split("{% else %}")
-    check("baslik acik", len(kollar) == 2 and 'id="btn-toplu-mesaj"' in kollar[0] and "girisMusteriWhatsAppAc" not in kollar[0])
-    check("baslik kapali", "girisMusteriWhatsAppAc()" in kollar[1])
+    check("baslik tekli", 'id="btn-toplu-mesaj"' not in baslik and "girisMusteriWhatsAppAc()" in baslik)
+    check("baslik if yok", "{% if wa_toplu_kampanya %}" not in baslik)
     form_i = giris.find("musteri-form-btn-whatsapp", cubuk)
     arac = giris[cubuk:form_i]
     check(

@@ -44,10 +44,14 @@
 
   function bagla() {
     haricBagla();
-    var modal = document.getElementById("wtModal");
-    var acBtn = document.getElementById("btn-toplu-mesaj");
-    if (!modal || !acBtn) return;
+    var panel = document.getElementById("wtPanel");
+    if (!panel) return;
+    if (panel.getAttribute("data-wt-bagli") === "1") return;
+    panel.setAttribute("data-wt-bagli", "1");
 
+    var panelGecikme = document.getElementById("wtPanelGecikme");
+    var btnGecikme = document.getElementById("wtAltGecikme");
+    var btnToplu = document.getElementById("wtAltToplu");
     var sablon = document.getElementById("wtSablon");
     var sayac = document.getElementById("wtSayac");
     var tavan = document.getElementById("wtTavan");
@@ -65,6 +69,8 @@
     var kampanyaDurum = "";
     var bekleyenSayi = 0;
     var testOk = false;
+    var listeYuklendi = false;
+    var listeYukleniyor = false;
 
     function kac() {
       if (sayac && sablon) sayac.textContent = String((sablon.value || "").length) + "/1000";
@@ -161,14 +167,20 @@
       ozetYaz();
     }
 
-    function listeYukle() {
+    function listeYukle(zorla) {
+      if (listeYukleniyor) return;
+      if (listeYuklendi && !zorla) return;
+      listeYukleniyor = true;
       fetch("/whatsapp/api/toplu-liste", { cache: "no-store" }).then(function (r) {
         return r.json();
       }).then(function (j) {
         satirlar = (j && j.satirlar) || [];
+        listeYuklendi = true;
         ciz();
       }).catch(function () {
         if (testSonuc) testSonuc.textContent = "Liste alınamadı";
+      }).then(function () {
+        listeYukleniyor = false;
       });
     }
 
@@ -194,17 +206,23 @@
       });
     }
 
-    function ac() {
-      modal.hidden = false;
-      modal.style.display = "flex";
-      kac();
-      durumYukle();
-      listeYukle();
-    }
-
-    function kapat() {
-      modal.hidden = true;
-      modal.style.display = "none";
+    function altSekmeAktif(ad) {
+      var toplu = ad === "toplu";
+      if (btnGecikme) {
+        btnGecikme.classList.toggle("active", !toplu);
+        btnGecikme.setAttribute("aria-selected", toplu ? "false" : "true");
+      }
+      if (btnToplu) {
+        btnToplu.classList.toggle("active", toplu);
+        btnToplu.setAttribute("aria-selected", toplu ? "true" : "false");
+      }
+      if (panelGecikme) panelGecikme.hidden = !!toplu;
+      panel.hidden = !toplu;
+      if (toplu) {
+        kac();
+        durumYukle();
+        listeYukle(false);
+      }
     }
 
     function testiDusur() {
@@ -348,9 +366,13 @@
         }
       });
     });
-    acBtn.addEventListener("click", ac);
-    var kapatBtn = document.getElementById("wtKapat");
-    if (kapatBtn) kapatBtn.addEventListener("click", kapat);
+    if (btnGecikme) btnGecikme.addEventListener("click", function () { altSekmeAktif("gecikme"); });
+    if (btnToplu) btnToplu.addEventListener("click", function () { altSekmeAktif("toplu"); });
+    var yenileBtn = document.getElementById("wtYenile");
+    if (yenileBtn) yenileBtn.addEventListener("click", function () {
+      durumYukle();
+      listeYukle(true);
+    });
     var testBtn = document.getElementById("wtTest");
     if (testBtn) testBtn.addEventListener("click", testGonder);
     if (baslat) baslat.addEventListener("click", baslatKomut);
