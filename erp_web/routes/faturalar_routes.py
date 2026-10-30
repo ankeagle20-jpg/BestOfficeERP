@@ -6793,8 +6793,8 @@ def _tahsilat_rapor_dataset_from_request():
 
     date_mode:
     - Tahsilat Makbuzu AÇIK → created_at (Yıllık ezilir)
-    - Makbuz KAPALI + Yıllık AÇIK (senaryo≠0) → donem_kapsama
-    - Makbuz KAPALI + Yıllık KAPALI (senaryo=0) → tahsilat_tarihi
+    - Makbuz KAPALI + Yıllık AÇIK (senaryo=1) → donem_kapsama
+    - Makbuz KAPALI + Yıllık KAPALI / varsayılan (senaryo=0) → tahsilat_tarihi
     """
     today = date.today()
     bas_s = (request.args.get("baslangic") or "").strip()
@@ -6819,7 +6819,8 @@ def _tahsilat_rapor_dataset_from_request():
         d1 = today
         yil = d0.year
 
-    senaryo = str(request.args.get("senaryo", "1") or "1").strip()
+    # Varsayılan: tahsilat (makbuz) tarihi. Dönem kapsama yalnız senaryo=1 (Yıllık) ile.
+    senaryo = str(request.args.get("senaryo", "0") or "0").strip()
     _mm_raw = str(request.args.get("sadece_manuel_makbuz") or "").strip().lower()
     sadece_manuel_makbuz = _mm_raw in ("1", "true", "yes", "on")
     if sadece_manuel_makbuz:
@@ -10920,7 +10921,12 @@ def tahsilat_sil():
 @bp.route("/api/tahsilat-raporu")
 @faturalar_gerekli
 def api_tahsilat_raporu():
-    """Tahsilat makbuzları: tarih aralığına göre listesi (giriş Tahsilat / Rapor sekmesi). musteri_id ile sadece o cari."""
+    """Tahsilat makbuzları: tahsilat_tarihi aralığına göre (Giriş / Sözleşme rapor).
+
+    Varsayılan: baslangic ≤ tahsilat_tarihi ≤ bitis (gün dahil).
+    senaryo=1 → dönem kapsama (AYLIK_TAH marker ayı aralıkta; Faturalar «Yıllık» ile aynı).
+    Açıklama/dağıtım sütunu aciklama marker'larından gelir; tutar = makbuz tutarı (çift sayım yok).
+    """
     _ensure_tahsil_eden_column()
     bugun = date.today()
     bas_raw = (request.args.get("baslangic") or "").strip()
@@ -10936,19 +10942,15 @@ def api_tahsilat_raporu():
     if bas > bit:
         bas, bit = bit, bas
     mid = _opt_customer_id(request.args.get("musteri_id")) or 0
-    # Rapor kuralı:
-    # - Marker'lı kayıtta hem marker ay aralığı hem de fiili tahsilat_tarihi aralığı kabul edilir
-    #   (elle kaydettiğim bugünkü makbuzlar marker ayı eski olsa da raporda görünmeli).
-    # - Marker'sız kayıtta tahsilat_tarihi aralığı esas alınır.
-    wh = ["""(
+    senaryo = str(request.args.get("senaryo", "0") or "0").strip()
+    donem_mod = senaryo != "0"
+
+    if donem_mod:
+        # Dönem kapsama: marker ayı aralıkta VEYA markersızda tahsilat_tarihi aralıkta
+        wh = ["""(
             (
-                COALESCE(t.aciklama, '') LIKE '%%|AYLIK_TAH|%%'
-                AND (
-                    (
-                        t.tahsilat_tarihi::date >= %s::date
-                        AND t.tahsilat_tarihi::date <= %s::date
-                    )
-                    OR EXISTS (
+                COALESCE(t.aciklama, '') ~ E'\\|AYLIK_TAH\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|'
+                AND EXISTS (
                     SELECT 1
                     FROM regexp_matches(
                         COALESCE(t.aciklama, ''),
@@ -10958,120 +10960,43 @@ def api_tahsilat_raporu():
                     WHERE (mm[1])::date >= %s::date
                       AND (mm[1])::date <= %s::date
                 )
-                )
             )
-            OR
-            (
-                COALESCE(t.aciklama, '') NOT LIKE '%%|AYLIK_TAH|%%'
+            OR (
+                NOT (COALESCE(t.aciklama, '') ~ E'\\|AYLIK_TAH\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|')
                 AND t.tahsilat_tarihi::date >= %s::date
                 AND t.tahsilat_tarihi::date <= %s::date
             )
-        )""",
-    ]
-    params = [bas, bit, bas, bit, bas, bit]
+        )"""]
+        params = [bas, bit, bas, bit]
+    else:
+        # Varsayılan: yalnız makbuz / tahsilat tarihi
+        wh = [
+            "t.tahsilat_tarihi::date >= %s::date",
+            "t.tahsilat_tarihi::date <= %s::date",
+        ]
+        params = [bas, bit]
     if mid > 0:
         wh.insert(0, "(t.musteri_id = %s OR t.customer_id = %s)")
         params = [mid, mid] + params
-    rows = fetch_all(
-        f"""
+    # f-string kullanma: wh içinde {4} regex grupları var
+    _sql = (
+        """
         SELECT t.id, t.fatura_id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi,
                t.aciklama, t.tahsil_eden,
                COALESCE(t.customer_id, t.musteri_id) AS cari_id,
                COALESCE(NULLIF(TRIM(c.name), ''), '—') AS musteri_adi,
-               COALESCE(
-                   NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date,
-                   t.tahsilat_tarihi::date
-               ) AS rapor_tarihi
+               t.tahsilat_tarihi::date AS rapor_tarihi
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
-        WHERE {" AND ".join(wh)}
-        ORDER BY rapor_tarihi DESC NULLS LAST, t.id DESC
-        """,
-        tuple(params),
+        WHERE """
+        + " AND ".join(wh)
+        + """
+        ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
+        """
     )
-    # Sözleşme/Aylık Tutarlar gridinde görünmeyen aylar rapora düşmesin:
-    # marker'lı kayıtlar yalnızca cache.payload.aylar içindeki yıl-ay anahtarlarıyla eşleşirse gösterilir.
-    visible_ym = None  # None => cache yok/okunamadı, düşürme yapma.
-    visible_tutar_by_ym = {}
-    if mid > 0:
-        try:
-            cache_row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
-            payload_raw = (cache_row or {}).get("payload")
-            if payload_raw:
-                payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
-                aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
-                if isinstance(aylar, list):
-                    s = set()
-                    for a in aylar:
-                        if not isinstance(a, dict):
-                            continue
-                        try:
-                            yy = int(a.get("yil"))
-                            mm = int(a.get("ay"))
-                        except (TypeError, ValueError):
-                            continue
-                        if 1 <= mm <= 12 and 1900 <= yy <= 2200:
-                            key = f"{yy:04d}-{mm:02d}"
-                            s.add(key)
-                            try:
-                                tv = float(a.get("tutar_kdv_dahil"))
-                                if tv > 0:
-                                    visible_tutar_by_ym[key] = round(tv, 2)
-                            except (TypeError, ValueError):
-                                pass
-                    visible_ym = s
-        except Exception:
-            visible_ym = None
+    rows = fetch_all(_sql, tuple(params))
 
-    filtered_rows = []
-    for r in (rows or []):
-        ac = str((r or {}).get("aciklama") or "")
-        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2})-[0-9]{2}\|", ac)
-        pay_tokens = re.findall(r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|", ac)
-        if marker_isos and isinstance(visible_ym, set):
-            # Marker'lı kayıt: görünür ayda değilse normalde düşer;
-            # ancak fiili tahsilat tarihi seçili aralıktaysa (elle bugünden kayıt) raporda kalsın.
-            if not any(ym in visible_ym for ym in marker_isos):
-                td = (r or {}).get("tahsilat_tarihi")
-                td_ok = False
-                if hasattr(td, "year") and hasattr(td, "month") and hasattr(td, "day"):
-                    try:
-                        td_ok = bas <= date(int(td.year), int(td.month), int(td.day)) <= bit
-                    except Exception:
-                        td_ok = False
-                if not td_ok:
-                    continue
-            # Rapor tutarı:
-            # - AYLİK_PAY varsa pay toplamı (manuel oldest dağıtımda gerçek tutar korunur),
-            # - tek marker varsa görünür hücreyle hizalama (net/kdv uyumu),
-            # - çoklu marker'da satır toplamı (tutar) korunur.
-            if pay_tokens:
-                try:
-                    pay_toplam = round(
-                        sum(float((_t or ("", 0))[1] or 0) for _t in (pay_tokens or [])),
-                        2,
-                    )
-                except Exception:
-                    pay_toplam = 0.0
-                if pay_toplam > 0:
-                    r["tutar"] = pay_toplam
-            elif len(marker_isos) == 1:
-                try:
-                    fatura_id = int((r or {}).get("fatura_id") or 0)
-                except (TypeError, ValueError):
-                    fatura_id = 0
-                if fatura_id <= 0:
-                    filtered_rows.append(r)
-                    continue
-                ym0 = marker_isos[0]
-                if ym0 in visible_tutar_by_ym:
-                    try:
-                        r["tutar"] = visible_tutar_by_ym[ym0]
-                    except Exception:
-                        pass
-        filtered_rows.append(r)
-
-    items = [_row_serializable(r) for r in filtered_rows]
+    items = [_row_serializable(r) for r in (rows or [])]
     toplam = sum(float(it.get("tutar") or 0) for it in items)
     ok = jsonify(
         {
@@ -11079,6 +11004,7 @@ def api_tahsilat_raporu():
             "musteri_id": mid or None,
             "baslangic": bas.strftime("%Y-%m-%d"),
             "bitis": bit.strftime("%Y-%m-%d"),
+            "date_mode": ("donem_kapsama" if donem_mod else "tahsilat_tarihi"),
             "items": items,
             "toplam": round(toplam, 2),
             "adet": len(items),
