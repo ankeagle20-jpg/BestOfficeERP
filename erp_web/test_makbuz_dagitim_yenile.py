@@ -62,6 +62,61 @@ def test_strip_and_rebuild_helpers():
     )
     check("grid_toplu skip", skip is None)
 
+    # Varsayılan (tam_fifo=False): allowlist TAH aylarını korur — Ağustos'a yazmaz.
+    with patch(
+        "routes.faturalar_routes._auto_allocate_oldest_unpaid_months",
+        return_value=(
+            ["2026-09-01"],
+            [("2026-09-01", 51799.80)],
+        ),
+    ) as alloc:
+        _ = yeniden_hesapla_makbuz_dagitim_aciklama(
+            872,
+            tutar=51799.80,
+            tahsilat_tarihi="2026-09-07",
+            aciklama_eski=(
+                "Eylül 2026 Tahsilat H|AYLIK_TAH|2026-09-01| |AYLIK_TAH|2026-10-01| "
+                "|AYLIK_PAY|2026-09-01=49760.40| |AYLIK_PAY|2026-10-01=2038.60|"
+            ),
+            haric_tahsilat_id=5584,
+            kaynak="manuel_makbuz",
+            odeme_turu="havale",
+        )
+        kwargs = alloc.call_args.kwargs if alloc.call_args else {}
+        allow = kwargs.get("iso_allowlist")
+        check(
+            "default allowlist TAH",
+            allow == ["2026-09-01", "2026-10-01"],
+            allow,
+        )
+
+    with patch(
+        "routes.faturalar_routes._auto_allocate_oldest_unpaid_months",
+        return_value=(
+            ["2026-08-01", "2026-09-01"],
+            [("2026-08-01", 0.80), ("2026-09-01", 51799.00)],
+        ),
+    ) as alloc2:
+        _ = yeniden_hesapla_makbuz_dagitim_aciklama(
+            872,
+            tutar=51799.80,
+            tahsilat_tarihi="2026-09-07",
+            aciklama_eski=(
+                "Eylül 2026 Tahsilat H|AYLIK_TAH|2026-09-01| |AYLIK_TAH|2026-10-01| "
+                "|AYLIK_PAY|2026-09-01=49760.40| |AYLIK_PAY|2026-10-01=2038.60|"
+            ),
+            haric_tahsilat_id=5584,
+            kaynak="manuel_makbuz",
+            odeme_turu="havale",
+            tam_fifo=True,
+        )
+        kwargs2 = alloc2.call_args.kwargs if alloc2.call_args else {}
+        check(
+            "tam_fifo allowlist None",
+            kwargs2.get("iso_allowlist") is None,
+            kwargs2.get("iso_allowlist"),
+        )
+
 
 def test_call_sites_use_tahsilat_degisti():
     giris = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")

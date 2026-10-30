@@ -684,11 +684,18 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
     haric_tahsilat_id: int | None = None,
     kaynak: str | None = None,
     odeme_turu: str | None = None,
+    tam_fifo: bool = False,
+    onceki_tahsilatlar=None,
+    borc_satirlari=None,
 ) -> str | None:
     """Makbuz tutar/tarih sonrası |AYLIK_TAH|/|AYLIK_PAY| FIFO yenile.
 
     grid_toplu / eşitle satırına dokunmaz (None → çağıran eski metni korur).
     Dönüş: yeni açıklama metni veya None (yenileme yok).
+
+    tam_fifo=True: eski TAH/PAY aylarını allowlist yapmaz (onarım scripti).
+    Varsayılan False → mevcut allowlist davranışı değişmez.
+    onceki_tahsilatlar / borc_satirlari: yalnız test/onarım simülasyonu (DB yerine).
     """
     kay = str(kaynak or "").strip().lower()
     if kay == "grid_toplu":
@@ -716,31 +723,34 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
     odeme = str(tahsilat_tarihi or "")[:10]
     if len(odeme) != 10:
         odeme = date.today().isoformat()
-    # Mevcut TAH aylarını allowlist yap (seçim korunur); yoksa tam FIFO.
+    # Mevcut TAH aylarını allowlist yap (seçim korunur); yoksa / tam_fifo: tam FIFO.
     allow = []
-    for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac_eski):
-        try:
-            iso = date(int(y), int(mo), 1).isoformat()
-        except ValueError:
-            continue
-        if iso not in allow:
-            allow.append(iso)
-    if not allow:
-        for y, mo in re.findall(
-            r"\|AYLIK_PAY\|(\d{4})-(\d{2})-\d{2}=", ac_eski
-        ):
+    if not tam_fifo:
+        for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac_eski):
             try:
                 iso = date(int(y), int(mo), 1).isoformat()
             except ValueError:
                 continue
             if iso not in allow:
                 allow.append(iso)
+        if not allow:
+            for y, mo in re.findall(
+                r"\|AYLIK_PAY\|(\d{4})-(\d{2})-\d{2}=", ac_eski
+            ):
+                try:
+                    iso = date(int(y), int(mo), 1).isoformat()
+                except ValueError:
+                    continue
+                if iso not in allow:
+                    allow.append(iso)
     iso_list, pay_items = _auto_allocate_oldest_unpaid_months(
         mid,
         tot,
         odeme_tarihi=odeme,
-        iso_allowlist=allow or None,
+        iso_allowlist=None if tam_fifo else (allow or None),
         haric_tahsilat_id=haric_tahsilat_id,
+        onceki_tahsilatlar=onceki_tahsilatlar,
+        borc_satirlari=borc_satirlari,
     )
     if not iso_list and not pay_items:
         # Açık ay yoksa yalnız düz metin (marker temiz)
@@ -761,6 +771,26 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
     text = _aciklama_with_aylik_markers(plain, iso_list)
     text = _aciklama_with_aylik_pay_tokens(text, pay_items)
     return text
+
+
+def makbuz_aciklama_sadece_guncelle(tahsilat_id: int, yeni_aciklama: str) -> bool:
+    """Yalnız tahsilatlar.aciklama günceller. tutar/tarih/kaynak değişmez."""
+    try:
+        tid = int(tahsilat_id)
+    except (TypeError, ValueError):
+        return False
+    if tid <= 0:
+        return False
+    row = execute_returning(
+        """
+        UPDATE tahsilatlar
+           SET aciklama = %s
+         WHERE id = %s
+        RETURNING id
+        """,
+        (str(yeni_aciklama or ""), tid),
+    )
+    return bool(row and row.get("id"))
 
 
 def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
