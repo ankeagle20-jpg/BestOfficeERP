@@ -45,7 +45,10 @@ FIKSTUR = [
     _satir(6, 0.005),          # sınır: > değil, gizli
     _satir(7, 1.0, "Pasif"),   # borçlu pasif
     _satir(8, 2.0, "Aktif", "Ofis"),
+    _satir(9, None),           # bilinmeyen borç — listede kalır
 ]
+# flag for None row
+FIKSTUR[-1]["borc_hesaplanamadi"] = True
 
 
 def test_python_filtre():
@@ -57,13 +60,14 @@ def test_python_filtre():
         return _firma_ozet_client_filtre_uygula(FIKSTUR, **base)
 
     hepsi = suz()
-    check("kapali tumu", [r["musteri_id"] for r in hepsi] == [1, 2, 3, 4, 5, 6, 7, 8])
+    check("kapali tumu", [r["musteri_id"] for r in hepsi] == [1, 2, 3, 4, 5, 6, 7, 8, 9])
 
     borc = suz(sadece_borclu=True)
-    check("acik borclu", [r["musteri_id"] for r in borc] == [1, 2, 7, 8], [r["musteri_id"] for r in borc])
+    check("acik borclu", [r["musteri_id"] for r in borc] == [1, 2, 7, 8, 9], [r["musteri_id"] for r in borc])
     check("0.004 gizli", all(r["musteri_id"] != 3 for r in borc))
     check("0 ve negatif gizli", all(r["musteri_id"] not in (4, 5, 6) for r in borc))
     check("0.01 gorunur", any(r["musteri_id"] == 2 for r in borc))
+    check("None kalir", any(r["musteri_id"] == 9 for r in borc))
 
     and_pasif = suz(sadece_borclu=True, durum="pasif")
     check("and durum pasif", [r["musteri_id"] for r in and_pasif] == [7])
@@ -71,7 +75,7 @@ def test_python_filtre():
     and_g2 = suz(sadece_borclu=True, grup2=["Ofis"])
     check("and grup2", [r["musteri_id"] for r in and_g2] == [8])
 
-    check("kapali geri", [r["musteri_id"] for r in suz(sadece_borclu=False)] == [1, 2, 3, 4, 5, 6, 7, 8])
+    check("kapali geri", [r["musteri_id"] for r in suz(sadece_borclu=False)] == [1, 2, 3, 4, 5, 6, 7, 8, 9])
 
 
 def test_html_ve_js():

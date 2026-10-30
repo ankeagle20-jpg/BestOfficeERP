@@ -14016,9 +14016,11 @@ function faturaRaporFirmaUstDurumGuncelle() {
         var n = parseFloat(tr.getAttribute('data-fr-tutar-n') || '');
         if (!isFinite(n)) n = 0;
         sum += n;
-        var b = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
-        if (!isFinite(b)) b = 0;
-        sumBorc += b;
+        var bRaw = tr.getAttribute('data-fr-borc-n');
+        if (bRaw != null && String(bRaw).trim() !== '') {
+            var b = parseFloat(bRaw);
+            if (isFinite(b)) sumBorc += b;
+        }
     });
     function fmtTop(x) {
         return (x != null ? x : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -14034,11 +14036,13 @@ function faturaRaporFirmaUstDurumGuncelle() {
     if (kararUst.tabloMesaj) tekilStr += ' | ' + kararUst.tabloMesaj;
     var sz = (typeof faturaRaporFirmaSuzgecEtiketiKisa === 'function') ? faturaRaporFirmaSuzgecEtiketiKisa() : '';
     var kapGen = kapF + (sz ? (' | Süzgeç: ' + sz) : '');
+    var bhN = (meta && meta.borcHesaplanamadi != null) ? Number(meta.borcHesaplanamadi) : 0;
+    var bhNot = (isFinite(bhN) && bhN > 0) ? (' | ' + bhN + ' müşteri için borç hesaplanmadı') : '';
     var msg = '✓ Liste güncellendi. ' +
         (ayRef ? ('Aylık referans: ' + ayRef + ' | ') : '') +
         tekilStr + kapGen + gaLbl + gyLbl +
         ' | Aylık tutar toplamı: ' + fmtTop(sum) + ' ₺' +
-        ' | Toplam borç: ' + fmtTop(sumBorc) + ' ₺';
+        ' | Toplam borç: ' + fmtTop(sumBorc) + ' ₺' + bhNot;
     faturaRaporDurumGoster('success', msg);
 }
 
@@ -14124,8 +14128,12 @@ function faturaRaporListeAraUygula() {
         if (ok && firmaMod) {
             var elSb = document.getElementById('fatura_rapor_sadece_borclu');
             if (elSb && elSb.checked) {
-                var borcN = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
-                if (!isFinite(borcN) || !(borcN > 0.005)) ok = false;
+                var borcRaw = tr.getAttribute('data-fr-borc-n');
+                if (borcRaw != null && String(borcRaw).trim() !== '') {
+                    var borcN = parseFloat(borcRaw);
+                    if (isFinite(borcN) && !(borcN > 0.005)) ok = false;
+                }
+                // boş/None: gizleme
             }
         }
         tr.style.display = ok ? '' : 'none';
@@ -14254,20 +14262,26 @@ function faturaRaporFirmaOzetAltGuncelle() {
         if (!isFinite(ik)) ik = 0;
         var gn = parseFloat(tr.getAttribute('data-fr-guncel-n') || '');
         if (!isFinite(gn)) gn = 0;
-        var b = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
-        if (!isFinite(b)) b = 0;
-        var ga = parseInt(tr.getAttribute('data-fr-geciken-n') || '', 10);
-        if (!Number.isFinite(ga)) ga = 0;
+        var bRaw = tr.getAttribute('data-fr-borc-n');
+        var b = NaN;
+        if (bRaw != null && String(bRaw).trim() !== '') {
+            b = parseFloat(bRaw);
+        }
+        var gaRawAttr = tr.getAttribute('data-fr-geciken-n');
+        var ga = NaN;
+        if (gaRawAttr != null && String(gaRawAttr).trim() !== '') {
+            ga = parseInt(gaRawAttr, 10);
+        }
         sumVis += n;
         sumIlkVis += ik;
         sumGuncelVis += gn;
-        sumBorcVis += b;
-        sumGecikenVis += ga;
+        if (isFinite(b)) sumBorcVis += b;
+        if (Number.isFinite(ga)) sumGecikenVis += ga;
         nVis++;
         var cb = tr.querySelector('.fatura-rapor-firma-sec');
         if (cb && cb.checked) {
             sumChk += n;
-            sumBorcChk += b;
+            if (isFinite(b)) sumBorcChk += b;
             nChk++;
         }
     });
@@ -15340,7 +15354,7 @@ function faturaRaporYukle() {
                 var gaLbl = (data.giri_aylar_filtre && data.giri_aylar_filtre.length && typeof faturaRaporGirisAyFiltreMetni === 'function')
                     ? faturaRaporGirisAyFiltreMetni(data.giri_aylar_filtre) : '';
                 try {
-                    window.__faturaRaporDurumFirmaMeta = { ayRef: ayRef, kapF: kapF, gaLbl: gaLbl };
+                    window.__faturaRaporDurumFirmaMeta = { ayRef: ayRef, kapF: kapF, gaLbl: gaLbl, borcHesaplanamadi: (data && data.borc_hesaplanamadi_sayisi != null) ? Number(data.borc_hesaplanamadi_sayisi) : 0 };
                 } catch (eMeta) {}
                 var ordRows = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
                 var buildFirmaRowsHtml = function (list) {
@@ -15349,8 +15363,9 @@ function faturaRaporYukle() {
                     var plainAd = (s.firma_adi || '') + (s.musteri_durum ? (' (' + String(s.musteri_durum) + ')') : '');
                     var tutFmt = fmtF(s.aylik_tutar);
                     var tutN = (s.aylik_tutar != null && !isNaN(Number(s.aylik_tutar))) ? String(Number(s.aylik_tutar)) : '';
-                    var borcFmt = fmtF(s.toplam_borc);
-                    var borcN = (s.toplam_borc != null && !isNaN(Number(s.toplam_borc))) ? String(Number(s.toplam_borc)) : '';
+                    var borcBilinen = (s.toplam_borc != null && s.borc_hesaplanamadi !== true && !isNaN(Number(s.toplam_borc)));
+                    var borcFmt = borcBilinen ? fmtF(s.toplam_borc) : '—';
+                    var borcN = borcBilinen ? String(Number(s.toplam_borc)) : '';
                     var ilkK = s.ilk_kira_bedeli;
                     var guncK = s.guncel_kira_bedeli;
                     var ilkNum = (ilkK != null && !isNaN(Number(ilkK))) ? Number(ilkK) : NaN;
@@ -15373,9 +15388,10 @@ function faturaRaporYukle() {
                     var ayStr = ayAd || '—';
                     var aySortN = sayNum > 0 ? String(sayNum) : '0';
                     var gaRaw = s.geciken_ay;
-                    var gaNum = (gaRaw != null && !isNaN(parseInt(gaRaw, 10))) ? parseInt(gaRaw, 10) : 0;
-                    if (!Number.isFinite(gaNum) || gaNum < 0) gaNum = 0;
-                    var gaStr = String(gaNum);
+                    var gaBilinen = (gaRaw != null && s.borc_hesaplanamadi !== true && !isNaN(parseInt(gaRaw, 10)));
+                    var gaNum = gaBilinen ? parseInt(gaRaw, 10) : NaN;
+                    if (gaBilinen && (!Number.isFinite(gaNum) || gaNum < 0)) gaNum = 0;
+                    var gaStr = gaBilinen ? String(gaNum) : '—';
                     var ad = (s.firma_adi || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
                     if (s.musteri_durum) {
                         ad += ' <span style="color:#78909c;font-size:9px;font-style:normal;">(' +

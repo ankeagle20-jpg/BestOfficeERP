@@ -12368,15 +12368,33 @@ def _grup_rapor_ilk_ve_donem_kira(kyc_for_grid, tufe_map, ref_y: int, ref_m: int
     return round(ilk, 2), round(donem, 2)
 
 
-def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = None) -> dict[int, dict]:
+def musteri_firma_ozet_grid_ozet_batch(
+    musteri_ids: list,
+    ref: date | None = None,
+    *,
+    prewarm: bool = True,
+    budget_sec: float | None = None,
+) -> dict[int, dict]:
     """
     Grup raporları için tek geçişte:
     - borc_month: referans ay KDV dahil aylık grid hücresi
     - geciken_ay: tahsilsiz pozitif ay adedi
     - sozlesme_gun: sözleşme başlangıç günü (1-31)
+
+    prewarm=False: disk grid ön ısıtma yok (büyük sayfa).
+    budget_sec: canlı yol için süre üst sınırı; aşımda kalan mid'ler
+    toplam_borc/geciken_ay=None (borc_hesaplanamadi=True). Meta: .last_meta
     """
     d = ref or date.today()
     ref_y, ref_m = int(d.year), int(d.month)
+    musteri_firma_ozet_grid_ozet_batch.last_meta = {
+        "borc_hesaplanamadi": 0,
+        "cache_hit": 0,
+        "cache_fast": 0,
+        "canli": 0,
+        "budget_hit": False,
+        "elapsed_ms": 0.0,
+    }
     if ref_m < 1 or ref_m > 12:
         return {}
 
@@ -12393,6 +12411,7 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
         mids.append(i)
     if not mids:
         return {}
+    t0 = time.time()
     if not hasattr(musteri_firma_ozet_grid_ozet_batch, "_cache"):
         musteri_firma_ozet_grid_ozet_batch._cache = {}
     cache = musteri_firma_ozet_grid_ozet_batch._cache
@@ -12407,9 +12426,11 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             cached_out[mid] = dict(cval[1] or {})
         else:
             need_mids.append(mid)
+    musteri_firma_ozet_grid_ozet_batch.last_meta["cache_hit"] = len(cached_out)
     if not need_mids:
         # Cache hit-only: eski önbellekte yoksa ilk_kira/donem_kira bilgisini (saf TÜFE) ekle.
         if all(("ilk_kira" in (cached_out.get(m) or {}) and "donem_kira" in (cached_out.get(m) or {})) for m in mids):
+            musteri_firma_ozet_grid_ozet_batch.last_meta["elapsed_ms"] = round((time.time() - t0) * 1000.0, 2)
             return cached_out
         tufe_map_hit = _tufe_map_by_year_month_cached()
         base_sql_hit = _musteri_aylik_grid_customer_kyc_select_sql()
@@ -12430,11 +12451,13 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             o["donem_kira"] = donem_h
             cached_out[mid] = o
             cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(o))
+        musteri_firma_ozet_grid_ozet_batch.last_meta["elapsed_ms"] = round((time.time() - t0) * 1000.0, 2)
         return cached_out
 
     try:
         _plan_paket_yukle(need_mids)
-        prewarm_aylik_grid_cache_for_musteriler(need_mids, date(ref_y, ref_m, 1))
+        if prewarm:
+            prewarm_aylik_grid_cache_for_musteriler(need_mids, date(ref_y, ref_m, 1))
     except Exception:
         pass
 
@@ -12499,6 +12522,18 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             pass
         return 0
 
+    def _ozet_hesaplanamadi(gun: int) -> dict:
+        return {
+            "borc_month": None,
+            "borc_month_placeholder": False,
+            "toplam_borc": None,
+            "geciken_ay": None,
+            "sozlesme_gun": gun,
+            "borc_hesaplanamadi": True,
+        }
+
+    live_queue: list[tuple[int, dict | None, dict | None, int]] = []
+    n_fast = 0
     for mid in need_mids:
         row = row_by_id.get(mid)
         kyc_for_grid = _firma_ozet_kyc_dict_from_grid_sql_row(row) if row else None
@@ -12513,19 +12548,31 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
         )
         if fast is not None:
             fast["sozlesme_gun"] = gun
+            fast.pop("borc_hesaplanamadi", None)
             out[mid] = fast
             cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(fast))
+            n_fast += 1
             continue
         if not kyc_for_grid:
-            out[mid] = {
-                "borc_month": 0.0,
-                "borc_month_placeholder": False,
-                "toplam_borc": 0.0,
-                "geciken_ay": 0,
-                "sozlesme_gun": gun,
-            }
-            cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
+            o = _ozet_hesaplanamadi(gun)
+            out[mid] = o
+            cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(o))
             continue
+        live_queue.append((mid, kyc_for_grid, cached_pl if isinstance(cached_pl, dict) else None, gun))
+
+    musteri_firma_ozet_grid_ozet_batch.last_meta["cache_fast"] = n_fast
+    n_canli = 0
+    n_skip = 0
+    budget_hit = False
+    for qi, (mid, kyc_for_grid, cached_pl, gun) in enumerate(live_queue):
+        if budget_sec is not None and (time.time() - t0) >= float(budget_sec):
+            budget_hit = True
+            for mid2, _k2, _p2, gun2 in live_queue[qi:]:
+                o = _ozet_hesaplanamadi(gun2)
+                out[mid2] = o
+                cache[(int(mid2), ref_y, ref_m)] = (now_ts, dict(o))
+                n_skip += 1
+            break
         reel_manual = dict(reel_by_mid.get(mid) or {})
         try:
             borc_month = float(
@@ -12574,15 +12621,13 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
                 "geciken_ay": int(gec or 0),
                 "sozlesme_gun": gun,
             }
+            n_canli += 1
         except Exception:
-            out[mid] = {
-                "borc_month": 0.0,
-                "borc_month_placeholder": False,
-                "toplam_borc": 0.0,
-                "geciken_ay": 0,
-                "sozlesme_gun": gun,
-            }
+            out[mid] = _ozet_hesaplanamadi(gun)
+            n_skip += 1
         cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
+
+    musteri_firma_ozet_grid_ozet_batch.last_meta["canli"] = n_canli
     out.update(cached_out)
     # ATTACH_ILK_DONEM_PASS — bilgi alanları (borc_month / net / alacak toplamlarına karışmaz)
     missing_row_ids = [m for m in mids if m not in row_by_id]
@@ -12596,20 +12641,19 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             if rid > 0:
                 row_by_id[rid] = r
     for mid in mids:
-        o = dict(out.get(mid) or {
-            "borc_month": 0.0,
-            "borc_month_placeholder": False,
-            "toplam_borc": 0.0,
-            "geciken_ay": 0,
-            "sozlesme_gun": 0,
-        })
+        o = dict(out.get(mid) or _ozet_hesaplanamadi(0))
         kyc_a = _firma_ozet_kyc_dict_from_grid_sql_row(row_by_id.get(mid)) if mid in row_by_id else None
         ilk_a, donem_a = _grup_rapor_ilk_ve_donem_kira(kyc_a, tufe_map, ref_y, ref_m)
         o["ilk_kira"] = ilk_a
         o["donem_kira"] = donem_a
         out[mid] = o
         cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(o))
+    n_hesaplanamadi = sum(1 for mid in mids if (out.get(mid) or {}).get("borc_hesaplanamadi"))
+    musteri_firma_ozet_grid_ozet_batch.last_meta["borc_hesaplanamadi"] = int(n_hesaplanamadi)
+    musteri_firma_ozet_grid_ozet_batch.last_meta["budget_hit"] = bool(budget_hit)
+    musteri_firma_ozet_grid_ozet_batch.last_meta["elapsed_ms"] = round((time.time() - t0) * 1000.0, 2)
     return out
+
 
 
 def musteri_firma_ozet_geciken_ay_ve_sozlesme_gun_batch(musteri_ids: list, ref: date | None = None) -> dict[int, dict]:

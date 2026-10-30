@@ -3179,7 +3179,13 @@ def _firma_ozet_dedupe_satirlar(satirlar: list) -> list:
     return out
 
 
-def _firma_ozet_grid_ozet_map_for_rows(rows: list, ref: date | None = None) -> dict[int, dict]:
+def _firma_ozet_grid_ozet_map_for_rows(
+    rows: list,
+    ref: date | None = None,
+    *,
+    prewarm: bool = True,
+    budget_sec: float | None = None,
+) -> dict[int, dict]:
     """Firma ozet raporunda borc/geciken ay hesabini aylik grid ozetiyle esler."""
     mids: list[int] = []
     seen = set()
@@ -3196,7 +3202,9 @@ def _firma_ozet_grid_ozet_map_for_rows(rows: list, ref: date | None = None) -> d
         return {}
     try:
         from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
-        return musteri_firma_ozet_grid_ozet_batch(mids, ref) or {}
+        return musteri_firma_ozet_grid_ozet_batch(
+            mids, ref, prewarm=prewarm, budget_sec=budget_sec
+        ) or {}
     except Exception as e:
         try:
             current_app.logger.warning("firma_ozet grid ozet baglanti hatasi: %r", e)
@@ -3221,8 +3229,10 @@ def _firma_ozet_toplam_borc_sum_from_rows(
         satirlar = _firma_ozet_dedupe_satirlar(satirlar)
     toplam_borc = 0.0
     for it in satirlar:
+        if it.get("toplam_borc") is None:
+            continue
         try:
-            b = float(it.get("toplam_borc") or 0)
+            b = float(it.get("toplam_borc"))
             if math.isfinite(b):
                 toplam_borc += b
         except (TypeError, ValueError):
@@ -3333,6 +3343,66 @@ def _firma_ozet_sayfa_grid_hesapla(liste_hizli: bool, page_size: int, esik: int 
     if not liste_hizli:
         return True
     return page_size > 0 and page_size <= esik
+
+
+
+def _firma_ozet_borc_budget_sec() -> float:
+    """Canlı borç hesabı süre üst sınırı (sn). Varsayılan 60; Render timeout 120."""
+    try:
+        v = float(str(os.getenv("FIRMA_OZET_BORC_BUDGET_SEC") or "60").strip() or "60")
+    except ValueError:
+        v = 60.0
+    return max(5.0, min(v, 110.0))
+
+
+def _firma_ozet_borc_fields_from_ozet(oz) -> tuple:
+    """(toplam_borc, geciken_ay) — hesaplanamadıysa (None, None)."""
+    if not isinstance(oz, dict) or not oz:
+        return None, None
+    if oz.get("borc_hesaplanamadi"):
+        return None, None
+    if oz.get("toplam_borc") is None:
+        return None, None
+    try:
+        tborc = max(0.0, round(float(oz.get("toplam_borc")), 2))
+    except (TypeError, ValueError):
+        return None, None
+    if not math.isfinite(tborc):
+        return None, None
+    try:
+        gec = oz.get("geciken_ay")
+        if gec is None:
+            return tborc, None
+        geciken_ay = max(0, int(gec))
+    except (TypeError, ValueError):
+        geciken_ay = None
+    return tborc, geciken_ay
+
+
+def _firma_ozet_sum_borc_skip_none(satirlar: list) -> float:
+    toplam = 0.0
+    for it in satirlar or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("toplam_borc") is None:
+            continue
+        try:
+            b = float(it.get("toplam_borc"))
+            if math.isfinite(b):
+                toplam += b
+        except (TypeError, ValueError):
+            pass
+    return round(toplam, 2)
+
+
+def _firma_ozet_borc_hesaplanamadi_say(satirlar: list) -> int:
+    n = 0
+    for it in satirlar or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("toplam_borc") is None or it.get("borc_hesaplanamadi"):
+            n += 1
+    return n
 
 
 _firma_ozet_rapor_schema_ready = False
@@ -3973,6 +4043,7 @@ def _firma_ozet_toplam_borc_grid_for_winner_ids(
     ref: date,
     *,
     chunk_size: int = 100,
+    budget_sec: float | None = None,
 ) -> float:
     """Grid kaynaklı toplam borç (aylık grid ile aynı); id listesi üzerinden batch."""
     if not musteri_ids:
@@ -3982,16 +4053,20 @@ def _firma_ozet_toplam_borc_grid_for_winner_ids(
 
         total = 0.0
         n = max(1, int(chunk_size or 100))
+        bud = budget_sec if budget_sec is not None else _firma_ozet_borc_budget_sec()
+        t0 = time.perf_counter()
         for i in range(0, len(musteri_ids), n):
+            remain = bud - (time.perf_counter() - t0)
+            if remain <= 0:
+                break
             part = musteri_ids[i : i + n]
-            oz = musteri_firma_ozet_grid_ozet_batch(part, ref) or {}
+            oz = musteri_firma_ozet_grid_ozet_batch(
+                part, ref, prewarm=False, budget_sec=remain
+            ) or {}
             for mid in part:
-                try:
-                    b = float((oz.get(int(mid)) or {}).get("toplam_borc") or 0)
-                    if math.isfinite(b):
-                        total += b
-                except (TypeError, ValueError):
-                    pass
+                tb, _ga = _firma_ozet_borc_fields_from_ozet(oz.get(int(mid)) or {})
+                if tb is not None:
+                    total += float(tb)
         return round(total, 2)
     except Exception as ex:
         try:
@@ -4111,27 +4186,23 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
             grid_ozet = dict(grid_ozet_map.get(int(gid or 0)) or {})
         except (TypeError, ValueError):
             grid_ozet = {}
+    borc_hesaplanamadi = False
     if grid_ozet:
         try:
-            gcur = float(grid_ozet.get("borc_month") or 0)
-            if math.isfinite(gcur) and abs(gcur) > 1e-9:
-                guncel_json = round(gcur, 2)
+            gcur_raw = grid_ozet.get("borc_month")
+            if gcur_raw is not None:
+                gcur = float(gcur_raw)
+                if math.isfinite(gcur) and abs(gcur) > 1e-9:
+                    guncel_json = round(gcur, 2)
         except (TypeError, ValueError):
             pass
-        try:
-            tborc = max(0.0, round(float(grid_ozet.get("toplam_borc") or 0), 2))
-        except (TypeError, ValueError):
-            tborc = 0.0
-        try:
-            geciken_ay = max(0, int(grid_ozet.get("geciken_ay") or 0))
-        except (TypeError, ValueError):
-            geciken_ay = 0
+        tborc, geciken_ay = _firma_ozet_borc_fields_from_ozet(grid_ozet)
+        borc_hesaplanamadi = bool(grid_ozet.get("borc_hesaplanamadi")) or (tborc is None)
     else:
-        try:
-            tborc = max(0.0, round(float(row.get("current_balance") or 0), 2))
-        except (TypeError, ValueError):
-            tborc = 0.0
-        geciken_ay = 0
+        # current_balance yedeği kaldırıldı — hesap yoksa None
+        tborc = None
+        geciken_ay = None
+        borc_hesaplanamadi = True
     g2_raw = row.get("grup2_secimleri")
     g2_list = []
     if isinstance(g2_raw, list):
@@ -4156,6 +4227,7 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
         "ilk_kira_bedeli": ilk_kira_json,
         "guncel_kira_bedeli": guncel_json,
         "toplam_borc": tborc,
+        "borc_hesaplanamadi": bool(borc_hesaplanamadi),
         "grup2": (row.get("grup2_etiketler") or ("Bizim Hesap" if bool(row.get("bizim_hesap")) else "")).strip(),
         "grup2_secimleri": g2_list,
         "sozlesme_gun": sozlesme_gun,
@@ -4384,12 +4456,15 @@ def _firma_ozet_client_filtre_uygula(
             if gy is None or gy not in yillar:
                 ok = False
         if ok and sadece_borclu:
-            try:
-                borc = float(it.get("toplam_borc") or 0)
-            except (TypeError, ValueError):
-                borc = 0.0
-            if not (borc > 0.005):
-                ok = False
+            if it.get("toplam_borc") is None or it.get("borc_hesaplanamadi"):
+                pass  # bilinmeyen borç: listede bırak
+            else:
+                try:
+                    borc = float(it.get("toplam_borc"))
+                except (TypeError, ValueError):
+                    borc = 0.0
+                if not (borc > 0.005):
+                    ok = False
         if ok:
             out.append(it)
     return out
@@ -4399,9 +4474,11 @@ def _firma_ozet_satirlara_grid_ozet_uygula(satirlar: list, ref_first: date) -> N
     """Excel / tam liste: geciken_ay + toplam_borc + guncel grid özetiyle güncelle."""
     if not satirlar:
         return
-    page_grid_map = _firma_ozet_grid_ozet_map_for_rows(satirlar, ref_first)
-    if not isinstance(page_grid_map, dict) or not page_grid_map:
-        return
+    page_grid_map = _firma_ozet_grid_ozet_map_for_rows(
+        satirlar, ref_first, prewarm=False, budget_sec=_firma_ozet_borc_budget_sec()
+    )
+    if not isinstance(page_grid_map, dict):
+        page_grid_map = {}
     for _it in satirlar:
         if not isinstance(_it, dict):
             continue
@@ -4413,21 +4490,22 @@ def _firma_ozet_satirlara_grid_ozet_uygula(satirlar: list, ref_first: date) -> N
             continue
         _oz = page_grid_map.get(_mid)
         if not isinstance(_oz, dict) or not _oz:
+            _it["toplam_borc"] = None
+            _it["geciken_ay"] = None
+            _it["borc_hesaplanamadi"] = True
             continue
         try:
-            _gcur = float(_oz.get("borc_month") or 0)
-            if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
-                _it["guncel_kira_bedeli"] = round(_gcur, 2)
+            _gcur_raw = _oz.get("borc_month")
+            if _gcur_raw is not None:
+                _gcur = float(_gcur_raw)
+                if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
+                    _it["guncel_kira_bedeli"] = round(_gcur, 2)
         except (TypeError, ValueError):
             pass
-        try:
-            _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
-        except (TypeError, ValueError):
-            pass
-        try:
-            _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
-        except (TypeError, ValueError):
-            pass
+        tb, ga = _firma_ozet_borc_fields_from_ozet(_oz)
+        _it["toplam_borc"] = tb
+        _it["geciken_ay"] = ga
+        _it["borc_hesaplanamadi"] = bool(_oz.get("borc_hesaplanamadi")) or (tb is None)
 
 
 def _firma_ozet_recalc_ozet(satirlar: list) -> tuple[float, float, int]:
@@ -4440,8 +4518,10 @@ def _firma_ozet_recalc_ozet(satirlar: list) -> tuple[float, float, int]:
                 toplam_aylik += v
         except (TypeError, ValueError):
             pass
+        if it.get("toplam_borc") is None:
+            continue
         try:
-            b = float(it.get("toplam_borc") or 0)
+            b = float(it.get("toplam_borc"))
             if math.isfinite(b):
                 toplam_borc += b
         except (TypeError, ValueError):
@@ -4754,83 +4834,84 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
             toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
             grid_hesapla = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
-            if not grid_hesapla:
-                _t_pg = time.perf_counter()
-                satirlar_resp = [
-                    _firma_ozet_row_to_satir_item(r, pasifleri_dahil, None)
-                    for r in page_rows
-                ]
-                current_app.logger.info(
-                    "firma_ozet_liste_hizli page=%s rows=%s ms=%.2f",
-                    page,
-                    len(page_rows),
-                    (time.perf_counter() - _t_pg) * 1000.0,
-                )
-            else:
-                # Sayfa satirlari icin prewarm — tum winner listesini SQL ile cekmeye gerek yok.
-                winner_ids_prewarm = [
-                    int(r["id"])
-                    for r in page_rows
-                    if r is not None and r.get("id") is not None
-                ]
+            # Büyük sayfada da borç hesabı zorunlu; prewarm yalnız küçük sayfada (eski davranış).
+            _borc_budget = _firma_ozet_borc_budget_sec()
+            winner_ids_page = [
+                int(r["id"])
+                for r in page_rows
+                if r is not None and r.get("id") is not None
+            ]
+            if grid_hesapla:
                 try:
                     from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
 
                     _t_pw0 = time.perf_counter()
                     n_pw = prewarm_aylik_grid_cache_for_musteriler(
-                        winner_ids_prewarm,
+                        winner_ids_page,
                         ref_first,
                         max_rebuild=min(50, max(1, len(page_rows))),
                     )
                     current_app.logger.info(
                         "firma_ozet prewarm rebuilt=%s winner_ids=%s ms=%.2f",
                         n_pw,
-                        len(winner_ids_prewarm),
+                        len(winner_ids_page),
                         (time.perf_counter() - _t_pw0) * 1000.0,
                     )
                 except Exception as e_pw:
                     current_app.logger.warning("firma_ozet prewarm err=%r", e_pw)
-                page_grid_map = _firma_ozet_grid_ozet_map_for_rows(page_rows, ref_first)
-                satirlar_resp = [
-                    _firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map)
-                    for r in page_rows
+            _t_pg = time.perf_counter()
+            page_grid_map = _firma_ozet_grid_ozet_map_for_rows(
+                page_rows,
+                ref_first,
+                prewarm=False,
+                budget_sec=_borc_budget,
+            )
+            satirlar_resp = [
+                _firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map)
+                for r in page_rows
+            ]
+            try:
+                from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch as _fo_batch
+                _meta = getattr(_fo_batch, "last_meta", {}) or {}
+            except Exception:
+                _meta = {}
+            current_app.logger.info(
+                "firma_ozet grid_ozet page=%s rows=%s prewarm=%s budget=%.1f "
+                "hesaplanamadi=%s canli=%s cache_fast=%s ms=%.2f",
+                page,
+                len(page_rows),
+                bool(grid_hesapla),
+                _borc_budget,
+                int(_meta.get("borc_hesaplanamadi") or 0),
+                int(_meta.get("canli") or 0),
+                int(_meta.get("cache_fast") or 0),
+                (time.perf_counter() - _t_pg) * 1000.0,
+            )
+            try:
+                _t_tb = time.perf_counter()
+                ids_sql = _firma_ozet_sql_winner_ids_query(
+                    rows_firma_sql_no_order, cift_olanlar
+                )
+                id_rows = fetch_all(ids_sql, rows_firma_params) or []
+                winner_ids = [
+                    int(r["id"])
+                    for r in id_rows
+                    if r is not None and r.get("id") is not None
                 ]
-                try:
-                    _t_tb = time.perf_counter()
-                    ids_sql = _firma_ozet_sql_winner_ids_query(
-                        rows_firma_sql_no_order, cift_olanlar
+                # Adet sınırı yok: grid batch + süre bütçesi
+                if winner_ids:
+                    toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
+                        winner_ids, ref_first, chunk_size=100, budget_sec=_borc_budget
                     )
-                    id_rows = fetch_all(ids_sql, rows_firma_params) or []
-                    winner_ids = [
-                        int(r["id"])
-                        for r in id_rows
-                        if r is not None and r.get("id") is not None
-                    ]
-                    try:
-                        max_ids = int(
-                            str(os.getenv("FIRMA_OZET_TOPLAM_BORC_MAX_IDS") or "800").strip() or "800"
-                        )
-                    except ValueError:
-                        max_ids = 800
-                    if winner_ids and len(winner_ids) <= max(50, max_ids):
-                        toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
-                            winner_ids, ref_first, chunk_size=100
-                        )
-                    elif winner_ids:
-                        toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
-                        current_app.logger.info(
-                            "firma_ozet toplam_borc SQL yedek (winner_ids=%s > max=%s)",
-                            len(winner_ids),
-                            max_ids,
-                        )
-                    current_app.logger.info(
-                        "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%.2f",
-                        len(winner_ids),
-                        (time.perf_counter() - _t_tb) * 1000.0,
-                        toplam_borc,
-                    )
-                except Exception as e_borc:
-                    current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
+                current_app.logger.info(
+                    "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%s",
+                    len(winner_ids),
+                    (time.perf_counter() - _t_tb) * 1000.0,
+                    toplam_borc,
+                )
+            except Exception as e_borc:
+                current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
+                toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
             for _it in satirlar_resp:
                 _it.pop("_dedupe_vergi", None)
             has_more = off + len(satirlar_resp) < total_count_firma
@@ -4910,10 +4991,12 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             except Exception as e_pw_fb:
                 current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
         grid_hesapla_fb = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
-        # Hizli mod kapaliysa (liste_hizli=False): tum satirlar icin batch — eski davranis.
-        # Hizli mod + kucuk sayfa: once None ile donustur+sirala+dilimle, sonra dilim ID'leri icin batch.
-        if grid_hesapla_fb and not liste_hizli:
-            grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
+        _borc_budget_fb = _firma_ozet_borc_budget_sec()
+        # Hizli kapalı: tüm satırlar. Hizli + büyük sayfa: yine borç (prewarm yok).
+        if (not liste_hizli) or (not grid_hesapla_fb):
+            grid_map_all = _firma_ozet_grid_ozet_map_for_rows(
+                rows_firma, ref_first, prewarm=bool(not liste_hizli), budget_sec=_borc_budget_fb
+            )
         else:
             grid_map_all = {}
         satirlar_firma = []
@@ -4931,7 +5014,6 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         for _it in satirlar_firma:
             _it.pop("_dedupe_vergi", None)
         toplam_aylik = 0.0
-        toplam_borc = 0.0
         for it in satirlar_firma:
             try:
                 v = float(it.get("aylik_tutar") or 0)
@@ -4939,14 +5021,8 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                     toplam_aylik += v
             except (TypeError, ValueError):
                 pass
-            try:
-                b = float(it.get("toplam_borc") or 0)
-                if math.isfinite(b):
-                    toplam_borc += b
-            except (TypeError, ValueError):
-                pass
         toplam_aylik = round(toplam_aylik, 2)
-        toplam_borc = round(toplam_borc, 2)
+        toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_firma)
         total_count_firma = len(satirlar_firma)
         satirlar_resp = satirlar_firma
         has_more = False
@@ -4974,14 +5050,10 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                         _it["guncel_kira_bedeli"] = round(_gcur, 2)
                 except (TypeError, ValueError):
                     pass
-                try:
-                    _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
-                except (TypeError, ValueError):
-                    pass
-                try:
-                    _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
-                except (TypeError, ValueError):
-                    pass
+                tb, ga = _firma_ozet_borc_fields_from_ozet(_oz)
+                _it["toplam_borc"] = tb
+                _it["geciken_ay"] = ga
+                _it["borc_hesaplanamadi"] = bool(_oz.get("borc_hesaplanamadi")) or (tb is None)
         if page_size > 0:
             current_app.logger.info(
                 "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
@@ -5045,8 +5117,14 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             "toplam_borc_kdv_dahil": toplam_borc,
         },
         "degrade_mode": firma_hizli_degrade,
+        "borc_hesaplanamadi_sayisi": _firma_ozet_borc_hesaplanamadi_say(satirlar_resp),
         "mesaj": ("Bağlantı dalgalanması nedeniyle hızlı modda yüklendi (borç özetleri sadeleştirildi)." if firma_hizli_degrade else ""),
     }
+    _bh_n = int(_firma_payload.get("borc_hesaplanamadi_sayisi") or 0)
+    if _bh_n > 0:
+        _ek = f"{_bh_n} müşteri için borç hesaplanmadı"
+        _m0 = str(_firma_payload.get("mesaj") or "").strip()
+        _firma_payload["mesaj"] = (_m0 + (" | " if _m0 else "") + _ek)
     if liste_hizli and not excel_mode:
         _firma_ozet_resp_cache_set(_firma_ozet_resp_cache_key(), _firma_payload)
 
@@ -7283,9 +7361,10 @@ def _firma_ozet_workbook_bytes(ds: dict):
         ws.cell(row=row, column=9, value=gun_v if gun_v else None).font = arial
         ws.cell(row=row, column=10, value=str(s.get("sozlesme_ay_adi") or "")).font = arial
         try:
-            ga = int(s.get("geciken_ay") or 0)
+            _ga_raw = s.get("geciken_ay")
+            ga = int(_ga_raw) if _ga_raw is not None and str(_ga_raw).strip() != "" else None
         except (TypeError, ValueError):
-            ga = 0
+            ga = None
         ws.cell(row=row, column=11, value=ga).font = arial
         ws.cell(row=row, column=12, value=str(s.get("grup2") or "")).font = arial
         ws.cell(row=row, column=13, value=str(s.get("hizmet_turu") or "")).font = arial
