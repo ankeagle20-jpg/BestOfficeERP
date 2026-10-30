@@ -71,7 +71,7 @@ def test_kira_son_borc_ayi_birim():
 
 
 def test_hepsi_sozlesme_yili_bayrak():
-    """KAPANIS_HEPSI_SOZLESME_YILI=1: sözleşme yılı sonu; N dolu değişmez."""
+    """KAPANIS_HEPSI_SOZLESME_YILI=1: ay-hizalı sözleşme yılı sonu; N dolu değişmez."""
     os.environ["KAPANIS_HEPSI_SOZLESME_YILI"] = "1"
     try:
         import importlib
@@ -79,12 +79,13 @@ def test_hepsi_sozlesme_yili_bayrak():
 
         importlib.reload(kc)
         from kira_kapanis_cap import (
+            _hepsi_sozlesme_yili_son_borc_ayi_eski,
             hepsi_sozlesme_yili_son_borc_ayi,
             kapanis_ek_fingerprint,
             kira_son_borc_ayi,
         )
 
-        # giriş Ağu-2023, kap Eyl-2025 → Tem-2026
+        # 1) giriş Ağu → Tem; kap Eyl-2025 → Tem-2026
         r = {
             "durum": "pasif",
             "kapanis_tarihi": date(2025, 9, 30),
@@ -93,9 +94,42 @@ def test_hepsi_sozlesme_yili_bayrak():
         }
         check("hepsi_agu_eyl", kira_son_borc_ayi(r) == date(2026, 7, 1), kira_son_borc_ayi(r))
 
-        # kap ayı yıl sonu (Tem-2025) → ek borç yok
+        # 2) kap ayı yıl sonu (Tem-2025) → son = kapanış ayı
         r_ys = dict(r, kapanis_tarihi=date(2025, 7, 15))
         check("hepsi_yil_sonu", kira_son_borc_ayi(r_ys) == date(2025, 7, 1), kira_son_borc_ayi(r_ys))
+
+        # 3) giriş Oca → Ara; kap Ağu-2025 → Ara-2025
+        r_oca = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2025, 8, 20),
+            "kapanis_sonrasi_borc_ay": None,
+            "sozlesme_tarihi": date(2024, 1, 10),
+        }
+        check("hepsi_oca_ara", kira_son_borc_ayi(r_oca) == date(2025, 12, 1), kira_son_borc_ayi(r_oca))
+
+        # 4) giriş Kas → Eki; kap Kas-2022 → Eki-2023
+        r_kas = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2022, 11, 5),
+            "kapanis_sonrasi_borc_ay": None,
+            "sozlesme_tarihi": date(2020, 11, 1),
+        }
+        check("hepsi_kas_eki", kira_son_borc_ayi(r_kas) == date(2023, 10, 1), kira_son_borc_ayi(r_kas))
+
+        # 5) yıl geçişi: giriş Kas, kap Ara → Eki sonraki yıl
+        r_ara = dict(r_kas, kapanis_tarihi=date(2022, 12, 31))
+        check("hepsi_kas_ara", kira_son_borc_ayi(r_ara) == date(2023, 10, 1), kira_son_borc_ayi(r_ara))
+
+        # soz > kap (yenileme tarihi ileri): soz 2027-01, kap 2025-08 → Ara-2025
+        r_yen = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2025, 8, 1),
+            "kapanis_sonrasi_borc_ay": None,
+            "sozlesme_tarihi": date(2027, 1, 8),
+        }
+        check("hepsi_soz_gt_kap", kira_son_borc_ayi(r_yen) == date(2025, 12, 1), kira_son_borc_ayi(r_yen))
+        eski_yen = _hepsi_sozlesme_yili_son_borc_ayi_eski(date(2027, 1, 8), date(2025, 8, 1))
+        check("hepsi_soz_gt_kap_eski_farkli", eski_yen != date(2025, 12, 1), eski_yen)
 
         # 3 ay sonra çıkış (Ağu..Eki) → ilk yıl Tem-2024
         r3 = dict(r, kapanis_tarihi=date(2023, 10, 10))
@@ -144,6 +178,18 @@ def test_hepsi_sozlesme_yili_bayrak():
             hepsi_sozlesme_yili_son_borc_ayi(date(2023, 8, 1), date(2025, 9, 30))
             == date(2026, 7, 1),
         )
+
+        # m≥0: yeni == eski (birkaç örnek)
+        for g, k in (
+            (date(2023, 8, 1), date(2025, 9, 30)),
+            (date(2023, 8, 1), date(2025, 7, 15)),
+            (date(2024, 1, 10), date(2025, 8, 20)),
+            (date(2020, 11, 1), date(2022, 11, 5)),
+            (date(2020, 11, 1), date(2022, 12, 31)),
+        ):
+            yeni = hepsi_sozlesme_yili_son_borc_ayi(g, k)
+            eski = _hepsi_sozlesme_yili_son_borc_ayi_eski(g, k)
+            check(f"eq_mge0_{g}_{k}", yeni == eski, f"yeni={yeni} eski={eski}")
     finally:
         os.environ.pop("KAPANIS_HEPSI_SOZLESME_YILI", None)
         import importlib

@@ -6,7 +6,8 @@ N = customers.kapanis_sonrasi_borc_ay
   1..12 → kapanış ayı + N ek ay
   None/boş → Hepsi:
     KAPANIS_HEPSI_SOZLESME_YILI!=1 → cap yok (None; eski)
-    =1 → çıktığı ayı içeren sözleşme yılının sonuna (giriş ayından 12'şer)
+    =1 → çıktığı ayı içeren sözleşme yılının sonuna
+      (giriş ayı 1..12 ile hizalı; sozlesme_bitis / kira_suresi_ay kullanılmaz)
 
 Dönüş: son borç ayının 1. günü (dahil). None = cap yok.
 """
@@ -78,19 +79,38 @@ def _giris_tarihi(musteri_row: Mapping[str, Any]) -> date | None:
     )
 
 
-def hepsi_sozlesme_yili_son_borc_ayi(giris: date, kap: date) -> date:
-    """Çıktığı ayı içeren sözleşme yılının son ayının 1'i.
-
-    m = (kap_ayı − giriş_ayı) ay farkı (aynı ay → 0).
-    son = giriş_ayı + 12*(m//12 + 1) − 1 ay.
-    Örn. giriş 2023-08, kap 2025-09 → m=25 → 2026-07.
-    """
+def _hepsi_sozlesme_yili_son_borc_ayi_eski(giris: date, kap: date) -> date:
+    """Eski m-tabanlı formül (kanıt / karşılaştırma). m<0 → 0 zorlanır."""
     g = date(giris.year, giris.month, 1)
     k = date(kap.year, kap.month, 1)
     m = (k.year - g.year) * 12 + (k.month - g.month)
     if m < 0:
         m = 0
     return _add_months(g, 12 * (m // 12 + 1) - 1)
+
+
+def hepsi_sozlesme_yili_son_borc_ayi(giris: date, kap: date) -> date:
+    """Çıktığı ayı içeren sözleşme yılının son ayının 1'i.
+
+    Anchor = giriş ayı (1..12). Yıl sonu ayı = anchor − 1 (Oca → Ara).
+    Kapanış ayından (dahil) ileriye ilk karşılaşılan yıl-sonu ayı.
+    Giriş yılı kullanılmaz → sozlesme_tarihi kapanıştan sonra (yenileme) olsa da doğru.
+    m≥0 iken eski formülle birebir aynı; m<0 iken eski m=0 zorlardı (yanlış yıl).
+
+    Örn. giriş Ağu → Tem; kap Eyl-2025 → Tem-2026; kap Tem-2025 → Tem-2025.
+    """
+    anchor = int(giris.month)
+    if not 1 <= anchor <= 12:
+        anchor = 1
+    year_end_m = 12 if anchor == 1 else anchor - 1
+    k = date(kap.year, kap.month, 1)
+    if k.month == year_end_m:
+        return k
+    if k.month < year_end_m:
+        delta = year_end_m - k.month
+    else:
+        delta = 12 - k.month + year_end_m
+    return _add_months(k, delta)
 
 
 def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
