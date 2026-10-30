@@ -361,30 +361,32 @@ def tutar_yaziya_gib(tutar):
 
 
 def _parse_amount_flexible(v):
-    """100.000,00 / 100000,00 / 100000.00 / 100000 biçimlerini güvenli parse eder."""
-    if v is None:
-        return 0.0
-    if isinstance(v, (int, float)):
-        try:
-            return float(v)
-        except Exception:
-            return 0.0
-    s = str(v).strip().replace(" ", "")
-    if not s:
-        return 0.0
-    if "," in s and "." in s:
-        if s.rfind(",") > s.rfind("."):
-            # TR biçim: 100.000,00
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            # EN biçim: 100,000.00
-            s = s.replace(",", "")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
+    """100.000,00 / 100000,00 / 100000.00 / 20.60 / 2.060 biçimlerini güvenli parse eder.
+
+    Ortak kurallar: tutar_parse.parse_amount_tr (tek nokta+1–2 hane = ondalık; +3 = binlik).
+    Belirsiz girdi → 0 (eski davranış; sessizce 100× büyütmez).
+    """
+    from tutar_parse import parse_amount_tr_or_zero
+
+    return parse_amount_tr_or_zero(v)
+
+
+def _fmt_tl_tr(n) -> str:
+    from tutar_parse import fmt_tl_tr
+
+    return fmt_tl_tr(n)
+
+
+def _ileri_donem_spill_ozet(pay_items, odeme_tarihi) -> tuple[float, float]:
+    from tutar_parse import ileri_donem_spill_ozet
+
+    return ileri_donem_spill_ozet(pay_items, odeme_tarihi)
+
+
+def _ileri_donem_onay_ret(pay_items, odeme_tarihi, tutar, data) -> dict | None:
+    from tutar_parse import ileri_donem_onay_ret
+
+    return ileri_donem_onay_ret(pay_items, odeme_tarihi, tutar, data)
 
 
 # Sadece rakam makbuzlar (>=1000). Eski '^10[0-9]+$' 1100+ satırları dışarıda bırakıyordu → hep 1000/çakışma.
@@ -10426,13 +10428,6 @@ def tahsilat_ekle():
                     _onay_raw = data.get("asiri_tutar_onay")
                     _onay = _onay_raw in (True, 1, "1", "true", "True", "yes", "on")
                     if not _onay:
-                        def _fmt_tl(n):
-                            return (
-                                f"{float(n):,.2f}"
-                                .replace(",", "X")
-                                .replace(".", ",")
-                                .replace("X", ".")
-                            )
                         return jsonify({
                             "ok": False,
                             "kod": "asiri_tutar_onay_gerekli",
@@ -10440,9 +10435,9 @@ def tahsilat_ekle():
                                 "Girilen %s TL'nin %s TL'si açık aylara dağıtılacak; "
                                 "%s TL hiçbir aya eşleşmeyecek. Devam edilsin mi?"
                                 % (
-                                    _fmt_tl(tutar),
-                                    _fmt_tl(dagitilacak),
-                                    _fmt_tl(eslesmeyen),
+                                    _fmt_tl_tr(tutar),
+                                    _fmt_tl_tr(dagitilacak),
+                                    _fmt_tl_tr(eslesmeyen),
                                 )
                             ),
                             "tutar": round(float(tutar or 0), 2),
@@ -10450,6 +10445,12 @@ def tahsilat_ekle():
                             "eslesmeyen": eslesmeyen,
                             "acik_ay_sayisi": len(auto_pay_items or []),
                         }), 400
+                # Vadesi gelmiş borcu aşıp ileri aya taşma → peşini engellemez, onay ister.
+                _ileri = _ileri_donem_onay_ret(
+                    auto_pay_items, tahsilat_tarihi, tutar, data
+                )
+                if _ileri:
+                    return jsonify(_ileri), 400
         aciklama_text = _aciklama_with_aylik_markers(
             raw_aciklama,
             ay_ref_isos,

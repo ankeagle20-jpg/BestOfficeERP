@@ -330,8 +330,13 @@ def yeni_merchant_oid() -> str:
 
 
 def kurus_from_tutar(raw) -> int:
+    from tutar_parse import parse_amount_tr
+
     try:
-        dec = Decimal(str(raw).replace(",", ".").strip())
+        n = parse_amount_tr(raw, default=None)
+        if n is None:
+            raise ValueError("tutar")
+        dec = Decimal(str(n))
     except Exception as exc:
         raise ValueError("tutar") from exc
     kurus = int((dec * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

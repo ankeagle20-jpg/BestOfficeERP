@@ -16343,6 +16343,23 @@ def api_aylik_tutarlardan_tahsil_et():
     if fazla_ret:
         return jsonify(fazla_ret), 400
 
+    # İleri dönem (vadesi gelmemiş ay) seçildiyse peşini engelleme; yalnız onay.
+    try:
+        from tutar_parse import ileri_donem_onay_ret
+
+        _odeme_s = varsayilan_tahsilat_tarihi.isoformat()
+        _pay_items = [
+            (p["ay_bir"].isoformat(), float(p["tutar"]))
+            for p in parsed
+            if p.get("ay_bir") is not None
+        ]
+        _toplam_p = round(sum(float(p["tutar"]) for p in parsed), 2)
+        _ileri = ileri_donem_onay_ret(_pay_items, _odeme_s, _toplam_p, data)
+        if _ileri:
+            return jsonify(_ileri), 400
+    except Exception:
+        pass
+
     caplanan = []
     try:
         kyc_cap = _musteri_kyc_grup_for_aylik_grid(musteri_id)

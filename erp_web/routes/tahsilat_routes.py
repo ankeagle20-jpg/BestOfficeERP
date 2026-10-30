@@ -20,27 +20,9 @@ def _parse_date(s):
 
 
 def _parse_amount_flexible(v):
-    if v is None:
-        return 0.0
-    if isinstance(v, (int, float)):
-        try:
-            return float(v)
-        except Exception:
-            return 0.0
-    s = str(v).strip().replace(" ", "")
-    if not s:
-        return 0.0
-    if "," in s and "." in s:
-        if s.rfind(",") > s.rfind("."):
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", "")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
+    from tutar_parse import parse_amount_tr_or_zero
+
+    return parse_amount_tr_or_zero(v)
 
 
 @bp.route("/")

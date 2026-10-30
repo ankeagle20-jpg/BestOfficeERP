@@ -15854,10 +15854,28 @@ function faturaRaporSecilenleriSil() {
     };
 
     function parseNumberTR(s) {
+        if (typeof window.parseAmountTRSafe === 'function') {
+            var n0 = window.parseAmountTRSafe(s);
+            return Number.isFinite(n0) ? n0 : 0;
+        }
         if (s == null) return 0;
         s = String(s).trim();
         if (!s) return 0;
-        s = s.replace(/\./g, '').replace(',', '.');
+        // Güvenli yedek: virgül ondalık; tek nokta 1–2 hane ondalık, 3 hane binlik
+        var hasDot = s.indexOf('.') >= 0, hasComma = s.indexOf(',') >= 0;
+        if (hasDot && hasComma) {
+            if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+            else s = s.replace(/,/g, '');
+        } else if (hasComma) {
+            s = s.replace(/\./g, '').replace(',', '.');
+        } else if (hasDot) {
+            if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+            else {
+                var mm = s.match(/^(\d+)\.(\d+)$/);
+                if (mm && mm[2].length === 3) s = s.replace(/\./g, '');
+                else if (!(mm && mm[2].length <= 2)) return 0;
+            }
+        }
         var n = parseFloat(s);
         return Number.isFinite(n) ? n : 0;
     }
@@ -19191,6 +19209,7 @@ function sozlesmeAylikTahsilEt(onayFazla) {
         tahsilBtn.style.cursor = 'not-allowed';
         tahsilBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> İşleniyor...';
     }
+    if (!onayFazla) window.__ileriDonemOnayPanel = false;
     var fazlaRetry = false;
     var tahsilAbort = new AbortController();
     var tahsilTimeoutId = setTimeout(function () {
@@ -19203,7 +19222,7 @@ function sozlesmeAylikTahsilEt(onayFazla) {
         credentials: 'same-origin',
         timeoutMs: 120000,
         signal: tahsilAbort.signal,
-        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0 })
+        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0, ileri_donem_onay: window.__ileriDonemOnayPanel ? 1 : 0 })
     }, 2).then(function (res) {
         if (res.iptal || (res.j && res.j.iptal)) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
@@ -19214,6 +19233,15 @@ function sozlesmeAylikTahsilEt(onayFazla) {
             var fazlaMetin = girisTahsilFazlaTutarOnayMetni(res.j);
             if (fazlaMetin && !onayFazla && confirm(fazlaMetin)) {
                 fazlaRetry = true;
+                return;
+            }
+            if (res.j && res.j.kod === 'ileri_donem_onay_gerekli' && !window.__ileriDonemOnayPanel) {
+                if (confirm(res.j.mesaj || 'Tutar vadesi gelmiş borcu aşıyor; fazlası ileri döneme yazılacak. Emin misiniz?')) {
+                    window.__ileriDonemOnayPanel = true;
+                    fazlaRetry = true;
+                    return;
+                }
+                alert('İptal edildi; ileri döneme yazılmadı.');
                 return;
             }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'İşlem başarısız.');
@@ -19571,18 +19599,61 @@ function sozlesmeAylikBorctanCikar() {
 }
 
 /** Tahsilat makbuz tutar alanı için tr-TR biçim (örn. 1.234,56). */
-/** TR sayı metni → float (1.000, 1.234,56, 1000, 1.25). Geçersiz → NaN. */
-function girisTrSayiParse(str) {
+
+/** Ortak TR tutar ayrıştırma — sessiz 100× yok.
+ *  Virgül ondalık; tek nokta +1–2 hane ondalık; +3 hane / 1.234 grupları binlik.
+ *  Belirsiz → NaN (çağıran reddeder).
+ */
+function parseAmountTRSafe(str) {
     if (str == null) return NaN;
-    var s = String(str).trim();
+    if (typeof str === 'number') return Number.isFinite(str) ? str : NaN;
+    var s = String(str).trim().replace(/\s/g, '').replace(/\u00a0/g, '');
     if (!s) return NaN;
-    s = s.replace(/\s/g, '');
-    if (s.indexOf(',') !== -1) {
-        s = s.replace(/\./g, '').replace(',', '.');
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
-        s = s.replace(/\./g, '');
+    s = s.replace(/TL$/i, '').trim();
+    if (!s) return NaN;
+    var neg = false;
+    if (s.charAt(0) === '-') { neg = true; s = s.slice(1); }
+    var hasDot = s.indexOf('.') >= 0;
+    var hasComma = s.indexOf(',') >= 0;
+    var out = null;
+    if (hasDot && hasComma) {
+        if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+            out = s.replace(/\./g, '').replace(',', '.');
+        } else {
+            out = s.replace(/,/g, '');
+        }
+    } else if (hasComma) {
+        if ((s.match(/,/g) || []).length > 1) return NaN;
+        out = s.replace(/\./g, '').replace(',', '.');
+    } else if (hasDot) {
+        if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+            out = s.replace(/\./g, '');
+        } else {
+            var m = s.match(/^(\d+)\.(\d+)$/);
+            if (!m) return NaN;
+            var frac = m[2];
+            if (frac.length <= 2) out = s;
+            else if (frac.length === 3) out = s.replace(/\./g, '');
+            else return NaN;
+        }
+    } else {
+        if (!/^\d+$/.test(s)) return NaN;
+        out = s;
     }
-    return parseFloat(s);
+    var n = parseFloat(out);
+    if (!Number.isFinite(n)) return NaN;
+    return neg ? -n : n;
+}
+function parseNumberTR(s) {
+    var n = parseAmountTRSafe(s);
+    return Number.isFinite(n) ? n : 0;
+}
+window.parseAmountTRSafe = parseAmountTRSafe;
+window.parseNumberTR = parseNumberTR;
+
+/** TR sayı metni → float; belirsiz → NaN. parseAmountTRSafe ile aynı kurallar. */
+function girisTrSayiParse(str) {
+    return parseAmountTRSafe(str);
 }
 
 /** girisTrSayiParse; geçersiz/boş → 0 */
@@ -22410,7 +22481,7 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, onayFazla) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         timeoutMs: 120000,
-        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0 })
+        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0, ileri_donem_onay: window.__ileriDonemOnayPanel ? 1 : 0 })
     }, 2).then(function (res) {
         window.__tahsilatYilAyDbInFlight = false;
         if (res.iptal || (res.j && res.j.iptal)) {
@@ -22422,6 +22493,16 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, onayFazla) {
             var fazlaMetin = girisTahsilFazlaTutarOnayMetni(res.j);
             if (fazlaMetin && !onayFazla && confirm(fazlaMetin)) {
                 girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, true);
+                return;
+            }
+            if (res.j && res.j.kod === 'ileri_donem_onay_gerekli' && !window.__ileriDonemOnayPanel) {
+                if (confirm(res.j.mesaj || 'Tutar vadesi gelmiş borcu aşıyor; fazlası ileri döneme yazılacak. Emin misiniz?')) {
+                    window.__ileriDonemOnayPanel = true;
+                    girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb, onayFazla);
+                    return;
+                }
+                alert('İptal edildi; ileri döneme yazılmadı.');
+                if (doneCb) doneCb(false);
                 return;
             }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kaydı başarısız.');
@@ -27611,9 +27692,11 @@ function girisTediyeMusteriListesiGetir(q) {
 function girisTediyeFormPayload() {
     var musteriId = document.getElementById('giris_tediye_musteri_id').value;
     var tutarRaw = document.getElementById('giris_tediye_tutar').value || '';
-    var tutar = (typeof parseNumberTR === 'function')
-        ? parseNumberTR(tutarRaw)
-        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    var tutar = (typeof parseAmountTRSafe === 'function')
+        ? (function () { var n = parseAmountTRSafe(tutarRaw); return Number.isFinite(n) ? n : 0; })()
+        : ((typeof parseNumberTR === 'function')
+            ? parseNumberTR(tutarRaw)
+            : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0));
     var odemeTuru = document.getElementById('giris_tediye_odeme_turu').value || 'nakit';
     var cekDetay = tahsilatCekDetayTopla('giris_tediye');
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
@@ -32523,9 +32606,11 @@ function sozlesmeTediyeMusteriListesiGetir(q) {
 function sozlesmeTediyeFormPayload() {
     var musteriId = document.getElementById('sozlesme_tediye_musteri_id').value;
     var tutarRaw = document.getElementById('sozlesme_tediye_tutar').value || '';
-    var tutar = (typeof parseNumberTR === 'function')
-        ? parseNumberTR(tutarRaw)
-        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    var tutar = (typeof parseAmountTRSafe === 'function')
+        ? (function () { var n = parseAmountTRSafe(tutarRaw); return Number.isFinite(n) ? n : 0; })()
+        : ((typeof parseNumberTR === 'function')
+            ? parseNumberTR(tutarRaw)
+            : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0));
     var odemeTuru = document.getElementById('sozlesme_tediye_odeme_turu').value || 'nakit';
     var cekDetay = tahsilatCekDetayTopla('sozlesme_tediye');
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
@@ -33296,9 +33381,11 @@ function girisTahsilatFormPayload() {
     const musteriAdiAra = (document.getElementById('giris_tahsilat_musteri_ara').value || '').trim();
     const musteriAdiSecilen = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || '').trim();
     const tutarRaw = (document.getElementById('giris_tahsilat_tutar').value || '');
-    let tutar = (typeof parseNumberTR === 'function')
-        ? parseNumberTR(tutarRaw)
-        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    let tutar = (typeof parseAmountTRSafe === 'function')
+        ? (function () { var n = parseAmountTRSafe(tutarRaw); return Number.isFinite(n) ? n : 0; })()
+        : ((typeof parseNumberTR === 'function')
+            ? parseNumberTR(tutarRaw)
+            : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0));
     const odemeTuru = (document.getElementById('giris_tahsilat_odeme_turu').value || 'nakit');
     const cekDetay = tahsilatCekDetayTopla('giris_tahsilat');
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
@@ -33477,7 +33564,17 @@ function girisTahsilatMakbuzKaydet() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payloadOnay)
-            }).then(function (r2) { return r2.json(); }).then(girisTahsilatMakbuzKaydetUygula);
+            }).then(function (r2) { return r2.json(); }).then(girisTahsilatMakbuzKaydetCevap);
+        }
+        if (data && data.kod === 'ileri_donem_onay_gerekli') {
+            var onayMsg2 = (data.mesaj || 'Tutar vadesi gelmiş borcu aşıyor; fazlası ileri döneme yazılacak. Emin misiniz?');
+            if (!window.confirm(onayMsg2)) return;
+            var payloadOnay2 = Object.assign({}, payload, { ileri_donem_onay: true });
+            return fetch(API_TAHSILAT_EKLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadOnay2)
+            }).then(function (r2) { return r2.json(); }).then(girisTahsilatMakbuzKaydetCevap);
         }
         return girisTahsilatMakbuzKaydetUygula(data);
     }
@@ -33825,9 +33922,11 @@ function sozlesmeTahsilatFormPayload() {
     const musteriAdiAra = (document.getElementById('sozlesme_tahsilat_musteri_ara').value || '').trim();
     const musteriAdiSecilen = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || '').trim();
     const tutarRaw = (document.getElementById('sozlesme_tahsilat_tutar').value || '');
-    let tutar = (typeof parseNumberTR === 'function')
-        ? parseNumberTR(tutarRaw)
-        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    let tutar = (typeof parseAmountTRSafe === 'function')
+        ? (function () { var n = parseAmountTRSafe(tutarRaw); return Number.isFinite(n) ? n : 0; })()
+        : ((typeof parseNumberTR === 'function')
+            ? parseNumberTR(tutarRaw)
+            : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0));
     const odemeTuru = (document.getElementById('sozlesme_tahsilat_odeme_turu').value || 'nakit');
     const cekDetay = tahsilatCekDetayTopla('sozlesme_tahsilat');
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
@@ -33971,7 +34070,17 @@ function sozlesmeTahsilatKaydet() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payloadOnay)
-            }).then(function (r2) { return r2.json(); }).then(sozlesmeTahsilatKaydetUygula);
+            }).then(function (r2) { return r2.json(); }).then(sozlesmeTahsilatKaydetCevap);
+        }
+        if (data && data.kod === 'ileri_donem_onay_gerekli') {
+            var onayMsg2 = (data.mesaj || 'Tutar vadesi gelmiş borcu aşıyor; fazlası ileri döneme yazılacak. Emin misiniz?');
+            if (!window.confirm(onayMsg2)) return;
+            var payloadOnay2 = Object.assign({}, payload, { ileri_donem_onay: true });
+            return fetch(API_TAHSILAT_EKLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadOnay2)
+            }).then(function (r2) { return r2.json(); }).then(sozlesmeTahsilatKaydetCevap);
         }
         return sozlesmeTahsilatKaydetUygula(data);
     }
