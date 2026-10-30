@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -207,6 +208,352 @@ def test_apply_without_allow_prod_write():
     check("apply reddedildi", rc == 2)
 
 
+def _borc_209() -> dict[str, float]:
+    out = {}
+    for y, months in ((2023, range(8, 13)), (2024, range(1, 7))):
+        for m in months:
+            out[f"{y}-{m:02d}-01"] = 1800.0
+    return out
+
+
+def _sentetik_209() -> list[dict]:
+    """Markersiz banka + erken manuel; son manuel eski spill marker'lı."""
+    rows = [
+        {
+            "id": 1,
+            "mid": 209,
+            "makbuz_no": "M1",
+            "tutar": 3000.0,
+            "tarih": "2023-09-25",
+            "aciklama": (
+                "Tahsilat H|AYLIK_TAH|2023-08-01| |AYLIK_TAH|2023-09-01| "
+                "|AYLIK_PAY|2023-08-01=1800.00| |AYLIK_PAY|2023-09-01=1200.00|"
+            ),
+            "kaynak": "manuel_makbuz",
+            "odeme_turu": "havale",
+            "tahsil_eden": 1,
+            "cls": "manuel_makbuz",
+        },
+        {
+            "id": 2,
+            "mid": 209,
+            "makbuz_no": "M2",
+            "tutar": 1500.0,
+            "tarih": "2023-11-07",
+            "aciklama": (
+                "Tahsilat H|AYLIK_TAH|2023-09-01| |AYLIK_TAH|2023-10-01| "
+                "|AYLIK_PAY|2023-09-01=600.00| |AYLIK_PAY|2023-10-01=900.00|"
+            ),
+            "kaynak": "manuel_makbuz",
+            "odeme_turu": "havale",
+            "tahsil_eden": 1,
+            "cls": "manuel_makbuz",
+        },
+        {
+            "id": 3,
+            "mid": 209,
+            "makbuz_no": "M3",
+            "tutar": 2000.0,
+            "tarih": "2023-12-29",
+            "aciklama": (
+                "Tahsilat H|AYLIK_TAH|2023-10-01| |AYLIK_TAH|2023-11-01| "
+                "|AYLIK_PAY|2023-10-01=900.00| |AYLIK_PAY|2023-11-01=1100.00|"
+            ),
+            "kaynak": "manuel_makbuz",
+            "odeme_turu": "havale",
+            "tahsil_eden": 1,
+            "cls": "manuel_makbuz",
+        },
+        {
+            "id": 10,
+            "mid": 209,
+            "makbuz_no": "B1",
+            "tutar": 2000.0,
+            "tarih": "2024-05-28",
+            "aciklama": "FAST gelen transfer",
+            "kaynak": "banka_import",
+            "odeme_turu": "havale",
+            "tahsil_eden": None,
+            "cls": "banka_import",
+        },
+        {
+            "id": 11,
+            "mid": 209,
+            "makbuz_no": "B2",
+            "tutar": 2000.0,
+            "tarih": "2024-09-30",
+            "aciklama": "FAST gelen transfer",
+            "kaynak": "banka_import",
+            "odeme_turu": "havale",
+            "tahsil_eden": None,
+            "cls": "banka_import",
+        },
+        {
+            "id": 20,
+            "mid": 209,
+            "makbuz_no": "M4",
+            "tutar": 3000.0,
+            "tarih": "2024-12-29",
+            "aciklama": (
+                "Tahsilat H|AYLIK_TAH|2023-11-01| |AYLIK_TAH|2023-12-01| |AYLIK_TAH|2024-01-01| "
+                "|AYLIK_PAY|2023-11-01=700.00| |AYLIK_PAY|2023-12-01=1800.00| "
+                "|AYLIK_PAY|2024-01-01=500.00|"
+            ),
+            "kaynak": "manuel_makbuz",
+            "odeme_turu": "havale",
+            "tahsil_eden": 1,
+            "cls": "manuel_makbuz",
+        },
+    ]
+    return rows
+
+
+def test_sentetik_209_odendi_korunur():
+    from scripts.makbuz_dagitim_onar import (
+        _simulate_tahsil_map,
+        _panel_cells_from_map,
+        hesapla_plan,
+    )
+
+    borc = _borc_209()
+    rows = _sentetik_209()
+    plan = hesapla_plan(209, rows, borc=borc)
+    check("209 plan ok", plan.get("ok") is True, plan.get("neden"))
+    # banka aciklama değişmemeli
+    for r in rows:
+        if r.get("cls") == "banka_import":
+            check("209 banka ayni", r.get("aciklama") == "FAST gelen transfer")
+    by_yeni = {int(p["id"]): p["yeni_aciklama"] for p in plan["plans"]}
+    rows_eff = []
+    for r in rows:
+        item = dict(r)
+        if int(r["id"]) in by_yeni:
+            item["aciklama"] = by_yeni[int(r["id"])]
+        rows_eff.append(item)
+    tah = _simulate_tahsil_map(borc, rows_eff)
+    cells = _panel_cells_from_map(borc, tah)
+    # Erken aylar ödendi kalmalı (markersiz banka sabit tüketim + manuel)
+    for iso in ("2023-08-01", "2023-09-01", "2023-10-01"):
+        check(
+            f"209 {iso} odendi",
+            (cells.get(iso) or {}).get("durum") == "odendi",
+            cells.get(iso),
+        )
+    # Ara23 panel simülasyonunda borçluya düşmemeli
+    check(
+        "209 Ara23 not borclu",
+        (cells.get("2023-12-01") or {}).get("durum") != "borclu",
+        cells.get("2023-12-01"),
+    )
+
+
+def _sentetik_126() -> tuple[list[dict], dict]:
+    brut = 1373.93
+    borc = {f"2026-{m:02d}-01": (600.0 if m < 8 else brut) for m in range(4, 13)}
+    rows = []
+    for i, m in enumerate((4, 5, 6, 7), start=1):
+        iso = f"2026-{m:02d}-01"
+        rows.append(
+            {
+                "id": 100 + i,
+                "mid": 126,
+                "makbuz_no": f"E{i}",
+                "tutar": 600.0,
+                "tarih": f"2026-{m:02d}-01",
+                "aciklama": _tah_only(iso, 600.0),
+                "kaynak": "",
+                "odeme_turu": "havale",
+                "tahsil_eden": None,
+                "cls": "esitle_grid_pattern",
+            }
+        )
+    rows.append(
+        {
+            "id": 200,
+            "mid": 126,
+            "makbuz_no": "4172",
+            "tutar": 600.0,
+            "tarih": "2026-07-08",
+            "aciklama": (
+                "Temmuz 2026 Tahsilat H|AYLIK_TAH|2026-07-01| "
+                "|AYLIK_PAY|2026-07-01=600.00|"
+            ),
+            "kaynak": "manuel_makbuz",
+            "odeme_turu": "havale",
+            "tahsil_eden": 1,
+            "cls": "manuel_makbuz",
+        }
+    )
+    for tid, no, td, iso in (
+        (201, "4436", "2026-08-11", "2026-08-01"),
+        (202, "4529", "2026-09-01", "2026-09-01"),
+        (203, "4698", "2026-10-06", "2026-10-01"),
+    ):
+        rows.append(
+            {
+                "id": tid,
+                "mid": 126,
+                "makbuz_no": no,
+                "tutar": 1374.0,
+                "tarih": td,
+                "aciklama": (
+                    f"Tahsilat H|AYLIK_TAH|{iso}| |AYLIK_PAY|{iso}=1374.00|"
+                ),
+                "kaynak": "manuel_makbuz",
+                "odeme_turu": "havale",
+                "tahsil_eden": 1,
+                "cls": "manuel_makbuz",
+            }
+        )
+    return rows, borc
+
+
+def test_sentetik_126_onemsiz():
+    from scripts.makbuz_dagitim_onar import (
+        _kurus_gurultusu_mu,
+        degerlendir_plan,
+        hesapla_plan,
+    )
+
+    # Doğrudan kuruş kuralı (126 tipi spill)
+    plans_kurus = [
+        {
+            "degisti": True,
+            "eski_pay": [("2026-08-01", 1374.0)],
+            "yeni_pay": [("2026-08-01", 1373.93), ("2026-09-01", 0.07)],
+        },
+        {
+            "degisti": True,
+            "eski_pay": [("2026-09-01", 1374.0)],
+            "yeni_pay": [("2026-09-01", 1373.86), ("2026-10-01", 0.14)],
+        },
+        {
+            "degisti": True,
+            "eski_pay": [("2026-10-01", 1374.0)],
+            "yeni_pay": [("2026-10-01", 1373.79), ("2026-11-01", 0.21)],
+        },
+    ]
+    check("126 kurus fn", _kurus_gurultusu_mu(plans_kurus) is True)
+
+    rows, borc = _sentetik_126()
+    plan = {
+        "ok": True,
+        "plans": [
+            {
+                "id": 201,
+                "no": "4436",
+                "tarih": "2026-08-11",
+                "tutar": 1374.0,
+                "eski_pay": [("2026-08-01", 1374.0)],
+                "yeni_pay": [("2026-08-01", 1373.93), ("2026-09-01", 0.07)],
+                "eski_sum": 1374.0,
+                "yeni_sum": 1374.0,
+                "degisti": True,
+                "eski_aciklama": "x",
+                "yeni_aciklama": (
+                    "x|AYLIK_TAH|2026-08-01| |AYLIK_TAH|2026-09-01| "
+                    "|AYLIK_PAY|2026-08-01=1373.93| |AYLIK_PAY|2026-09-01=0.07|"
+                ),
+            },
+            {
+                "id": 202,
+                "no": "4529",
+                "tarih": "2026-09-01",
+                "tutar": 1374.0,
+                "eski_pay": [("2026-09-01", 1374.0)],
+                "yeni_pay": [("2026-09-01", 1373.86), ("2026-10-01", 0.14)],
+                "eski_sum": 1374.0,
+                "yeni_sum": 1374.0,
+                "degisti": True,
+                "eski_aciklama": "x",
+                "yeni_aciklama": (
+                    "x|AYLIK_TAH|2026-09-01| |AYLIK_TAH|2026-10-01| "
+                    "|AYLIK_PAY|2026-09-01=1373.86| |AYLIK_PAY|2026-10-01=0.14|"
+                ),
+            },
+            {
+                "id": 203,
+                "no": "4698",
+                "tarih": "2026-10-06",
+                "tutar": 1374.0,
+                "eski_pay": [("2026-10-01", 1374.0)],
+                "yeni_pay": [("2026-10-01", 1373.79), ("2026-11-01", 0.21)],
+                "eski_sum": 1374.0,
+                "yeni_sum": 1374.0,
+                "degisti": True,
+                "eski_aciklama": "x",
+                "yeni_aciklama": (
+                    "x|AYLIK_TAH|2026-10-01| |AYLIK_TAH|2026-11-01| "
+                    "|AYLIK_PAY|2026-10-01=1373.79| |AYLIK_PAY|2026-11-01=0.21|"
+                ),
+            },
+        ],
+        "n_degisti": 3,
+        "update_ids": [201, 202, 203],
+        "n_manuel": 3,
+        "n_diger": 0,
+        "diger_ids": [],
+        "borc": borc,
+    }
+    snap = {
+        "by_iso": {
+            iso: {"aylik": b, "tahsil": min(b, 1374.0) if b > 600 else b, "kalan": 0.0}
+            for iso, b in borc.items()
+        },
+        "payload": {
+            "aylar": [
+                {
+                    "yil": int(iso[:4]),
+                    "ay": int(iso[5:7]),
+                    "brut_tutar_kdv": b,
+                }
+                for iso, b in borc.items()
+            ]
+        },
+    }
+    for iso, cell in snap["by_iso"].items():
+        b = cell["aylik"]
+        t = cell["tahsil"]
+        cell["kalan"] = round(max(b - t, 0), 2)
+    deg = degerlendir_plan(plan, rows, snap, date(2026, 10, 30))
+    check("126 ONEMSIZ", deg.get("hukum") == "ONEMSIZ", deg)
+    check("126 n_update0", int(deg.get("n_update", -1)) == 0, deg.get("n_update"))
+    # canlı hesapla da kuruş/uygulama-gereksiz sınıfına düşebilir; en azından ok
+    plan_live = hesapla_plan(126, rows, borc=borc)
+    check("126 live ok", plan_live.get("ok") is True, plan_live.get("neden"))
+
+
+def test_risk_apply_reddedilir():
+    from scripts.makbuz_dagitim_onar import _risk_analiz
+
+    once = {
+        "2024-01-01": {
+            "aylik": 1800.0,
+            "tahsil": 1800.0,
+            "kalan": 0.0,
+            "durum": "odendi",
+        }
+    }
+    bek = {
+        "2024-01-01": {
+            "aylik": 1800.0,
+            "tahsil": 0.0,
+            "kalan": 1800.0,
+            "durum": "borclu",
+        }
+    }
+    r = _risk_analiz(once, bek, date(2026, 10, 30))
+    check("riskli bayrak", r.get("riskli") is True, r)
+    check(
+        "odendi_gerileme",
+        any(x.get("tip") == "odendi_gerileme" for x in (r.get("riskler") or [])),
+        r.get("riskler"),
+    )
+    # Apply kapısı: RISKLI ve --risk-onay yok → reddedilmeli
+    hukum, risk_onay = "RISKLI", False
+    check("apply red kosulu", hukum == "RISKLI" and not risk_onay)
+
+
 def test_default_allowlist_davranisi_degismedi():
     """tam_fifo=False iken eski TAH allowlist hâlâ kilitler."""
     from routes.faturalar_routes import yeniden_hesapla_makbuz_dagitim_aciklama
@@ -300,6 +647,9 @@ if __name__ == "__main__":
     test_kapsam_disi_degismez()
     test_apply_without_allow_prod_write()
     test_default_allowlist_davranisi_degismedi()
+    test_sentetik_209_odendi_korunur()
+    test_sentetik_126_onemsiz()
+    test_risk_apply_reddedilir()
     if FAILS:
         print("FAILS", FAILS)
         raise SystemExit(1)

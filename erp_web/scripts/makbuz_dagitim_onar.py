@@ -111,13 +111,194 @@ def load_tahsilatlar(mid: int, fetch_all) -> list[dict]:
     return out
 
 
+def _has_marker(aciklama: str | None) -> bool:
+    ac = str(aciklama or "")
+    return bool(_PAY_RE.search(ac) or _TAH_RE.search(ac))
+
+
+def _pay_map(pays) -> dict[str, float]:
+    out: dict[str, float] = defaultdict(float)
+    for iso, p in pays or []:
+        out[str(iso)[:10]] = round(out[str(iso)[:10]] + float(p), 2)
+    return dict(out)
+
+
+def _durum(tahsil: float, kalan: float, brut: float) -> str:
+    if tahsil <= 0.01:
+        return "borclu" if brut > 0.01 else "bos"
+    if kalan <= 0.05:
+        return "odendi"
+    return "kismi"
+
+
+def _kurus_gurultusu_mu(plans: list[dict]) -> bool:
+    """Yalnız ≤1,00 TL ay farkı varsa True (126 tipi). Değişen yoksa False."""
+    any_chg = False
+    for p in plans or []:
+        if not p.get("degisti"):
+            continue
+        any_chg = True
+        a = _pay_map(p.get("eski_pay"))
+        b = _pay_map(p.get("yeni_pay"))
+        for iso in set(a) | set(b):
+            if abs(a.get(iso, 0.0) - b.get(iso, 0.0)) > 1.00 + 1e-9:
+                return False
+    return any_chg
+
+
+def _simulate_tahsil_map(brut_by: dict[str, float], rows_eff: list[dict]) -> dict[str, float]:
+    """Panel `_aylik_tahsil_tutar_map` iki geçişi (marker'lı → markersiz oldest-open)."""
+    remaining = {str(k)[:10]: round(float(v), 2) for k, v in (brut_by or {}).items() if float(v) > 0}
+    marked: list[dict] = []
+    unmarked: list[dict] = []
+    for r in rows_eff or []:
+        try:
+            tut = round(float(r.get("tutar") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if tut <= 0:
+            continue
+        ac = str(r.get("aciklama") or "")
+        if _has_marker(ac):
+            marked.append(r)
+        else:
+            unmarked.append(r)
+
+    out: dict[str, float] = defaultdict(float)
+
+    def _alloc_oldest(rem_tutar: float) -> list[tuple[str, float]]:
+        rem = round(float(rem_tutar or 0), 2)
+        if rem <= 0 or not remaining:
+            return []
+        al: list[tuple[str, float]] = []
+        for iso in sorted(remaining):
+            if rem <= 0.004:
+                break
+            acik = round(float(remaining.get(iso) or 0), 2)
+            if acik <= 0:
+                continue
+            pay = round(min(acik, rem), 2)
+            if pay <= 0:
+                continue
+            al.append((iso, pay))
+            remaining[iso] = round(acik - pay, 2)
+            rem = round(rem - pay, 2)
+        return al
+
+    def _yaz(iso: str, pv: float) -> None:
+        iso = str(iso)[:10]
+        pv = round(float(pv or 0), 2)
+        if pv <= 0:
+            return
+        out[iso] = round(out[iso] + pv, 2)
+        if iso in remaining:
+            remaining[iso] = round(max(float(remaining.get(iso) or 0) - pv, 0), 2)
+
+    marked.sort(key=lambda r: (str(r.get("tarih") or "")[:10], int(r.get("id") or 0)))
+    unmarked.sort(key=lambda r: (str(r.get("tarih") or "")[:10], int(r.get("id") or 0)))
+
+    for r in marked:
+        ac = str(r.get("aciklama") or "")
+        tut = round(float(r.get("tutar") or 0), 2)
+        pays = _pay_list(ac)
+        if pays:
+            for iso, pv in pays:
+                _yaz(iso, pv)
+            continue
+        tahs = _TAH_RE.findall(ac)
+        if tahs:
+            n = len(tahs)
+            cents = int(round(tut * 100))
+            if cents <= 0 or n <= 0:
+                continue
+            base, rem = cents // n, cents % n
+            for i, iso in enumerate(tahs):
+                share = (base + (1 if i < rem else 0)) / 100.0
+                _yaz(iso, share)
+            continue
+        for iso, pv in _alloc_oldest(tut):
+            out[iso] = round(out[iso] + pv, 2)
+
+    for r in unmarked:
+        tut = round(float(r.get("tutar") or 0), 2)
+        al = _alloc_oldest(tut)
+        if al:
+            for iso, pv in al:
+                out[iso] = round(out[iso] + pv, 2)
+            continue
+        tah = str(r.get("tarih") or "")[:10]
+        if len(tah) == 10:
+            iso = f"{tah[:7]}-01"
+            _yaz(iso, tut)
+    return dict(out)
+
+
+def _panel_cells_from_map(brut_by: dict[str, float], tahsil_map: dict[str, float]) -> dict[str, dict]:
+    out = {}
+    for iso, brut in sorted((brut_by or {}).items()):
+        b = round(float(brut or 0), 2)
+        t = round(float((tahsil_map or {}).get(iso) or 0), 2)
+        if b > 0 and t > b:
+            t = b
+        k = round(max(b - t, 0), 2) if b > 0 else 0.0
+        out[iso] = {"aylik": b, "tahsil": t, "kalan": k, "durum": _durum(t, k, b)}
+    return out
+
+
+def _risk_analiz(panel_once: dict, panel_bek: dict, bugun: date) -> dict:
+    """(a) ödendi→borçlu/kısmi (b) vadesi gelmiş borç artışı >0.50 (c) tek ay >1000."""
+    riskler = []
+    for iso in sorted(set(panel_once or {}) | set(panel_bek or {})):
+        o = (panel_once or {}).get(iso) or {}
+        b = (panel_bek or {}).get(iso) or {}
+        try:
+            ot = round(float(o.get("tahsil") or 0), 2)
+            ok_ = round(float(o.get("kalan") or 0), 2)
+            oa = round(float(o.get("aylik") or 0), 2)
+            bt = round(float(b.get("tahsil") or 0), 2)
+            bk = round(float(b.get("kalan") or 0), 2)
+            ba = round(float(b.get("aylik") or oa), 2)
+        except (TypeError, ValueError):
+            continue
+        st0 = o.get("durum") or _durum(ot, ok_, oa)
+        st1 = b.get("durum") or _durum(bt, bk, ba)
+        if st0 == "odendi" and st1 in ("borclu", "kismi"):
+            riskler.append({"tip": "odendi_gerileme", "ay": iso, "st0": st0, "st1": st1})
+        dt = round(bt - ot, 2)
+        dk = round(bk - ok_, 2)
+        if abs(dt) > 1000 or abs(dk) > 1000:
+            riskler.append({"tip": "ay_gt1000", "ay": iso, "dt": dt, "dk": dk})
+    b0 = _borc_ozet(panel_once, bugun)
+    b1 = _borc_ozet(panel_bek, bugun)
+    artis = round(
+        float(b1.get("vadesi_gelmis_kalan") or 0) - float(b0.get("vadesi_gelmis_kalan") or 0),
+        2,
+    )
+    if artis > 0.50:
+        riskler.append(
+            {
+                "tip": "borc_artisi",
+                "delta": artis,
+                "once": b0.get("vadesi_gelmis_kalan"),
+                "sonra": b1.get("vadesi_gelmis_kalan"),
+            }
+        )
+    return {
+        "riskli": bool(riskler),
+        "riskler": riskler,
+        "borc_once": b0,
+        "borc_sonra": b1,
+    }
+
+
 def hesapla_plan(
     mid: int,
     rows: list[dict],
     *,
     borc: dict | None = None,
 ) -> dict:
-    """manuel_makbuz satırlarını kronolojik tam FIFO ile yeniden dağıt (yazmaz)."""
+    """manuel_makbuz tam FIFO; markersiz kapsam-dışı kendi tarihinde SABİT tüketilir (yazılmaz)."""
+    from ay_fifo import acik_ay_dagit
     from routes.faturalar_routes import (
         _gorunen_borc_satirlari,
         yeniden_hesapla_makbuz_dagitim_aciklama,
@@ -126,37 +307,61 @@ def hesapla_plan(
     mid = int(mid)
     manuel = [r for r in rows if r.get("cls") == "manuel_makbuz"]
     diger = [r for r in rows if r.get("cls") != "manuel_makbuz"]
-    manuel = sorted(
-        manuel, key=lambda r: (str(r.get("tarih") or "")[:10], int(r.get("id") or 0))
-    )
     if borc is None:
         borc_map = _gorunen_borc_satirlari(mid)
     else:
         borc_map = dict(borc)
 
-    diger_onceki = [
-        {
-            "id": int(r["id"]),
-            "tarih": str(r.get("tarih") or "")[:10],
-            "tutar": round(float(r.get("tutar") or 0), 2),
-            "aciklama": r.get("aciklama") or "",
-        }
-        for r in diger
-    ]
-    batch: list[dict] = []
+    sirali = sorted(
+        rows,
+        key=lambda r: (str(r.get("tarih") or "")[:10], int(r.get("id") or 0)),
+    )
+    # Kronolojik: markersiz kapsam-dışı → kendi odeme tarihinde sanal PAY (DB'ye yazılmaz).
+    # Marker'lı eşitle/grid olduğu gibi. Manuel → tam_fifo yeniden hesap.
+    onceki_sabit: list[dict] = []
+    batch_manuel: list[dict] = []
     plans: list[dict] = []
-    for r in manuel:
+
+    for r in sirali:
         tid = int(r["id"])
         tah = str(r.get("tarih") or "")[:10]
         tutar = round(float(r.get("tutar") or 0), 2)
-        eski_ac = r.get("aciklama") or ""
-        eski_pay = _pay_list(eski_ac)
-        onceki = list(diger_onceki) + list(batch)
+        ac = r.get("aciklama") or ""
+        cls = r.get("cls")
+
+        if cls != "manuel_makbuz":
+            if _has_marker(ac):
+                onceki_sabit.append(
+                    {"id": tid, "tarih": tah, "tutar": tutar, "aciklama": ac}
+                )
+            else:
+                # banka_import / odeme_linki / markersiz diğer — sabit FIFO tüketim
+                onceki_now = list(onceki_sabit) + list(batch_manuel)
+                sanal_pay = acik_ay_dagit(
+                    borc_map,
+                    tutar,
+                    tah,
+                    onceki=onceki_now,
+                    sozlesme_basi=None,
+                )
+                onceki_sabit.append(
+                    {
+                        "id": tid,
+                        "tarih": tah,
+                        "tutar": tutar,
+                        "pay": list(sanal_pay or []),
+                        "aciklama": "",
+                    }
+                )
+            continue
+
+        eski_pay = _pay_list(ac)
+        onceki = list(onceki_sabit) + list(batch_manuel)
         yeni_ac = yeniden_hesapla_makbuz_dagitim_aciklama(
             mid,
             tutar=tutar,
             tahsilat_tarihi=tah,
-            aciklama_eski=eski_ac,
+            aciklama_eski=ac,
             haric_tahsilat_id=tid,
             kaynak="manuel_makbuz",
             odeme_turu=r.get("odeme_turu"),
@@ -167,9 +372,13 @@ def hesapla_plan(
         if yeni_ac is None:
             return {
                 "ok": False,
-                "neden": "yeniden_hesapla_none",
+                "neden": "yeniden_hesapla_none_acik_ay_yok",
                 "id": tid,
+                "tutar": tutar,
+                "tarih": tah,
+                "eski_pay": eski_pay,
                 "plans": plans,
+                "not": "onceki markersiz/sabit tuketim sonrasi acik ay kalmamis olabilir",
             }
         yeni_pay = _pay_list(yeni_ac)
         yeni_sum = _pay_sum(yeni_pay)
@@ -183,7 +392,6 @@ def hesapla_plan(
                 "yeni_pay": yeni_pay,
                 "plans": plans,
             }
-        # Yalnız PAY dağılımı değişince UPDATE (kozmetik metin farkı sayılmaz).
         degisti = list(eski_pay) != list(yeni_pay)
         plans.append(
             {
@@ -196,17 +404,12 @@ def hesapla_plan(
                 "eski_sum": _pay_sum(eski_pay),
                 "yeni_sum": yeni_sum,
                 "degisti": degisti,
-                "eski_aciklama": eski_ac,
+                "eski_aciklama": ac,
                 "yeni_aciklama": yeni_ac,
             }
         )
-        batch.append(
-            {
-                "id": tid,
-                "tarih": tah,
-                "tutar": tutar,
-                "aciklama": yeni_ac,
-            }
+        batch_manuel.append(
+            {"id": tid, "tarih": tah, "tutar": tutar, "aciklama": yeni_ac}
         )
 
     return {
@@ -220,6 +423,112 @@ def hesapla_plan(
         "update_ids": [p["id"] for p in plans if p["degisti"]],
         "diger_ids": [int(r["id"]) for r in diger],
         "borc": {k: round(float(v), 2) for k, v in sorted((borc_map or {}).items())},
+    }
+
+
+def degerlendir_plan(
+    plan: dict,
+    rows: list[dict],
+    snap: dict,
+    bugun: date,
+) -> dict:
+    """ÖNEMSİZ / RİSKLİ / UYGUN + panel önce/sonra (iki geçiş simülasyonu)."""
+    brut = _brut_by_iso(snap.get("payload") or {}, snap.get("by_iso") or {})
+    # Mevcut panel hücreleri (DB) — durum ekle
+    panel_once = {}
+    for iso, cell in (snap.get("by_iso") or {}).items():
+        try:
+            a = round(float((cell or {}).get("aylik") or brut.get(iso) or 0), 2)
+            t = round(float((cell or {}).get("tahsil") or 0), 2)
+            k = round(float((cell or {}).get("kalan") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        panel_once[str(iso)[:10]] = {
+            "aylik": a,
+            "tahsil": t,
+            "kalan": k,
+            "durum": _durum(t, k, a),
+        }
+    for iso, b in brut.items():
+        if iso not in panel_once:
+            panel_once[iso] = {
+                "aylik": b,
+                "tahsil": 0.0,
+                "kalan": b,
+                "durum": _durum(0.0, b, b),
+            }
+
+    # Efektif satırlar: manuel yeni aciklama, diger aynı (markersiz dokunulmaz)
+    by_yeni = {int(p["id"]): p.get("yeni_aciklama") for p in (plan.get("plans") or [])}
+    rows_eff = []
+    for r in rows:
+        item = dict(r)
+        tid = int(r["id"])
+        if tid in by_yeni and by_yeni[tid] is not None:
+            item["aciklama"] = by_yeni[tid]
+        rows_eff.append(item)
+
+    tahsil_bek = _simulate_tahsil_map(brut, rows_eff)
+    panel_bek = _panel_cells_from_map(brut, tahsil_bek)
+
+    kurus = _kurus_gurultusu_mu(plan.get("plans") or [])
+    risk = _risk_analiz(panel_once, panel_bek, bugun)
+
+    n_raw = int(plan.get("n_degisti") or 0)
+    update_ids = list(plan.get("update_ids") or [])
+    if kurus:
+        hukum = "ONEMSIZ"
+        gerekce = "yalniz <=1.00 TL kurus tasmasi; uygulama gerekmez"
+        n_update = 0
+        update_ids = []
+        # degisti bayraklarını rapor için düş
+        for p in plan.get("plans") or []:
+            p["degisti"] = False
+        plan["n_degisti"] = 0
+        plan["update_ids"] = []
+    elif risk.get("riskli"):
+        hukum = "RISKLI"
+        gerekce = ",".join(sorted({x.get("tip") for x in (risk.get("riskler") or [])}))
+        n_update = n_raw
+    elif n_raw == 0:
+        hukum = "UYGUN"
+        gerekce = "degisiklik yok (idempotent)"
+        n_update = 0
+    else:
+        hukum = "UYGUN"
+        gerekce = "risk yok; marker onarimi uygulanabilir"
+        n_update = n_raw
+
+    fark_aylar = []
+    for iso in sorted(set(panel_once) | set(panel_bek)):
+        o = panel_once.get(iso) or {}
+        b = panel_bek.get(iso) or {}
+        if abs(float(o.get("tahsil") or 0) - float(b.get("tahsil") or 0)) > 0.05 or abs(
+            float(o.get("kalan") or 0) - float(b.get("kalan") or 0)
+        ) > 0.05:
+            fark_aylar.append(
+                {
+                    "ay": iso,
+                    "once_t": o.get("tahsil"),
+                    "once_k": o.get("kalan"),
+                    "once_st": o.get("durum"),
+                    "bek_t": b.get("tahsil"),
+                    "bek_k": b.get("kalan"),
+                    "bek_st": b.get("durum"),
+                }
+            )
+
+    return {
+        "hukum": hukum,
+        "gerekce": gerekce,
+        "n_update": n_update,
+        "update_ids": update_ids,
+        "kurus": kurus,
+        "risk": risk,
+        "panel_once_borc": risk.get("borc_once"),
+        "panel_bek_borc": risk.get("borc_sonra"),
+        "fark_aylar": fark_aylar,
+        "panel_bek": panel_bek,
     }
 
 
@@ -467,7 +776,9 @@ def _dogrula_sonrasi(mid: int, plan: dict, bugun: date, fetch_all, fetch_one) ->
     }
 
 
-def _print_dry_run(mid: int, plan: dict, rows: list[dict], snap: dict, bugun: date) -> None:
+def _print_dry_run(
+    mid: int, plan: dict, rows: list[dict], snap: dict, bugun: date, deg: dict
+) -> None:
     print("=== KAPSAM_DISI ===", plan.get("n_diger"))
     for r in rows:
         if r.get("cls") == "manuel_makbuz":
@@ -480,6 +791,7 @@ def _print_dry_run(mid: int, plan: dict, rows: list[dict], snap: dict, bugun: da
                 "T": r.get("tutar"),
                 "cls": r.get("cls"),
                 "pays": _pay_list(r.get("aciklama")),
+                "markersiz": not _has_marker(r.get("aciklama")),
             }
         )
     print("=== MANUEL eski vs yeni ===")
@@ -496,41 +808,36 @@ def _print_dry_run(mid: int, plan: dict, rows: list[dict], snap: dict, bugun: da
                 "degisti": p["degisti"],
             }
         )
-    brut = _brut_by_iso(snap["payload"], snap["by_iso"])
-    bek = _beklenen_panel(
-        plan["plans"],
-        [r for r in rows if r.get("cls") != "manuel_makbuz"],
-        brut,
-    )
-    print("=== PANEL onceki vs beklenen (2026-04..12) ===")
-    for iso, cell in sorted(bek.items()):
-        cur = snap["by_iso"].get(iso) or {}
-        try:
-            pt = round(float(cur.get("tahsil") or 0), 2)
-            pk = round(float(cur.get("kalan") or 0), 2)
-        except (TypeError, ValueError):
-            pt, pk = 0.0, 0.0
-        _j(
-            {
-                "ay": iso,
-                "brut": cell["aylik"],
-                "panel_tahsil": pt,
-                "panel_kalan": pk,
-                "bek_tahsil": cell["tahsil"],
-                "bek_kalan": cell["kalan"],
-                "bek_durum": cell["durum"],
-                "fark_tahsil": round(pt - cell["tahsil"], 2),
-                "fark_kalan": round(pk - cell["kalan"], 2),
-            }
-        )
+    print("=== PANEL FARK (yalniz degisen) ===")
+    for row in deg.get("fark_aylar") or []:
+        _j(row)
     print("=== BORC ===")
-    _j({"mevcut": _borc_ozet(snap["by_iso"], bugun), "beklenen": _borc_ozet(bek, bugun)})
+    _j(
+        {
+            "mevcut": deg.get("panel_once_borc"),
+            "beklenen": deg.get("panel_bek_borc"),
+        }
+    )
+    print("=== HUKUM ===")
+    _j(
+        {
+            "hukum": deg.get("hukum"),
+            "gerekce": deg.get("gerekce"),
+            "n_update": deg.get("n_update"),
+            "ids": deg.get("update_ids"),
+            "riskler": (deg.get("risk") or {}).get("riskler"),
+        }
+    )
+    if deg.get("hukum") == "ONEMSIZ":
+        print("ONEMSIZ (yuvarlama), uygulama gerekmez")
+    elif deg.get("hukum") == "RISKLI":
+        print("RISKLI")
     print("=== UPDATE PLANI ===")
     _j(
         {
             "mid": mid,
-            "n_update": plan.get("n_degisti"),
-            "ids": plan.get("update_ids"),
+            "n_update": deg.get("n_update"),
+            "ids": deg.get("update_ids"),
             "tahsilat_degisti": f"tahsilat_degisti({mid})",
             "yedek": str(_yedek_yolu(mid)),
         }
@@ -574,6 +881,11 @@ def main(argv=None) -> int:
         help="yaz; yalnız ALLOW_PROD_WRITE + --mid ile",
     )
     ap.add_argument(
+        "--risk-onay",
+        action="store_true",
+        help="RİSKLİ hükümde apply'a bilinçli izin (varsayılan reddedilir)",
+    )
+    ap.add_argument(
         "--bugun",
         default="2026-10-30",
         help="vadesi gelmiş borç hesabı için tarih YYYY-MM-DD",
@@ -612,65 +924,65 @@ def main(argv=None) -> int:
     rows = load_tahsilatlar(mid, fetch_all)
     plan = hesapla_plan(mid, rows)
     if not plan.get("ok"):
-        print("DUR", plan.get("neden"), {k: plan.get(k) for k in ("id", "tutar", "yeni_sum")})
+        print(
+            "DUR",
+            plan.get("neden"),
+            {
+                k: plan.get(k)
+                for k in ("id", "tutar", "tarih", "eski_pay", "yeni_sum", "not")
+            },
+        )
         return 1
 
     snap = _panel_snapshot(mid, fetch_one)
+    deg = degerlendir_plan(plan, rows, snap, bugun)
     print("=== DRY-RUN mid=%s apply=%s ===" % (mid, bool(args.apply)))
-    _print_dry_run(mid, plan, rows, snap, bugun)
+    _print_dry_run(mid, plan, rows, snap, bugun, deg)
 
     if mid == 872:
         print("=== HEDEF mid=872 ===")
         _j(_hedef_872_uyum(plan))
 
     if not args.apply:
-        print("DRY-RUN tamam (yazilmadi). n_update=%s" % plan.get("n_degisti"))
+        print(
+            "DRY-RUN tamam (yazilmadi). hukum=%s n_update=%s"
+            % (deg.get("hukum"), deg.get("n_update"))
+        )
         return 0
 
-    # APPLY
+    if deg.get("hukum") == "ONEMSIZ" or int(deg.get("n_update") or 0) == 0:
+        print("APPLY atlandi: n_update=0 / ONEMSIZ")
+        return 0
+
+    if deg.get("hukum") == "RISKLI" and not args.risk_onay:
+        print("HATA: RISKLI — --apply reddedildi ( --risk-onay gerekli )")
+        return 3
+
+    # APPLY — plan.yeni_aciklama (kronolojik sabit onceki ile üretilmiş)
     yol = _yedek_yolu(mid)
     _yedek_al(mid, rows, snap, yol)
     print("YEDEK", str(yol))
 
-    from routes.faturalar_routes import (
-        makbuz_aciklama_sadece_guncelle,
-        yeniden_hesapla_makbuz_dagitim_aciklama,
-    )
+    from routes.faturalar_routes import makbuz_aciklama_sadece_guncelle
     from routes.giris_routes import tahsilat_degisti
 
-    # Sıralı: her adımda DB onceki güncel; tam_fifo (allowlist yok)
+    yazilan = 0
     for p in plan["plans"]:
-        if not p.get("degisti"):
+        if int(p["id"]) not in set(deg.get("update_ids") or []):
+            continue
+        if list(p.get("eski_pay") or []) == list(p.get("yeni_pay") or []):
             continue
         tid = int(p["id"])
-        row = next(r for r in rows if int(r["id"]) == tid)
-        yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
-            mid,
-            tutar=float(p["tutar"]),
-            tahsilat_tarihi=p["tarih"],
-            aciklama_eski=row.get("aciklama"),
-            haric_tahsilat_id=tid,
-            kaynak="manuel_makbuz",
-            odeme_turu=row.get("odeme_turu"),
-            tam_fifo=True,
-        )
-        if yeni is None:
-            print("DUR yeniden_hesapla_none id=%s" % tid)
-            return 1
+        yeni = p.get("yeni_aciklama") or ""
         if abs(_pay_sum(_pay_list(yeni)) - float(p["tutar"])) > 0.011:
             print("DUR marker_toplam id=%s" % tid)
-            return 1
-        if list(_pay_list(yeni)) != list(p.get("yeni_pay") or []):
-            print("DUR plan_sapma id=%s" % tid)
-            _j({"beklenen": p.get("yeni_pay"), "canli": _pay_list(yeni)})
             return 1
         if not makbuz_aciklama_sadece_guncelle(tid, yeni):
             print("DUR update_fail id=%s" % tid)
             return 1
-        # sonraki tur için rows aciklama güncelle
-        row["aciklama"] = yeni
+        yazilan += 1
 
-    _audit(mid, plan["plans"], execute)
+    _audit(mid, [p for p in plan["plans"] if int(p["id"]) in set(deg.get("update_ids") or [])], execute)
     tahsilat_degisti(mid)
 
     dog = _dogrula_sonrasi(mid, plan, bugun, fetch_all, fetch_one)
@@ -686,7 +998,7 @@ def main(argv=None) -> int:
     if not dog.get("ok"):
         print("DUR dogrulama uyusmazligi (self-repair yok)")
         return 1
-    print("APPLY OK mid=%s n_update=%s" % (mid, plan.get("n_degisti")))
+    print("APPLY OK mid=%s n_update=%s" % (mid, yazilan))
     return 0
 
 
