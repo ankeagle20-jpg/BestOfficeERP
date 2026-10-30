@@ -22,6 +22,7 @@ def check(name: str, ok: bool, ek: str = "") -> None:
 
 
 def test_kira_son_borc_ayi_birim():
+    os.environ.pop("KAPANIS_HEPSI_SOZLESME_YILI", None)
     from kira_kapanis_cap import (
         ay_kira_borc_dahil_mi,
         kapanis_ek_fingerprint,
@@ -51,11 +52,11 @@ def test_kira_son_borc_ayi_birim():
     check("n3_dahil_dec", ay_kira_borc_dahil_mi(r3, 2025, 12) is True)
     check("n3_haric_jan", ay_kira_borc_dahil_mi(r3, 2026, 1) is False)
 
-    # N=NULL Hepsi
+    # N=NULL Hepsi — bayrak KAPALI → eski (None)
     r_null = dict(r, kapanis_sonrasi_borc_ay=None)
-    check("null_son", kira_son_borc_ayi(r_null) is None)
-    check("null_excl", kira_borc_cap_exclusive(r_null) is None)
-    check("null_dahil_far", ay_kira_borc_dahil_mi(r_null, 2027, 5) is True)
+    check("null_son_flag_off", kira_son_borc_ayi(r_null) is None)
+    check("null_excl_flag_off", kira_borc_cap_exclusive(r_null) is None)
+    check("null_dahil_far_flag_off", ay_kira_borc_dahil_mi(r_null, 2027, 5) is True)
 
     # aktif
     check("aktif_none", kira_son_borc_ayi({"durum": "aktif", "kapanis_tarihi": date(2025, 1, 1), "kapanis_sonrasi_borc_ay": 0}) is None)
@@ -63,10 +64,92 @@ def test_kira_son_borc_ayi_birim():
     # kap boş
     check("kap_bos", kira_son_borc_ayi({"durum": "pasif", "kapanis_tarihi": None, "kapanis_sonrasi_borc_ay": 0}) is None)
 
-    # fingerprint NULL ≠ 0
+    # fingerprint NULL ≠ 0; bayrak kapalı → H
     check("fp_h", kapanis_ek_fingerprint(None) == "H")
     check("fp_0", kapanis_ek_fingerprint(0) == "0")
     check("fp_ayri", kapanis_ek_fingerprint(None) != kapanis_ek_fingerprint(0))
+
+
+def test_hepsi_sozlesme_yili_bayrak():
+    """KAPANIS_HEPSI_SOZLESME_YILI=1: sözleşme yılı sonu; N dolu değişmez."""
+    os.environ["KAPANIS_HEPSI_SOZLESME_YILI"] = "1"
+    try:
+        import importlib
+        import kira_kapanis_cap as kc
+
+        importlib.reload(kc)
+        from kira_kapanis_cap import (
+            hepsi_sozlesme_yili_son_borc_ayi,
+            kapanis_ek_fingerprint,
+            kira_son_borc_ayi,
+        )
+
+        # giriş Ağu-2023, kap Eyl-2025 → Tem-2026
+        r = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2025, 9, 30),
+            "kapanis_sonrasi_borc_ay": None,
+            "sozlesme_tarihi": date(2023, 8, 1),
+        }
+        check("hepsi_agu_eyl", kira_son_borc_ayi(r) == date(2026, 7, 1), kira_son_borc_ayi(r))
+
+        # kap ayı yıl sonu (Tem-2025) → ek borç yok
+        r_ys = dict(r, kapanis_tarihi=date(2025, 7, 15))
+        check("hepsi_yil_sonu", kira_son_borc_ayi(r_ys) == date(2025, 7, 1), kira_son_borc_ayi(r_ys))
+
+        # 3 ay sonra çıkış (Ağu..Eki) → ilk yıl Tem-2024
+        r3 = dict(r, kapanis_tarihi=date(2023, 10, 10))
+        check("hepsi_3ay", kira_son_borc_ayi(r3) == date(2024, 7, 1), kira_son_borc_ayi(r3))
+
+        # çıkış tam yıl dönümünde (giriş ayı Ağu-2025) → yeni dönem Tem-2026
+        r_don = dict(r, kapanis_tarihi=date(2025, 8, 1))
+        check("hepsi_donum", kira_son_borc_ayi(r_don) == date(2026, 7, 1), kira_son_borc_ayi(r_don))
+
+        # ay ortası kapanış
+        r_orta = dict(r, kapanis_tarihi=date(2025, 9, 15))
+        check("hepsi_orta", kira_son_borc_ayi(r_orta) == date(2026, 7, 1))
+
+        # giriş eksik → eski (None)
+        r_eksik = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2025, 9, 30),
+            "kapanis_sonrasi_borc_ay": None,
+            "id": 999001,
+        }
+        check("hepsi_giris_eksik", kira_son_borc_ayi(r_eksik) is None)
+
+        # rent_start yedeği
+        r_rent = {
+            "durum": "pasif",
+            "kapanis_tarihi": date(2025, 9, 30),
+            "kapanis_sonrasi_borc_ay": None,
+            "rent_start_date": date(2023, 8, 1),
+        }
+        check("hepsi_rent", kira_son_borc_ayi(r_rent) == date(2026, 7, 1))
+
+        # N=0 / N=3 değişmedi
+        check(
+            "hepsi_n0",
+            kira_son_borc_ayi(dict(r, kapanis_sonrasi_borc_ay=0)) == date(2025, 9, 1),
+        )
+        check(
+            "hepsi_n3",
+            kira_son_borc_ayi(dict(r, kapanis_sonrasi_borc_ay=3)) == date(2025, 12, 1),
+        )
+
+        check("fp_h12", kapanis_ek_fingerprint(None) == "H12")
+        check("fp_h12_n0", kapanis_ek_fingerprint(0) == "0")
+        check(
+            "fn_pure",
+            hepsi_sozlesme_yili_son_borc_ayi(date(2023, 8, 1), date(2025, 9, 30))
+            == date(2026, 7, 1),
+        )
+    finally:
+        os.environ.pop("KAPANIS_HEPSI_SOZLESME_YILI", None)
+        import importlib
+        import kira_kapanis_cap as kc
+
+        importlib.reload(kc)
 
 
 def test_effective_bitis_uses_helper():
@@ -226,8 +309,17 @@ def test_sadece_borclu_cap_ozet():
     check("sadece_borclu_0_gizle", ids == [2], ids)
 
 
+def test_script_dry_run_exists():
+    p = ROOT / "scripts" / "kapanis_hepsi_yeniden_hesapla.py"
+    check("script_var", p.is_file())
+    txt = p.read_text(encoding="utf-8")
+    check("script_dry", "DRY-RUN" in txt and "ALLOW_PROD_WRITE" in txt)
+    check("script_tahsilat_degisti", "tahsilat_degisti" in txt)
+
+
 def main():
     test_kira_son_borc_ayi_birim()
+    test_hepsi_sozlesme_yili_bayrak()
     test_effective_bitis_uses_helper()
     test_contract_core_n0_ay_sayisi()
     test_firma_ozet_toplam_cap()
@@ -235,6 +327,7 @@ def main():
     test_ekstre_ekran_n_set()
     test_cache_invalidation_hook()
     test_sadece_borclu_cap_ozet()
+    test_script_dry_run_exists()
     if FAILS:
         print("FAILED", len(FAILS), FAILS)
         sys.exit(1)

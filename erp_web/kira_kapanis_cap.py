@@ -4,14 +4,26 @@
 N = customers.kapanis_sonrasi_borc_ay
   0 → yalnız kapanış ayı
   1..12 → kapanış ayı + N ek ay
-  None/boş → Hepsi (cap yok; bu aşamada NULL anlamı değişmez)
+  None/boş → Hepsi:
+    KAPANIS_HEPSI_SOZLESME_YILI!=1 → cap yok (None; eski)
+    =1 → çıktığı ayı içeren sözleşme yılının sonuna (giriş ayından 12'şer)
 
 Dönüş: son borç ayının 1. günü (dahil). None = cap yok.
 """
 from __future__ import annotations
 
+import logging
+import os
 from datetime import date, datetime
 from typing import Any, Mapping
+
+_LOG = logging.getLogger(__name__)
+_ENV_HEPSI_SOZ = "KAPANIS_HEPSI_SOZLESME_YILI"
+
+
+def hepsi_sozlesme_yili_aktif() -> bool:
+    """Yalnız tam '1' açık; başka her şey kapalı."""
+    return str(os.environ.get(_ENV_HEPSI_SOZ) or "").strip() == "1"
 
 
 def _coerce_date(v) -> date | None:
@@ -59,11 +71,35 @@ def _parse_n(raw) -> int | None:
     return None
 
 
-def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
-    """Pasif + kapanış dolu + N dolu → son borç ayının 1'i; aksi halde None.
+def _giris_tarihi(musteri_row: Mapping[str, Any]) -> date | None:
+    """Grid ile aynı öncelik: sozlesme_tarihi → rent_start_date."""
+    return _coerce_date(musteri_row.get("sozlesme_tarihi")) or _coerce_date(
+        musteri_row.get("rent_start_date")
+    )
 
-    Örn. kap=2025-09-30, N=0 → 2025-09-01
-         kap=2025-09-15, N=3 → 2025-12-01
+
+def hepsi_sozlesme_yili_son_borc_ayi(giris: date, kap: date) -> date:
+    """Çıktığı ayı içeren sözleşme yılının son ayının 1'i.
+
+    m = (kap_ayı − giriş_ayı) ay farkı (aynı ay → 0).
+    son = giriş_ayı + 12*(m//12 + 1) − 1 ay.
+    Örn. giriş 2023-08, kap 2025-09 → m=25 → 2026-07.
+    """
+    g = date(giris.year, giris.month, 1)
+    k = date(kap.year, kap.month, 1)
+    m = (k.year - g.year) * 12 + (k.month - g.month)
+    if m < 0:
+        m = 0
+    return _add_months(g, 12 * (m // 12 + 1) - 1)
+
+
+def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
+    """Pasif + kapanış → son borç ayı (dahil); cap yoksa None.
+
+    N dolu: kapanış ayı + N.
+    N NULL + bayrak kapalı: None.
+    N NULL + bayrak açık + giriş var: sözleşme yılı sonu.
+    N NULL + bayrak açık + giriş yok: None + log.
     """
     src = dict(musteri_row or {})
     durum = str(src.get("durum") or src.get("musteri_durum") or "").strip().lower()
@@ -73,9 +109,20 @@ def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
     if not kap:
         return None
     n = _parse_n(src.get("kapanis_sonrasi_borc_ay"))
-    if n is None:
+    if n is not None:
+        return _add_months(date(kap.year, kap.month, 1), n)
+    # Hepsi (N NULL)
+    if not hepsi_sozlesme_yili_aktif():
         return None
-    return _add_months(date(kap.year, kap.month, 1), n)
+    giris = _giris_tarihi(src)
+    if not giris:
+        mid = src.get("id") or src.get("musteri_id") or "?"
+        _LOG.warning(
+            "kira_son_borc_ayi Hepsi+bayrak: giriş tarihi yok mid=%s (cap yok)",
+            mid,
+        )
+        return None
+    return hepsi_sozlesme_yili_son_borc_ayi(giris, kap)
 
 
 def kira_borc_cap_exclusive(musteri_row: Mapping[str, Any] | None) -> date | None:
@@ -99,6 +146,8 @@ def ay_kira_borc_dahil_mi(musteri_row: Mapping[str, Any] | None, yil: int, ay: i
 
 
 def kapanis_ek_fingerprint(raw) -> str:
-    """Cache/parmak izi: None/boş → 'H' (Hepsi), 0..12 → rakam. NULL ile 0 ayrılır."""
+    """Cache/parmak izi: N dolu → rakam; Hepsi → 'H' (eski) veya 'H12' (bayrak açık)."""
     n = _parse_n(raw)
-    return "H" if n is None else str(n)
+    if n is not None:
+        return str(n)
+    return "H12" if hepsi_sozlesme_yili_aktif() else "H"
