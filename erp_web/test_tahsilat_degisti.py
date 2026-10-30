@@ -263,7 +263,15 @@ def test_yollar_bagli():
         for ad in adlar:
             check(rel + " " + ad, ad in metin)
     giris = (kok / "routes/giris_routes.py").read_text(encoding="utf-8")
-    check("ekstre sil banka", "_banka_tahsilat_id_bosalt([tid])" in giris)
+    # ekstre sil: banka bağı tahsilat_degisti(..., banka_bagini_birak=True) ile
+    check(
+        "ekstre sil banka",
+        "tahsilat_degisti(musteri_id, tahsilat_ids=[tid], banka_bagini_birak=True)" in giris
+        or (
+            "banka_bagini_birak=True" in giris
+            and "def api_ekstre_tahsilat_sil" in giris
+        ),
+    )
     check("cikar banka", "_banka_tahsilat_id_bosalt([s.get(\"id\") for s in silinen])" in giris)
     js = (kok / "_t.js").read_text(encoding="utf-8")
     check("js onay", "onay_fazla_tutar" in js and "girisTahsilFazlaTutarOnayMetni" in js)

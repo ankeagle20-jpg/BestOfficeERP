@@ -637,6 +637,16 @@ def _ay_ref_iso_list_from_tahsilat_payload(data):
     return out
 
 
+_AYLIK_DAGITIM_STRIP_RE = re.compile(
+    r"\s*\|AYLIK_(?:TAH\|[0-9]{4}-[0-9]{2}-[0-9]{2}|PAY\|[0-9]{4}-[0-9]{2}-[0-9]{2}=[0-9]+(?:\.[0-9]+)?)\|"
+)
+
+
+def _strip_aylik_dagitim_markers(aciklama_text) -> str:
+    """|AYLIK_TAH| / |AYLIK_PAY| tokenlarını kaldırır; düz metin kalır."""
+    return _AYLIK_DAGITIM_STRIP_RE.sub("", str(aciklama_text or "")).strip()
+
+
 def _aciklama_with_aylik_markers(aciklama_text, iso_list):
     text = (aciklama_text or "").strip()
     for iso in iso_list or []:
@@ -662,6 +672,94 @@ def _aciklama_with_aylik_pay_tokens(aciklama_text, pay_items):
         tok = f"|AYLIK_PAY|{iso_s}={v:.2f}|"
         if tok not in text:
             text = f"{text} {tok}".strip()
+    return text
+
+
+def yeniden_hesapla_makbuz_dagitim_aciklama(
+    musteri_id: int,
+    *,
+    tutar: float,
+    tahsilat_tarihi,
+    aciklama_eski: str | None,
+    haric_tahsilat_id: int | None = None,
+    kaynak: str | None = None,
+    odeme_turu: str | None = None,
+) -> str | None:
+    """Makbuz tutar/tarih sonrası |AYLIK_TAH|/|AYLIK_PAY| FIFO yenile.
+
+    grid_toplu / eşitle satırına dokunmaz (None → çağıran eski metni korur).
+    Dönüş: yeni açıklama metni veya None (yenileme yok).
+    """
+    kay = str(kaynak or "").strip().lower()
+    if kay == "grid_toplu":
+        return None
+    ac_eski = str(aciklama_eski or "")
+    makbuz_kaynak = kay in ("manuel_makbuz", "banka_import", "odeme_linki")
+    # Eşitle/grid (kaynağı makbuz değil + GRID_TAH_PATTERN): marker metnini elle bozma.
+    # Not: manuel_makbuz da aynı «Ay YYYY Tahsilat H|AYLIK_TAH|» biçimini kullanır.
+    if not makbuz_kaynak:
+        try:
+            from routes.giris_routes import GRID_TAH_PATTERN
+        except Exception:
+            GRID_TAH_PATTERN = None
+        if GRID_TAH_PATTERN is not None and GRID_TAH_PATTERN.match(ac_eski.strip()):
+            return None
+        if "|AYLIK_TAH|" not in ac_eski and "|AYLIK_PAY|" not in ac_eski:
+            return None
+    try:
+        mid = int(musteri_id or 0)
+        tot = round(float(tutar or 0), 2)
+    except (TypeError, ValueError):
+        return None
+    if mid <= 0 or tot <= 0:
+        return None
+    odeme = str(tahsilat_tarihi or "")[:10]
+    if len(odeme) != 10:
+        odeme = date.today().isoformat()
+    # Mevcut TAH aylarını allowlist yap (seçim korunur); yoksa tam FIFO.
+    allow = []
+    for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac_eski):
+        try:
+            iso = date(int(y), int(mo), 1).isoformat()
+        except ValueError:
+            continue
+        if iso not in allow:
+            allow.append(iso)
+    if not allow:
+        for y, mo in re.findall(
+            r"\|AYLIK_PAY\|(\d{4})-(\d{2})-\d{2}=", ac_eski
+        ):
+            try:
+                iso = date(int(y), int(mo), 1).isoformat()
+            except ValueError:
+                continue
+            if iso not in allow:
+                allow.append(iso)
+    iso_list, pay_items = _auto_allocate_oldest_unpaid_months(
+        mid,
+        tot,
+        odeme_tarihi=odeme,
+        iso_allowlist=allow or None,
+        haric_tahsilat_id=haric_tahsilat_id,
+    )
+    if not iso_list and not pay_items:
+        # Açık ay yoksa yalnız düz metin (marker temiz)
+        plain = _strip_aylik_dagitim_markers(ac_eski)
+        return plain or None
+    plain = _strip_aylik_dagitim_markers(ac_eski)
+    if not plain:
+        try:
+            from routes.giris_routes import _AY_ADLARI as _AYG, _odeme_turu_harf
+
+            dd0 = datetime.strptime(str(iso_list[0])[:10], "%Y-%m-%d").date()
+            plain = (
+                f"{_AYG[dd0.month - 1]} {dd0.year} Tahsilat "
+                f"{_odeme_turu_harf(odeme_turu or 'havale')}"
+            )
+        except Exception:
+            plain = "Tahsilat"
+    text = _aciklama_with_aylik_markers(plain, iso_list)
+    text = _aciklama_with_aylik_pay_tokens(text, pay_items)
     return text
 
 
@@ -10731,7 +10829,12 @@ def tahsilat_guncelle():
             return jsonify({'ok': False, 'mesaj': 'Tarih formatı geçersiz.'}), 400
 
         existing = fetch_one(
-            "SELECT tutar, aciklama, tahsil_eden FROM tahsilatlar WHERE id = %s",
+            """
+            SELECT tutar, aciklama, tahsil_eden,
+                   COALESCE(customer_id, musteri_id) AS musteri_id,
+                   COALESCE(kaynak, '') AS kaynak
+            FROM tahsilatlar WHERE id = %s
+            """,
             (tahsilat_id,),
         )
         if not existing:
@@ -10749,19 +10852,31 @@ def tahsilat_guncelle():
             if tutar <= 0:
                 return jsonify({'ok': False, 'mesaj': 'Geçersiz mevcut tutar; tutar alanını gönderin.'}), 400
 
+        if "tahsil_eden" in data:
+            tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120]
+            tahsil_eden = tahsil_eden or None
+        else:
+            tahsil_eden = existing.get("tahsil_eden")
+
         if "aciklama" in data:
             aciklama_text = (data.get("aciklama") or "").strip()
             if len(aciklama_text) > 4000:
                 aciklama_text = aciklama_text[:4000]
             aciklama_text = aciklama_text or None
         else:
-            aciklama_text = existing.get("aciklama")
-
-        if "tahsil_eden" in data:
-            tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120]
-            tahsil_eden = tahsil_eden or None
-        else:
-            tahsil_eden = existing.get("tahsil_eden")
+            # Tutar/tarih değişiminde dağıtımı FIFO ile yenile (bayat |AYLIK_PAY| kalmasın).
+            ac_yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
+                int(existing.get("musteri_id") or 0),
+                tutar=tutar,
+                tahsilat_tarihi=tahsilat_tarihi,
+                aciklama_eski=existing.get("aciklama"),
+                haric_tahsilat_id=tahsilat_id,
+                kaynak=existing.get("kaynak"),
+                odeme_turu=odeme_turu,
+            )
+            aciklama_text = (
+                ac_yeni if ac_yeni is not None else existing.get("aciklama")
+            )
 
         row = execute_returning(
             """
@@ -10788,15 +10903,12 @@ def tahsilat_guncelle():
         try:
             mid = int((row or {}).get("musteri_id") or 0)
             if mid > 0:
-                from .giris_routes import (
-                    _cari_ekstre_cache_invalidate_musteri,
-                    resync_panel_and_grid_after_tahsil_change,
-                )
-                resync_panel_and_grid_after_tahsil_change(mid)
-                _cari_ekstre_cache_invalidate_musteri(mid)
+                from .giris_routes import tahsilat_degisti
+
+                tahsilat_degisti(mid)
         except Exception:
             logging.getLogger(__name__).exception(
-                "tahsilat_guncelle panel/grid resync musteri_id=%s",
+                "tahsilat_guncelle tahsilat_degisti musteri_id=%s",
                 (row or {}).get("musteri_id"),
             )
         return jsonify({'ok': True, 'mesaj': 'Tahsilat güncellendi.'})

@@ -19823,7 +19823,7 @@ def _serialize_row_dates(row):
 @bp.route("/api/ekstre-tahsilat-guncelle", methods=["POST"])
 @giris_gerekli
 def api_ekstre_tahsilat_guncelle():
-    """Cari ekstre: tahsilat tutarı / tarihi / ödeme türü düzeltme (|AYLIK_TAH| marker korunur)."""
+    """Cari ekstre: tutar/tarih/ödeme düzeltme; dağıtım markerları FIFO yenilenir."""
     try:
         data = request.get_json(force=True, silent=True) or {}
     except Exception:
@@ -19846,7 +19846,8 @@ def api_ekstre_tahsilat_guncelle():
         odeme = "havale"
     row = fetch_one(
         """
-        SELECT id, COALESCE(aciklama, '') AS aciklama, tahsilat_tarihi
+        SELECT id, COALESCE(aciklama, '') AS aciklama, tahsilat_tarihi,
+               COALESCE(kaynak, '') AS kaynak
         FROM tahsilatlar
         WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
         """,
@@ -19854,10 +19855,7 @@ def api_ekstre_tahsilat_guncelle():
     )
     if not row:
         return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
-    affected_iso = _iso_from_aylik_tah_marker(row.get("aciklama"))
     ac_old = str(row.get("aciklama") or "")
-    marker_m = re.search(r"(\|AYLIK_TAH\|[0-9]{4}-[0-9]{2}-[0-9]{2}\|)", ac_old)
-    marker = marker_m.group(1) if marker_m else ""
     if not tahsilat_tarihi:
         td = row.get("tahsilat_tarihi")
         if td and hasattr(td, "year"):
@@ -19868,22 +19866,25 @@ def api_ekstre_tahsilat_guncelle():
     tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120] or None
     if aciklama_in:
         aciklama = aciklama_in
-    elif marker:
-        mm_iso = re.search(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", marker)
-        ay_iso = mm_iso.group(1) if mm_iso else date(tahsilat_tarihi.year, tahsilat_tarihi.month, 1).isoformat()
-        try:
-            dd = datetime.strptime(ay_iso[:10], "%Y-%m-%d").date()
-            ay_adi = _AY_ADLARI[dd.month - 1]
-            yil = dd.year
-        except Exception:
-            ay_adi = _AY_ADLARI[tahsilat_tarihi.month - 1]
-            yil = tahsilat_tarihi.year
-            ay_iso = date(yil, tahsilat_tarihi.month, 1).isoformat()
-            marker = f"|AYLIK_TAH|{ay_iso}|"
-        harf = _odeme_turu_harf(odeme)
-        aciklama = f"{ay_adi} {yil} Tahsilat {harf}{marker}"
     else:
-        aciklama = ac_old or "Tahsilat"
+        try:
+            from routes.faturalar_routes import yeniden_hesapla_makbuz_dagitim_aciklama
+
+            ac_yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
+                musteri_id,
+                tutar=tutar,
+                tahsilat_tarihi=tahsilat_tarihi,
+                aciklama_eski=ac_old,
+                haric_tahsilat_id=tid,
+                kaynak=row.get("kaynak"),
+                odeme_turu=odeme,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "ekstre-tahsilat-guncelle marker yenile mid=%s tid=%s", musteri_id, tid
+            )
+            ac_yeni = None
+        aciklama = ac_yeni if ac_yeni is not None else (ac_old or "Tahsilat")
     execute(
         """
         UPDATE tahsilatlar
@@ -19892,10 +19893,8 @@ def api_ekstre_tahsilat_guncelle():
         """,
         (tutar, tahsilat_tarihi, odeme, aciklama, tahsil_eden, tid, musteri_id, musteri_id),
     )
-    aff_upd = _iso_from_aylik_tah_marker(aciklama) or affected_iso
-    _ekstre_invalidate_after_change(
-        musteri_id, [aff_upd] if aff_upd else None
-    )
+    # Tek giriş: panel by_iso + grid + ekstre bellek (bayat kesinti/kalan temizlenir).
+    tahsilat_degisti(musteri_id)
     return jsonify({"ok": True, "id": tid, "mesaj": "Tahsilat güncellendi."})
 
 
@@ -19921,9 +19920,6 @@ def api_ekstre_tahsilat_sil():
     )
     if row_pre and str(row_pre.get("kaynak") or "") == "odeme_linki":
         return jsonify({"ok": False, "mesaj": "Kart ödemesi, silinemez"}), 400
-    affected_iso = (
-        _iso_from_aylik_tah_marker(row_pre.get("aciklama")) if row_pre else None
-    )
     from tahsilat_silme import tahsilatlari_sil
 
     silinen = tahsilatlari_sil(
@@ -19933,10 +19929,8 @@ def api_ekstre_tahsilat_sil():
     )
     if not silinen:
         return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
-    _banka_tahsilat_id_bosalt([tid])
-    _ekstre_invalidate_after_change(
-        musteri_id, [affected_iso] if affected_iso else None
-    )
+    # Tek giriş: banka bağı + panel/grid/ekstre (eski _ekstre_invalidate sırası bayat paneli grid'e basıyordu).
+    tahsilat_degisti(musteri_id, tahsilat_ids=[tid], banka_bagini_birak=True)
     return jsonify({"ok": True, "mesaj": "Tahsilat silindi."})
 
 
