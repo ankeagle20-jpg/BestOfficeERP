@@ -58,6 +58,12 @@ from musteri_durum_yaz import (
     normalize_musteri_durum_kapanis as _normalize_musteri_durum_kapanis,
     parse_kapanis_tarihi as _parse_kapanis_tarihi,
 )
+from kira_kapanis_cap import (
+    ay_kira_borc_dahil_mi as _ay_kira_borc_dahil_mi,
+    kapanis_ek_fingerprint as _kapanis_ek_fingerprint,
+    kira_borc_cap_exclusive as _kira_borc_cap_exclusive,
+    kira_son_borc_ayi,
+)
 from datetime import datetime, date, timedelta
 import calendar
 import contextvars
@@ -1050,6 +1056,54 @@ def tahsilat_degisti(
         _tahsilat_degisti_icinde.discard(mid)
 
 
+def _firma_ozet_batch_cache_invalidate_musteri(musteri_id: int) -> int:
+    """musteri_firma_ozet_grid_ozet_batch 120 sn bellek önbelleğinden mid anahtarlarını sil."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return 0
+    if mid <= 0:
+        return 0
+    cache = getattr(musteri_firma_ozet_grid_ozet_batch, "_cache", None)
+    if not isinstance(cache, dict):
+        return 0
+    sil = [k for k in list(cache.keys()) if isinstance(k, tuple) and k and int(k[0] or 0) == mid]
+    for k in sil:
+        cache.pop(k, None)
+    return len(sil)
+
+
+def kapanis_borc_ufku_degisti(musteri_id: int) -> bool:
+    """durum / kapanis_tarihi / kapanis_sonrasi_borc_ay değişince tek giriş.
+
+    Grid+panel+ekstre: tahsilat_degisti. Firma özeti batch (120 sn) mid anahtarları.
+    Firma rapor resp cache (kısa TTL) temizlenir.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    _invalidate_musteri_kyc_grid_mem(mid)
+    try:
+        _firma_ozet_batch_cache_invalidate_musteri(mid)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "kapanis_borc_ufku_degisti firma_ozet batch mid=%s", mid
+        )
+    try:
+        from routes.faturalar_routes import _fatura_rapor_firma_resp_cache, _fatura_rapor_firma_resp_cache_lock
+
+        with _fatura_rapor_firma_resp_cache_lock:
+            _fatura_rapor_firma_resp_cache.clear()
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "kapanis_borc_ufku_degisti firma resp cache mid=%s", mid
+        )
+    return bool(tahsilat_degisti(mid))
+
+
 def apply_makbuz_dagitim_to_panel_db(
     musteri_id: int,
     dagitim_items: list | None,
@@ -1764,15 +1818,9 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     kap_cache = _aylik_grid_coerce_date(cache_obj.get("kapanis_tarihi"))
     if _kyc_date_iso(kap_db) != _kyc_date_iso(kap_cache):
         return False
-    try:
-        ek_db = int(kyc.get("kapanis_sonrasi_borc_ay") or 0)
-    except (TypeError, ValueError):
-        ek_db = 0
-    try:
-        ek_cache = int(cache_obj.get("kapanis_sonrasi_borc_ay") or 0)
-    except (TypeError, ValueError):
-        ek_cache = 0
-    if ek_db != ek_cache:
+    if _kapanis_ek_fingerprint(kyc.get("kapanis_sonrasi_borc_ay")) != _kapanis_ek_fingerprint(
+        cache_obj.get("kapanis_sonrasi_borc_ay")
+    ):
         return False
 
     artis_b = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_k
@@ -4254,10 +4302,7 @@ def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
     except (TypeError, ValueError):
         sure = None
     kap = _kyc_date_iso(_aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))) or ""
-    try:
-        ek = int(kyc.get("kapanis_sonrasi_borc_ay") or 0)
-    except (TypeError, ValueError):
-        ek = 0
+    ek = _kapanis_ek_fingerprint(kyc.get("kapanis_sonrasi_borc_ay"))
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
         f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}"
@@ -4288,10 +4333,7 @@ def _aylik_grid_freshness_k_from_payload(payload) -> str:
     if _aylik_grid_rev_uyumlu(payload):
         rev = AYLIK_GRID_COMPUTE_REV  # rev 30 plansiz payload == 31 (hesap ayni): parmak izi sabit kalir
     kap = str(payload.get("kapanis_tarihi") or "")[:10]
-    try:
-        ek = int(payload.get("kapanis_sonrasi_borc_ay") or 0)
-    except (TypeError, ValueError):
-        ek = 0
+    ek = _kapanis_ek_fingerprint(payload.get("kapanis_sonrasi_borc_ay"))
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
         f"{artis_ay}|{sure}|{rev}|{kap}|{ek}"
@@ -6478,26 +6520,11 @@ def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
     Semantik (D2): N = kapanıştan SONRA ek ay sayısı.
     N=0 -> sadece kapanış ayı; N=1 -> kapanış + 1 ay; N=2 -> kapanış + 2 ay.
     Örn. kapanış=2026-03-xx, N=2 -> Mart, Nisan, Mayıs.
-    Boş/None = Hepsi (cap yok).
+    Boş/None = Hepsi (cap yok). Merkezi kaynak: kira_son_borc_ayi / kira_borc_cap_exclusive.
     """
-    src = dict(kyc or {})
-    durum = str(src.get("durum") or src.get("musteri_durum") or "").strip().lower()
-    if durum != "pasif":
+    sinir = _kira_borc_cap_exclusive(kyc)
+    if sinir is None:
         return bit
-    kap = _aylik_grid_coerce_date(src.get("kapanis_tarihi"))
-    if not kap:
-        return bit
-    raw = src.get("kapanis_sonrasi_borc_ay")
-    if raw is None or str(raw).strip() == "":
-        return bit
-    try:
-        ek_ay = int(raw)
-    except (TypeError, ValueError):
-        return bit
-    if ek_ay < 0 or ek_ay > 12:
-        return bit
-    # Dışlayıcı bitiş: kapanış ayı + N ek ay => close_first + (N+1)
-    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay + 1)
     if bit is None:
         return sinir
     return min(bit, sinir)
@@ -7971,7 +7998,18 @@ def api_musteri_durum_guncelle(mid):
                 "mesaj": "Kayıt güncellenemedi (satır yok veya veritabanı kısıtı). Yöneticiye bildirin.",
             }
         ), 409
-    _upsert_aylik_grid_cache(int(mid))
+    try:
+        kapanis_borc_ufku_degisti(int(mid))
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "api_musteri_durum_guncelle kapanis_borc_ufku_degisti mid=%s", mid
+        )
+        try:
+            _upsert_aylik_grid_cache(int(mid))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "api_musteri_durum_guncelle upsert yedek mid=%s", mid
+            )
     out = musteri_durum_yaz_json(alanlar)
     out["ok"] = True
     return jsonify(out)
@@ -8286,6 +8324,12 @@ def kaydet():
                 musteri_id
             ))
             _persist_musteri_kyc_uyruk(musteri_id, uyruk_yabanci)
+            try:
+                kapanis_borc_ufku_degisti(int(musteri_id))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "kaydet kapanis_borc_ufku_degisti mid=%s", musteri_id
+                )
             out = {'ok': True, 'mesaj': '✅ Müşteri güncellendi'}
             out.update(musteri_durum_yaz_json(alanlar))
             return jsonify(out)
@@ -11784,10 +11828,13 @@ def firma_ozet_toplam_borc_ve_geciken_ay(
         )
     except Exception:
         reel_map = {}
+    son_borc = kira_son_borc_ayi(kyc)
     total = 0.0
     n_ay = 0
     cur = bas_first
     while cur <= ref_first:
+        if son_borc is not None and cur > son_borc:
+            break
         ay_key = f"{cur.year}-{cur.month}"
         if ay_key not in tahsil_n:
             v = 0.0
@@ -11883,7 +11930,7 @@ def _firma_ozet_sql_row_to_helper_input(row: dict) -> dict:
         "kdv_oran": row.get("kdv_oran"),
         "kapanis_tarihi": row.get("kapanis_tarihi"),
         "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
-        "durum": row.get("durum"),
+        "durum": row.get("durum") or row.get("musteri_durum"),
         "rent_start_date": row.get("rent_start_date"),
         "ilk_kira_bedeli": row.get("ilk_kira_bedeli"),
     }
@@ -11924,7 +11971,7 @@ def _firma_ozet_kyc_dict_from_grid_sql_row(row) -> dict | None:
     return {
         "sozlesme_tarihi": soz_bas_eff,
         "sozlesme_bitis": soz_bit_eff,
-        "durum": row.get("durum"),
+        "durum": row.get("durum") or row.get("musteri_durum"),
         "kapanis_tarihi": row.get("kapanis_tarihi"),
         "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
         "aylik_kira": row.get("firma_grid_aylik_net"),
@@ -12292,6 +12339,7 @@ def _firma_ozet_ozet_from_grid_cache_payload(
         if _firma_ozet_kyc_has_usable_kira(kyc_for_grid):
             return None
     ref_first = date(int(ref_y), int(ref_m), 1)
+    son_borc = kira_son_borc_ayi(kyc_for_grid) if kyc_for_grid else None
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     borc_month = 0.0
     borc_month_placeholder = False
@@ -12313,10 +12361,13 @@ def _firma_ozet_ozet_from_grid_cache_payload(
         if not math.isfinite(tut):
             tut = 0.0
         if cur.year == ref_y and cur.month == ref_m:
-            borc_month, borc_month_placeholder = _firma_ozet_classify_borc_month(
-                tut, a.get("brut_tutar_kdv")
-            )
+            if son_borc is None or cur <= son_borc:
+                borc_month, borc_month_placeholder = _firma_ozet_classify_borc_month(
+                    tut, a.get("brut_tutar_kdv")
+                )
         if cur > ref_first:
+            continue
+        if son_borc is not None and cur > son_borc:
             continue
         tahsil = bool(a.get("tahsil_edildi"))
         try:
@@ -12575,22 +12626,26 @@ def musteri_firma_ozet_grid_ozet_batch(
             break
         reel_manual = dict(reel_by_mid.get(mid) or {})
         try:
-            borc_month = float(
-                firma_ozet_aylik_grid_hucre_kdv_dahil(
-                    mid,
-                    ref_y,
-                    ref_m,
-                    tufe_map,
-                    kyc_for_grid,
-                    None,
-                    reel_manual,
-                    skip_disk_cache=False,
-                    skip_reel_overlay=False,
-                )
-            )
-            if not math.isfinite(borc_month):
+            if not _ay_kira_borc_dahil_mi(kyc_for_grid, ref_y, ref_m):
                 borc_month = 0.0
-            borc_month_placeholder = False
+                borc_month_placeholder = False
+            else:
+                borc_month = float(
+                    firma_ozet_aylik_grid_hucre_kdv_dahil(
+                        mid,
+                        ref_y,
+                        ref_m,
+                        tufe_map,
+                        kyc_for_grid,
+                        None,
+                        reel_manual,
+                        skip_disk_cache=False,
+                        skip_reel_overlay=False,
+                    )
+                )
+                if not math.isfinite(borc_month):
+                    borc_month = 0.0
+                borc_month_placeholder = False
             # Canlı hücre 0.01 zeminini, cache ay satırındaki gerçek brüt ile ayır.
             if 0 < borc_month < float(PLACEHOLDER_BRUT_MAX) and isinstance(cached_pl, dict):
                 for _a in cached_pl.get("aylar") or []:
@@ -13882,6 +13937,10 @@ def _cari_ekstre_hareketler(
             fifo_bas = soz_first_month
         y, m = fifo_bas.year, fifo_bas.month
         bit_y, bit_m = bit.year, bit.month
+        # Kapanış + N: kira borç satırları son borç ayını geçmesin (tahsilat/alacak ayrı).
+        son_borc_ek = kira_son_borc_ayi(kyc)
+        if son_borc_ek is not None and (son_borc_ek.year, son_borc_ek.month) < (bit_y, bit_m):
+            bit_y, bit_m = son_borc_ek.year, son_borc_ek.month
         prev_borc_tutar = None
         try:
             dondurulan_aylar = _dondurma_ay_kumesi(musteri_id)
@@ -15078,11 +15137,15 @@ def _cari_ekstre_ekran_varsayilan_bas_bit(
     kyc = _musteri_kyc_grup_for_aylik_grid(mid)
     durum = str((kyc or {}).get("durum") or "").strip().lower()
     if durum == "pasif":
-        kap = _aylik_grid_coerce_date((kyc or {}).get("kapanis_tarihi"))
-        if isinstance(kap, date):
-            ay1 = date(kap.year, kap.month, 1)
+        son = kira_son_borc_ayi(kyc)
+        if isinstance(son, date):
+            ay1 = date(son.year, son.month, 1)
         else:
-            ay1 = _ekstre_pasif_ay_yedek(mid, kyc) or date(bugun.year, bugun.month, 1)
+            kap = _aylik_grid_coerce_date((kyc or {}).get("kapanis_tarihi"))
+            if isinstance(kap, date):
+                ay1 = date(kap.year, kap.month, 1)
+            else:
+                ay1 = _ekstre_pasif_ay_yedek(mid, kyc) or date(bugun.year, bugun.month, 1)
         bit = _ekstre_ay_sonu(ay1.year, ay1.month)
         bas = date(bit.year, 1, 1)
         if bas > bit:
@@ -15136,6 +15199,11 @@ def _cari_ekstre_varsayilan_bas_bit(musteri_id: int) -> tuple[date, date]:
     if son_ay and (son_ay.year, son_ay.month) > (bugun.year, bugun.month):
         gun = acilis.day if acilis else bugun.day
         bit = _ekstre_tarih_gunu(son_ay.year, son_ay.month, gun)
+    son_borc = kira_son_borc_ayi(kyc)
+    if isinstance(son_borc, date):
+        bit_cap = _ekstre_ay_sonu(son_borc.year, son_borc.month)
+        if bit > bit_cap:
+            bit = bit_cap
     if bas > bit:
         bas = bit
     return bas, bit

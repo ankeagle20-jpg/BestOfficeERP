@@ -3740,7 +3740,9 @@ def _firma_ozet_build_rows_firma_sql(
                    COALESCE(NULLIF(TRIM(c.tax_number::text), ''), NULLIF(TRIM(mk.vergi_no::text), ''), '') AS rapor_vergi_no,
                    COALESCE(NULLIF(TRIM(mk.yetkili_tcno::text), ''), NULLIF(TRIM(c.yetkili_tcno::text), ''), '') AS rapor_kimlik_no,
                    c.kapanis_tarihi,
+                   c.kapanis_sonrasi_borc_ay,
                    TRIM(COALESCE(c.durum, '')) AS musteri_durum,
+                   TRIM(COALESCE(c.durum, '')) AS durum,
                    COALESCE(c.is_active, TRUE) AS is_active_kart,
                    COALESCE(
                        NULLIF(TRIM(mk.hizmet_turu), ''),
@@ -3877,9 +3879,19 @@ def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) ->
         return {}
     try:
         from routes.giris_routes import (
+            _firma_ozet_kyc_dict_from_grid_sql_row,
             _firma_ozet_ozet_from_grid_cache_payload,
             _read_aylik_grid_cache_payload_batch,
         )
+
+        kyc_by_mid: dict[int, dict | None] = {}
+        for row in rows or []:
+            try:
+                mid_r = int((row or {}).get("id") or (row or {}).get("musteri_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if mid_r > 0 and mid_r not in kyc_by_mid:
+                kyc_by_mid[mid_r] = _firma_ozet_kyc_dict_from_grid_sql_row(row)
 
         payloads = _read_aylik_grid_cache_payload_batch(mids, mem_ttl=30.0) or {}
         out: dict[int, dict] = {}
@@ -3887,7 +3899,9 @@ def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) ->
             pl = payloads.get(mid)
             if not pl:
                 continue
-            fast = _firma_ozet_ozet_from_grid_cache_payload(pl, ref_y, ref_m)
+            fast = _firma_ozet_ozet_from_grid_cache_payload(
+                pl, ref_y, ref_m, kyc_for_grid=kyc_by_mid.get(mid)
+            )
             if fast:
                 out[mid] = dict(fast)
         return out
