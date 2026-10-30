@@ -3703,8 +3703,11 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                             <input type="date" id="giris_tahsil_rapor_bit" autocomplete="off">
                         </div>
                         <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilRaporYukle(); return false;"><i class="fa fa-search"></i> Listele</button>
+                        <label class="giris-tahsil-rapor-manuel" title="Aylık grid düzeltmelerini hariç tutar" style="display:inline-flex;align-items:center;gap:6px;margin-left:10px;font-size:13px;cursor:pointer;white-space:nowrap;">
+                            <input type="checkbox" id="giris_tahsil_rapor_manuel" checked autocomplete="off"> Manuel
+                        </label>
                     </div>
-                    <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. Tarih aralığı seçip <strong>Listele</strong> ile filtreleyebilirsiniz.</p>
+                    <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. <strong>Manuel</strong> (varsayılan açık): aylık grid / eşitle satırlarını hariç tutar.</p>
                     <div id="giris_tahsil_rapor_durum" class="giris-tahsil-rapor-durum" role="status" aria-live="polite"></div>
                     <div id="giris_tahsil_rapor_list" class="giris-tahsil-rapor-list"></div>
                 </div>
@@ -4643,8 +4646,11 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                                 <input type="date" id="sozlesme_tahsil_rapor_bit" autocomplete="off">
                             </div>
                             <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilRaporYukle(); return false;"><i class="fa fa-search"></i> Listele</button>
+                            <label class="giris-tahsil-rapor-manuel" title="Aylık grid düzeltmelerini hariç tutar" style="display:inline-flex;align-items:center;gap:6px;margin-left:10px;font-size:13px;cursor:pointer;white-space:nowrap;">
+                                <input type="checkbox" id="sozlesme_tahsil_rapor_manuel" checked autocomplete="off"> Manuel
+                            </label>
                         </div>
-                        <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. Tarih aralığı seçip <strong>Listele</strong> ile filtreleyebilirsiniz.</p>
+                        <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. <strong>Manuel</strong> (varsayılan açık): aylık grid / eşitle satırlarını hariç tutar.</p>
                         <div id="sozlesme_tahsil_rapor_durum" class="giris-tahsil-rapor-durum" role="status" aria-live="polite"></div>
                         <div id="sozlesme_tahsil_rapor_list" class="giris-tahsil-rapor-list"></div>
                     </div>
@@ -32352,6 +32358,12 @@ function tahsilRaporYukleGenel(opts) {
     if (mid != null && String(mid).trim() !== '') {
         u += '&musteri_id=' + encodeURIComponent(String(mid).trim());
     }
+    var manId = opts.manuelId || null;
+    var manEl = manId ? document.getElementById(manId) : null;
+    // Kutu yoksa parametre gönderme (eski davranış). Varsayılan UI işaretli → manuel=1.
+    if (manEl) {
+        u += manEl.checked ? '&manuel=1' : '&manuel=0';
+    }
     fetch(u, { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
@@ -32384,7 +32396,8 @@ function girisTahsilRaporYukle() {
         basId: 'giris_tahsil_rapor_bas',
         bitId: 'giris_tahsil_rapor_bit',
         durumId: 'giris_tahsil_rapor_durum',
-        listId: 'giris_tahsil_rapor_list'
+        listId: 'giris_tahsil_rapor_list',
+        manuelId: 'giris_tahsil_rapor_manuel'
     });
 }
 function sozlesmeTahsilRaporYukle() {
@@ -32394,7 +32407,8 @@ function sozlesmeTahsilRaporYukle() {
         bitId: 'sozlesme_tahsil_rapor_bit',
         durumId: 'sozlesme_tahsil_rapor_durum',
         listId: 'sozlesme_tahsil_rapor_list',
-        musteriId: mid
+        musteriId: mid,
+        manuelId: 'sozlesme_tahsil_rapor_manuel'
     });
 }
 function sozlesmeTahsilAltTabAc(which) {

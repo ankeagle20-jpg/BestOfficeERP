@@ -10918,6 +10918,43 @@ def tahsilat_sil():
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
 
+# Gerçek makbuz kaynakları (Giriş «Manuel» filtresinde DAHİL).
+_TAHSIL_RAPOR_MAKBUZ_KAYNAK = frozenset({"manuel_makbuz", "banka_import", "odeme_linki"})
+# Grid «Seçilenleri tahsil et» / eşitle satırları (giris_routes.GRID_TAH_PATTERN ile aynı).
+_TAHSIL_RAPOR_GRID_TAH_RE = re.compile(r"^\w[\w\s]+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|")
+
+
+def _tahsilat_rapor_grid_esitle_satiri(row) -> bool:
+    """True → aylık grid / eşitle üretimi; Manuel filtresinde HARİÇ.
+
+    Ölçüt (giris_routes):
+    - kaynak == grid_toplu (api_aylik_tutarlardan_tahsil_et INSERT)
+    - tahsil_eden IS NULL + GRID_TAH_PATTERN (_reel_tahsilat_esitle_calistir)
+    """
+    if not isinstance(row, dict):
+        return False
+    kay = str(row.get("kaynak") or "").strip().lower()
+    if kay == "grid_toplu":
+        return True
+    if kay in _TAHSIL_RAPOR_MAKBUZ_KAYNAK:
+        return False
+    te = row.get("tahsil_eden")
+    if te is not None and str(te).strip() != "":
+        return False
+    ac = str(row.get("aciklama") or "")
+    return bool(_TAHSIL_RAPOR_GRID_TAH_RE.match(ac))
+
+
+def _tahsilat_rapor_manuel_belirsiz(row) -> bool:
+    """Kaynak boş/bilinmeyen ve grid değil → Manuel'de DAHİL (kaybetmemek)."""
+    if not isinstance(row, dict):
+        return False
+    if _tahsilat_rapor_grid_esitle_satiri(row):
+        return False
+    kay = str(row.get("kaynak") or "").strip().lower()
+    return kay not in _TAHSIL_RAPOR_MAKBUZ_KAYNAK
+
+
 @bp.route("/api/tahsilat-raporu")
 @faturalar_gerekli
 def api_tahsilat_raporu():
@@ -10925,7 +10962,8 @@ def api_tahsilat_raporu():
 
     Varsayılan: baslangic ≤ tahsilat_tarihi ≤ bitis (gün dahil).
     senaryo=1 → dönem kapsama (AYLIK_TAH marker ayı aralıkta; Faturalar «Yıllık» ile aynı).
-    Açıklama/dağıtım sütunu aciklama marker'larından gelir; tutar = makbuz tutarı (çift sayım yok).
+    manuel=1 → grid_toplu / eşitle satırlarını hariç tut (parametre yoksa eski: tümü).
+    Açıklama/dağıtım sütunu aciklama marker'larından gelir; tutar = makbuz tutarı.
     """
     _ensure_tahsil_eden_column()
     bugun = date.today()
@@ -10944,6 +10982,9 @@ def api_tahsilat_raporu():
     mid = _opt_customer_id(request.args.get("musteri_id")) or 0
     senaryo = str(request.args.get("senaryo", "0") or "0").strip()
     donem_mod = senaryo != "0"
+    _man_raw = str(request.args.get("manuel") or "").strip().lower()
+    # Parametre yoksa eski davranış (tümü). UI varsayılan işaretli → manuel=1 gönderir.
+    manuel_mod = _man_raw in ("1", "true", "yes", "on")
 
     if donem_mod:
         # Dönem kapsama: marker ayı aralıkta VEYA markersızda tahsilat_tarihi aralıkta
@@ -10982,7 +11023,7 @@ def api_tahsilat_raporu():
     _sql = (
         """
         SELECT t.id, t.fatura_id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi,
-               t.aciklama, t.tahsil_eden,
+               t.aciklama, t.tahsil_eden, t.kaynak,
                COALESCE(t.customer_id, t.musteri_id) AS cari_id,
                COALESCE(NULLIF(TRIM(c.name), ''), '—') AS musteri_adi,
                t.tahsilat_tarihi::date AS rapor_tarihi
@@ -10994,9 +11035,24 @@ def api_tahsilat_raporu():
         ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
         """
     )
-    rows = fetch_all(_sql, tuple(params))
+    rows = fetch_all(_sql, tuple(params)) or []
 
-    items = [_row_serializable(r) for r in (rows or [])]
+    belirsiz_ids: list[int] = []
+    if manuel_mod:
+        filtered = []
+        for r in rows:
+            if _tahsilat_rapor_grid_esitle_satiri(r):
+                continue
+            if _tahsilat_rapor_manuel_belirsiz(r):
+                try:
+                    belirsiz_ids.append(int(r.get("id") or 0))
+                except (TypeError, ValueError):
+                    pass
+            filtered.append(r)
+        rows = filtered
+    belirsiz_ids = [i for i in belirsiz_ids if i > 0]
+
+    items = [_row_serializable(r) for r in rows]
     toplam = sum(float(it.get("tutar") or 0) for it in items)
     ok = jsonify(
         {
@@ -11005,6 +11061,9 @@ def api_tahsilat_raporu():
             "baslangic": bas.strftime("%Y-%m-%d"),
             "bitis": bit.strftime("%Y-%m-%d"),
             "date_mode": ("donem_kapsama" if donem_mod else "tahsilat_tarihi"),
+            "manuel": bool(manuel_mod),
+            "belirsiz_adet": len(belirsiz_ids),
+            "belirsiz_ids": belirsiz_ids[:50],
             "items": items,
             "toplam": round(toplam, 2),
             "adet": len(items),
