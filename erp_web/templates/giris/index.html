@@ -4018,6 +4018,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     <label class="fatura-rapor-opt" title="İşaretli değilken aynı firma adına sahip kartlardan yalnızca biri listelenir (önce aktif, aynıysa küçük müşteri no). İşaretleyince tüm çiftler gelir."><input type="checkbox" id="fatura_rapor_cift_olanlar"> Çift olanlar</label>
                     <label class="fatura-rapor-opt" title="Açıkken filtreler, tekil liste sütun düzeni/sıralaması ve fatura satırı tablosu ayarları tarayıcıda saklanır; sayfa yenilense korunur. Kapalıyken yalnızca bu sekme oturumu için geçerlidir."><input type="checkbox" id="fatura_rapor_ayarlari_kaydet" autocomplete="off"> Ayarları kaydet</label>
                     <label class="fatura-rapor-opt" title="Müşteri kartında «Bizim Hesap» işaretli carileri listelemek için sunucuya filtre uygular; Listeyi getir ile yenileyin."><input type="checkbox" id="fatura_rapor_bizim_hesap" autocomplete="off"> Bizim Hesap</label>
+                    <label class="fatura-rapor-opt" title="Rapordaki Borç (kalan) değeri 0,005 TL üzeri olan carileri gösterir; işaret kalkınca tüm satırlar geri gelir (istemci süzgeci)."><input type="checkbox" id="fatura_rapor_sadece_borclu" autocomplete="off"> Sadece borçlular</label>
                     <span id="fatura_rapor_opt_sadece_wrap" style="display:none;"><label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_sadece_kesilen"> Yalnız kesilen faturalar (fatura yok satırı ekleme)</label></span>
                 </div>
                 <div id="fatura_rapor_durum" class="fatura-rapor-durum fatura-rapor-durum--idle" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -12015,6 +12016,7 @@ function faturaRaporFiltreStateKaydet() {
         var ara = document.getElementById('fatura_rapor_liste_ara');
         var co = document.getElementById('fatura_rapor_cift_olanlar');
         var bh = document.getElementById('fatura_rapor_bizim_hesap');
+        var sb = document.getElementById('fatura_rapor_sadece_borclu');
         var o = {
             gorunum: gor ? gor.value : '',
             duzenli_fatura: df ? df.value : '',
@@ -12023,6 +12025,7 @@ function faturaRaporFiltreStateKaydet() {
             sadece_aktif: !!(sa && sa.checked),
             cift_olanlar: !!(co && co.checked),
             bizim_hesap: !!(bh && bh.checked),
+            sadece_borclu: !!(sb && sb.checked),
             sadece_kesilen: !!(sk && sk.checked),
             baslangic: bas ? bas.value : '',
             bitis: bit ? bit.value : '',
@@ -12067,6 +12070,7 @@ function faturaRaporFiltreStateUygula() {
     var sa = document.getElementById('fatura_rapor_sadece_aktif');
     var co = document.getElementById('fatura_rapor_cift_olanlar');
     var bh = document.getElementById('fatura_rapor_bizim_hesap');
+    var sb = document.getElementById('fatura_rapor_sadece_borclu');
     var sk = document.getElementById('fatura_rapor_sadece_kesilen');
     if (sk) sk.checked = !!st.sadece_kesilen;
     if (tm) tm.checked = !!st.tum_musteri;
@@ -12074,6 +12078,7 @@ function faturaRaporFiltreStateUygula() {
     if (sa) sa.checked = !!st.sadece_aktif;
     if (co) co.checked = !!st.cift_olanlar;
     if (bh) bh.checked = !!st.bizim_hesap;
+    if (sb) sb.checked = !!st.sadece_borclu;
     if (sk && sk.checked) {
         if (tm) tm.checked = false;
         if (pd) pd.checked = false;
@@ -13987,6 +13992,8 @@ function faturaRaporFirmaSuzgecEtiketiKisa() {
     if (odaF === 'yok') parts.push('oda yok');
     else if (odaF === 'hepsi') parts.push('oda atanmış (hepsi)');
     else if (odaF) parts.push('oda ' + odaF);
+    var elSb = document.getElementById('fatura_rapor_sadece_borclu');
+    if (elSb && elSb.checked) parts.push('sadece borçlular');
     return parts.join(', ');
 }
 
@@ -14112,6 +14119,13 @@ function faturaRaporListeAraUygula() {
                 } else if (trOda !== odaF) {
                     ok = false;
                 }
+            }
+        }
+        if (ok && firmaMod) {
+            var elSb = document.getElementById('fatura_rapor_sadece_borclu');
+            if (elSb && elSb.checked) {
+                var borcN = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
+                if (!isFinite(borcN) || !(borcN > 0.005)) ok = false;
             }
         }
         tr.style.display = ok ? '' : 'none';
@@ -15021,6 +15035,8 @@ function faturaRaporExcelAktar() {
     if (typeof faturaRaporKapsamQuerySuffix === 'function') u += faturaRaporKapsamQuerySuffix();
     if (elCo && elCo.checked) u += '&cift_olanlar=1';
     if (elBh && elBh.checked) u += '&bizim_hesap=1';
+    var elSb = document.getElementById('fatura_rapor_sadece_borclu');
+    if (elSb && elSb.checked) u += '&sadece_borclu=1';
     if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
     u += '&gorunum=firma_ozet';
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
@@ -17114,6 +17130,15 @@ function faturaRaporSecilenleriSil() {
     bh.addEventListener('change', function () {
         if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
         if (typeof faturaRaporYukle === 'function') faturaRaporYukle();
+    });
+})();
+
+(function initFaturaRaporSadeceBorcluGiris() {
+    var sb = document.getElementById('fatura_rapor_sadece_borclu');
+    if (!sb) return;
+    sb.addEventListener('change', function () {
+        if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+        if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
     });
 })();
 

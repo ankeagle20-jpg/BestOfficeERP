@@ -4308,6 +4308,7 @@ def _firma_ozet_client_filtre_uygula(
     durum: str,
     oda: str | None,
     yillar: list | None = None,
+    sadece_borclu: bool = False,
 ) -> list:
     """faturaRaporListeAraUygula (firma_ozet) ile birebir istemci süzgeçleri."""
     q_raw = (q or "").strip()
@@ -4381,6 +4382,13 @@ def _firma_ozet_client_filtre_uygula(
         if ok and yillar is not None:
             gy = _firma_ozet_giris_yili_deger(it.get("giris_tarihi"))
             if gy is None or gy not in yillar:
+                ok = False
+        if ok and sadece_borclu:
+            try:
+                borc = float(it.get("toplam_borc") or 0)
+            except (TypeError, ValueError):
+                borc = 0.0
+            if not (borc > 0.005):
                 ok = False
         if ok:
             out.append(it)
@@ -4571,6 +4579,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
     client_oda_raw = (
         request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or ""
     ).strip()
+    client_sadece_borclu = _fatura_rapor_query_truthy(request.args.get("sadece_borclu"))
 
     liste_hizli = _firma_ozet_liste_hizli_mod()
     if liste_hizli:
@@ -5053,6 +5062,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             durum=client_durum,
             oda=client_oda_raw or None,
             yillar=giris_yillar_filtre,
+            sadece_borclu=client_sadece_borclu,
         )
         toplam_aylik, toplam_borc, total_count_firma = _firma_ozet_recalc_ozet(satirlar_resp)
         _firma_payload["satirlar"] = satirlar_resp
