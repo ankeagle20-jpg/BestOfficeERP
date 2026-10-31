@@ -6,7 +6,6 @@ Varsayılan: DRY-RUN (yazmaz).
 Mid listesi --mids-file (satır başına mid) veya --mid.
 Her mid: tahsilat_degisti(mid) → grid + panel by_iso + ekstre bellek.
 Repo dışı yedek (Masaüstü JSON). PII yok (yalnız mid / sayı).
-Bu script'i --apply ile bu komutta ÇALIŞTIRMAYIN (salt dry-run ok).
 """
 from __future__ import annotations
 
@@ -52,7 +51,7 @@ def _parse_mids(args) -> list[int]:
         if not p.is_file():
             raise SystemExit("HATA: mids-file yok: %s" % p)
         for line in p.read_text(encoding="utf-8").splitlines():
-            s = line.strip()
+            s = line.strip().lstrip("\ufeff")
             if not s or s.startswith("#"):
                 continue
             mid = int(s.split()[0])
@@ -68,6 +67,33 @@ def _yedek_yolu(tag: str) -> Path:
         desktop = Path.home()
     gun = date.today().isoformat()
     return desktop / f"yedek_kapanis_hepsi_{tag}_{gun}.json"
+
+
+def _son_iso(son) -> str | None:
+    if son is None:
+        return None
+    try:
+        return son.isoformat()
+    except Exception:
+        return str(son)[:10] or None
+
+
+def _audit_mid(execute, mid: int, anlik: dict, yeni: dict) -> bool:
+    """Mid başına tek audit satırı. Hata yutulur (False)."""
+    from audit_log import audit_yaz
+
+    return bool(
+        audit_yaz(
+            execute,
+            olay="kapanis_hepsi_yeniden_hesapla",
+            varlik="musteri_aylik_grid_cache",
+            kayit_id=int(mid),
+            musteri_id=int(mid),
+            kullanici="kapanis_hepsi_yeniden_hesapla",
+            anlik=dict(anlik or {}),
+            yeni=dict(yeni or {}),
+        )
+    )
 
 
 def main() -> int:
@@ -121,7 +147,7 @@ def main() -> int:
                 "durum": kyc.get("durum"),
                 "N": kyc.get("kapanis_sonrasi_borc_ay"),
                 "kap": str(kyc.get("kapanis_tarihi") or "")[:10],
-                "son_borc_ayi": son.isoformat() if son else None,
+                "son_borc_ayi": _son_iso(son),
             }
         )
 
@@ -148,9 +174,35 @@ def main() -> int:
     yol.write_text(json.dumps(yedek, ensure_ascii=False, indent=2), encoding="utf-8")
     print("yedek", yol)
 
+    from db import execute, fetch_one
+
+    def _grid_ay_n(mid: int) -> int | None:
+        try:
+            row = fetch_one(
+                "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
+                (int(mid),),
+            )
+            payload = (row or {}).get("payload")
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            aylar = (payload or {}).get("aylar") if isinstance(payload, dict) else None
+            return len(aylar) if isinstance(aylar, list) else None
+        except Exception:
+            return None
+
+    plan_by = {int(p["mid"]): p for p in plan}
     ok_n = 0
     fail = []
+    audit_ok_n = 0
     for mid in mids:
+        once = plan_by.get(int(mid)) or {}
+        anlik = {
+            "mid": int(mid),
+            "son_borc_ayi": once.get("son_borc_ayi"),
+            "kap": once.get("kap"),
+            "N": once.get("N"),
+            "ay_n": _grid_ay_n(int(mid)),
+        }
         try:
             if tahsilat_degisti(mid):
                 ok_n += 1
@@ -158,24 +210,30 @@ def main() -> int:
                 fail.append({"mid": mid, "err": "tahsilat_degisti False"})
         except Exception as ex:
             fail.append({"mid": mid, "err": str(ex).split("\n")[0][:120]})
+            continue
+        try:
+            kyc2 = _musteri_kyc_grup_for_aylik_grid(mid) or {}
+            son2 = kira_son_borc_ayi(kyc2)
+            yeni = {
+                "mid": int(mid),
+                "son_borc_ayi": _son_iso(son2),
+                "kap": str(kyc2.get("kapanis_tarihi") or "")[:10],
+                "N": kyc2.get("kapanis_sonrasi_borc_ay"),
+                "ay_n": _grid_ay_n(int(mid)),
+            }
+            if _audit_mid(execute, int(mid), anlik, yeni):
+                audit_ok_n += 1
+        except Exception as ex:
+            print("audit_uyari mid=%s %s" % (mid, str(ex)[:80]))
 
-    try:
-        from audit_log import audit_yaz
-
-        audit_yaz(
-            "kapanis_hepsi_yeniden_hesapla",
-            {
-                "mid_n": len(mids),
-                "ok_n": ok_n,
-                "fail_n": len(fail),
-                "flag": flag,
-                "yedek": str(yol),
-            },
-        )
-    except Exception as ex:
-        print("audit_uyari", str(ex)[:80])
-
-    _j({"ok_n": ok_n, "fail_n": len(fail), "fail_sample": fail[:10]})
+    _j(
+        {
+            "ok_n": ok_n,
+            "fail_n": len(fail),
+            "fail_sample": fail[:10],
+            "audit_ok_n": audit_ok_n,
+        }
+    )
     return 0 if not fail else 1
 
 
