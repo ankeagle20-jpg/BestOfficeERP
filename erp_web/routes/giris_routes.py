@@ -1581,6 +1581,68 @@ def _aylik_grid_cache_payload_from_db(musteri_id) -> dict | None:
     return _parse_aylik_grid_cache_payload_raw((row or {}).get("payload"))
 
 
+def _aylik_grid_trim_payload_to_son_borc(payload, son_borc: date, kyc=None) -> dict | None:
+    """Eski healthy payload'ı son_borc ayına (dahil) kırp; tutar/durum alanları aynen.
+
+    Cap sonrası aylar atılır. kapanis_ek_fingerprint / kapanis alanları KYC ile hizalanır.
+    Hata veya boş sonuç → None.
+    """
+    if not isinstance(payload, dict) or not isinstance(son_borc, date):
+        return None
+    try:
+        son_m = date(int(son_borc.year), int(son_borc.month), 1)
+    except (TypeError, ValueError):
+        return None
+    src = copy.deepcopy(payload)
+    aylar_in = src.get("aylar") if isinstance(src.get("aylar"), list) else []
+    aylar_out = []
+    for a in aylar_in:
+        if not isinstance(a, dict):
+            continue
+        try:
+            cur = date(int(a.get("yil")), int(a.get("ay")), 1)
+        except (TypeError, ValueError):
+            continue
+        if cur <= son_m:
+            aylar_out.append(a)
+    if not aylar_out and aylar_in:
+        # Hiç ay kalmadı — kırpma anlamsız; caller skip etsin
+        return None
+    src["aylar"] = aylar_out
+    src["bitis"] = son_m.isoformat()
+    src["kira_son_borc_ayi"] = son_m.isoformat()
+    kyc = dict(kyc or {})
+    if "kapanis_tarihi" in kyc or kyc.get("kapanis_tarihi") is not None:
+        kap = _aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))
+        if kap is not None:
+            src["kapanis_tarihi"] = kap.isoformat()
+    if "kapanis_sonrasi_borc_ay" in kyc or kyc.get("kapanis_sonrasi_borc_ay") is not None:
+        src["kapanis_sonrasi_borc_ay"] = kyc.get("kapanis_sonrasi_borc_ay")
+    # Fingerprint damgası (H / H12 / N) — env+N ile uyumlu okuma
+    src["kapanis_ek_fingerprint"] = _kapanis_ek_fingerprint(
+        src.get("kapanis_sonrasi_borc_ay")
+    )
+    src["cap_kirpildi"] = True
+    return src
+
+
+def _aylik_grid_son_borc_for_mid(musteri_id) -> tuple[date | None, dict]:
+    """kira_son_borc_ayi + kyc; hata → (None, {})."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None, {}
+    try:
+        kyc = _musteri_kyc_grup_for_aylik_grid(mid) or {}
+    except Exception:
+        return None, {}
+    try:
+        son = kira_son_borc_ayi(kyc)
+    except Exception:
+        return None, dict(kyc or {})
+    return son, dict(kyc or {})
+
+
 def _aylik_grid_should_skip_placeholder_collapse(
     musteri_id,
     new_payload,
@@ -1588,7 +1650,10 @@ def _aylik_grid_should_skip_placeholder_collapse(
     force_placeholder_collapse: bool = False,
     old_payload=None,
 ) -> bool:
-    """True → yazma/silme yapma (skip). Hata fırlatmaz."""
+    """True → yazma/silme yapma (skip). Cap kırpma adayı False (caller trim yazar).
+
+    Hata fırlatmaz. Cap varken placeholder+healthy → False (kırpma yolu).
+    """
     if force_placeholder_collapse:
         return False
     try:
@@ -1601,6 +1666,10 @@ def _aylik_grid_should_skip_placeholder_collapse(
     if old is None:
         old = _aylik_grid_cache_payload_from_db(mid)
     if not _aylik_grid_payload_is_healthy(old):
+        return False
+    # Cap var → skip etme; kırpılmış eski yazılacak
+    son, _kyc = _aylik_grid_son_borc_for_mid(mid)
+    if son is not None:
         return False
     os_, on, _oph = _aylik_grid_payload_brut_stats(old)
     ns, nn, _nph = _aylik_grid_payload_brut_stats(new_payload)
@@ -1618,6 +1687,56 @@ def _aylik_grid_should_skip_placeholder_collapse(
     except Exception:
         pass
     return True
+
+
+def _aylik_grid_cap_trim_if_placeholder_collapse(
+    musteri_id,
+    new_payload,
+    *,
+    force_placeholder_collapse: bool = False,
+    old_payload=None,
+) -> dict | None:
+    """Placeholder yeni + healthy eski + cap → kırpılmış eski payload; aksi None.
+
+    None → ya skip (cap yok) ya da normal yazım (placeholder değil / eski unhealthy).
+    Placeholder yeni asla dönülmez.
+    """
+    if force_placeholder_collapse:
+        return None
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    if not _aylik_grid_payload_is_placeholder(new_payload):
+        return None
+    old = old_payload
+    if old is None:
+        old = _aylik_grid_cache_payload_from_db(mid)
+    if not _aylik_grid_payload_is_healthy(old):
+        return None
+    son, kyc = _aylik_grid_son_borc_for_mid(mid)
+    if son is None:
+        return None
+    trimmed = _aylik_grid_trim_payload_to_son_borc(old, son, kyc)
+    if trimmed is None:
+        return None
+    os_, on, _ = _aylik_grid_payload_brut_stats(old)
+    ts_, tn, _ = _aylik_grid_payload_brut_stats(trimmed)
+    try:
+        logging.getLogger(__name__).warning(
+            "aylik_grid_cache placeholder_collapse_cap_trim mid=%s "
+            "old_sum=%s new_ph_sum=%s trim_sum=%s old_n=%s trim_n=%s son=%s",
+            mid,
+            os_,
+            (_aylik_grid_payload_brut_stats(new_payload)[0]),
+            ts_,
+            on,
+            tn,
+            son.isoformat()[:7],
+        )
+    except Exception:
+        pass
+    return trimmed
 
 
 def _delete_aylik_grid_cache_guarded(
@@ -1650,8 +1769,12 @@ def _delete_aylik_grid_cache_guarded(
         preview = _build_aylik_grid_cache_payload(mid)
     except Exception:
         preview = None
-    if _aylik_grid_should_skip_placeholder_collapse(
-        mid, preview, force_placeholder_collapse=False, old_payload=old
+    # Silme: placeholder çöküşünde (cap olsa bile) healthy cache'i silme;
+    # cap kırpma upsert/persist yolunda yazılır.
+    if (
+        not force_placeholder_collapse
+        and _aylik_grid_payload_is_placeholder(preview)
+        and _aylik_grid_payload_is_healthy(old)
     ):
         try:
             logging.getLogger(__name__).warning(
@@ -1685,10 +1808,23 @@ def _persist_grid_cache_with_panel(
             mid, force_placeholder_collapse=force_placeholder_collapse
         )
     payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload)
-    if _aylik_grid_should_skip_placeholder_collapse(
-        mid, payload, force_placeholder_collapse=force_placeholder_collapse
+    old_disk = _aylik_grid_cache_payload_from_db(mid)
+    trimmed = _aylik_grid_cap_trim_if_placeholder_collapse(
+        mid,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old_disk,
+    )
+    if trimmed is not None:
+        # Placeholder yeni yazılmaz; kırpılmış eski (tahsil güncel) yazılır
+        payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, trimmed)
+    elif _aylik_grid_should_skip_placeholder_collapse(
+        mid,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old_disk,
     ):
-        return _aylik_grid_cache_payload_from_db(mid)
+        return old_disk
     _ensure_aylik_grid_cache_table()
     execute(
         """
@@ -5537,8 +5673,8 @@ def _upsert_aylik_grid_cache(
     # Her tam rebuild DB'deki güncel KYC'yi görsün (45 sn'lik mem yarışını kapat).
     _invalidate_musteri_kyc_grid_mem(musteri_id)
     payload = _build_aylik_grid_cache_payload(musteri_id, tufe_map=tufe_map)
+    old = _aylik_grid_cache_payload_from_db(musteri_id)
     if not payload:
-        old = _aylik_grid_cache_payload_from_db(musteri_id)
         if _aylik_grid_should_skip_placeholder_collapse(
             musteri_id,
             None,
@@ -5546,13 +5682,34 @@ def _upsert_aylik_grid_cache(
             old_payload=old,
         ):
             return old
+        trimmed0 = _aylik_grid_cap_trim_if_placeholder_collapse(
+            musteri_id,
+            None,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old,
+        )
+        if trimmed0 is not None:
+            return _persist_grid_cache_with_panel(
+                musteri_id,
+                trimmed0,
+                force_placeholder_collapse=force_placeholder_collapse,
+            )
         return None
-    if _aylik_grid_should_skip_placeholder_collapse(
+    trimmed = _aylik_grid_cap_trim_if_placeholder_collapse(
         musteri_id,
         payload,
         force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old,
+    )
+    if trimmed is not None:
+        payload = trimmed
+    elif _aylik_grid_should_skip_placeholder_collapse(
+        musteri_id,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old,
     ):
-        return _aylik_grid_cache_payload_from_db(musteri_id)
+        return old
     # Adım 1: rebuild sonrası FP damgası (flag/shadow açıksa) — persist paneli yazarken kalıcılaşır.
     try:
         if _aylik_grid_cache_skip_refresh_enabled() or _aylik_grid_freshness_shadow_log_enabled():
