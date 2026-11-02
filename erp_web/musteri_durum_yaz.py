@@ -122,13 +122,25 @@ def normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
     raw = data.get("kapanis_sonrasi_borc_ay")
     if raw is None:
         return None
+    # bool int alt sınıfı — False'u 0 sayma
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        val = int(raw)
+        return val if 0 <= val <= 12 and float(raw) == val else None
     s = str(raw).strip()
     if not s:
         return None
     try:
         val = int(s)
     except (TypeError, ValueError):
-        return None
+        try:
+            f = float(s.replace(",", "."))
+            val = int(f)
+            if float(f) != float(val):
+                return None
+        except (TypeError, ValueError):
+            return None
     return val if 0 <= val <= 12 else None
 
 

@@ -6792,11 +6792,20 @@ def api_musteriler():
 
 
 def _musteri_serialize_val(v):
-    """Tarih/sayı alanlarını JSON uyumlu string yap."""
+    """Tarih/sayı alanlarını JSON uyumlu string yap.
+
+    0 korunur: kapanis_sonrasi_borc_ay=0 (yalnız kapanış ayı) Hepsi/NULL değildir.
+    Eski `if v else \"\"` sayısal 0'ı boş string yapıyordu → UI dropdown Hepsi'ye düşüyordu.
+    """
     if v is None:
         return ""
     if hasattr(v, "isoformat"):
         return v.isoformat()[:10] if v else ""
+    # bool, int alt sınıfı — False'u 0 ile karıştırma
+    if isinstance(v, bool):
+        return "1" if v else ""
+    if v == 0 and not isinstance(v, bool):
+        return str(v)
     return str(v).strip() if v else ""
 
 

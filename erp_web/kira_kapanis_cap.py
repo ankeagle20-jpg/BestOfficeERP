@@ -57,8 +57,15 @@ def _add_months(d: date, n: int) -> date:
 
 
 def _parse_n(raw) -> int | None:
-    """Geçerli N (0..12) veya None (Hepsi / geçersiz)."""
+    """Geçerli N (0..12) veya None (Hepsi / geçersiz). 0 korunur (falsy değil)."""
     if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        val = int(raw)
+        if 0 <= val <= 12 and float(raw) == val:
+            return val
         return None
     s = str(raw).strip()
     if not s:
@@ -66,7 +73,13 @@ def _parse_n(raw) -> int | None:
     try:
         val = int(s)
     except (TypeError, ValueError):
-        return None
+        try:
+            f = float(s.replace(",", "."))
+            val = int(f)
+            if float(f) != float(val):
+                return None
+        except (TypeError, ValueError):
+            return None
     if 0 <= val <= 12:
         return val
     return None
