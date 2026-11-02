@@ -52,11 +52,14 @@ from db import (
     sql_expr_fatura_gib_no_tasindi_degil,
 )
 from musteri_durum_yaz import (
+    dogrula_kapanis_giris,
     musteri_durum_yaz_alanlari,
     musteri_durum_yaz_json,
+    musteri_giris_tarihi_db,
     normalize_kapanis_sonrasi_borc_ay as _normalize_kapanis_sonrasi_borc_ay,
     normalize_musteri_durum_kapanis as _normalize_musteri_durum_kapanis,
     parse_kapanis_tarihi as _parse_kapanis_tarihi,
+    resolve_giris_tarihi,
 )
 from kira_kapanis_cap import (
     ay_kira_borc_dahil_mi as _ay_kira_borc_dahil_mi,
@@ -8383,6 +8386,12 @@ def api_musteri_durum_guncelle(mid):
     alanlar = musteri_durum_yaz_alanlari(data, kati=True, oda_bosalt=True)
     if not alanlar:
         return jsonify({"ok": False, "mesaj": "durum aktif veya pasif olmalıdır."}), 400
+    # Aktifte kapanış None → doğrulama yok (yeniden giriş / temizleme bozulmaz).
+    red = dogrula_kapanis_giris(
+        alanlar.get("kapanis_tarihi"), musteri_giris_tarihi_db(mid)
+    )
+    if red:
+        return jsonify({"ok": False, "mesaj": red}), 400
     ensure_customers_durum()
     ensure_customers_is_active()
     ensure_customers_kapanis_sonrasi_borc_ay()
@@ -8688,6 +8697,16 @@ def kaydet():
         kap = alanlar["kapanis_tarihi"]
         kap_borc_ay = alanlar["kapanis_sonrasi_borc_ay"]
         kart_aktif = alanlar["is_active"]
+        # Giriş: istekte sozlesme/rent varsa onları kullan; yoksa DB (mevcut kart).
+        giris_eff = resolve_giris_tarihi(
+            data.get("sozlesme_tarihi") or data.get("sozlesme_baslangic"),
+            data.get("rent_start_date"),
+        )
+        if giris_eff is None and musteri_id:
+            giris_eff = musteri_giris_tarihi_db(musteri_id)
+        red_kap = dogrula_kapanis_giris(kap, giris_eff)
+        if red_kap:
+            return jsonify({"ok": False, "mesaj": red_kap}), 400
         bh_raw = data.get("bizim_hesap")
         if isinstance(bh_raw, str):
             bizim_hesap_legacy = bh_raw.strip().lower() in ("1", "true", "yes", "evet", "on")

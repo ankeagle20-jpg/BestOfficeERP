@@ -38,7 +38,14 @@ import os
 import sys
 import re
 import threading
-from musteri_durum_yaz import musteri_durum_yaz_alanlari
+from musteri_durum_yaz import (
+    dogrula_kapanis_giris,
+    musteri_durum_yaz_alanlari,
+    musteri_giris_tarihi_db,
+    musteri_kapanis_tarihi_db,
+    parse_kapanis_tarihi,
+    resolve_giris_tarihi,
+)
 from services.cari_service import CariService
 
 _HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
@@ -2060,6 +2067,28 @@ def import_excel():
                         if tax:
                             existing_id = existing_by_tax.get(tax) or existing_by_tax.get((tax_raw or "").strip())
                         if existing_id:
+                            if rent_start is not None:
+                                try:
+                                    soz_r = fetch_one(
+                                        """
+                                        SELECT sozlesme_tarihi::date AS soz FROM musteri_kyc
+                                        WHERE musteri_id=%s ORDER BY id DESC LIMIT 1
+                                        """,
+                                        (int(existing_id),),
+                                    )
+                                except Exception:
+                                    soz_r = None
+                                red_imp = dogrula_kapanis_giris(
+                                    musteri_kapanis_tarihi_db(existing_id),
+                                    resolve_giris_tarihi(
+                                        (soz_r or {}).get("soz"), rent_start
+                                    ),
+                                )
+                                if red_imp:
+                                    errors.append(
+                                        f"Satır {idx + 2}: {name[:30]} — {red_imp}"
+                                    )
+                                    continue
                             cur.execute(
                                 "UPDATE customers SET name=%s,email=%s,phone=%s,address=%s,tax_number=%s,durum=%s,"
                                 "rent_start_date=%s,rent_start_year=%s,rent_start_month=%s,"
@@ -2528,6 +2557,50 @@ def api_bulk_update():
                 params.append(MONTHS_TR[rent_start_date_val.month - 1] if rent_start_date_val.month else None)
             if not sets:
                 continue
+            # kapanış < giriş: aktife almada kap yok sayılır; aksi halde yazılan/DB kapanış × giriş
+            col_to_val = {
+                s_expr.split(" = ", 1)[0].strip(): pval
+                for s_expr, pval in zip(sets, params)
+            }
+            durum_new = str(col_to_val.get("durum") or "").strip().lower() or None
+            if durum_new == "aktif":
+                kap_chk = None
+            else:
+                kap_chk = col_to_val.get("kapanis_tarihi")
+                if isinstance(kap_chk, str):
+                    kap_chk = parse_kapanis_tarihi(kap_chk)
+                if kap_chk is None and (
+                    "kapanis_tarihi" in col_to_val or "rent_start_date" in col_to_val
+                ):
+                    kap_chk = musteri_kapanis_tarihi_db(mid)
+            if "rent_start_date" in col_to_val:
+                try:
+                    soz_row = fetch_one(
+                        """
+                        SELECT sozlesme_tarihi::date AS soz
+                        FROM musteri_kyc WHERE musteri_id=%s
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (mid,),
+                    )
+                except Exception:
+                    soz_row = None
+                giris_chk = resolve_giris_tarihi(
+                    (soz_row or {}).get("soz"),
+                    col_to_val.get("rent_start_date"),
+                )
+            else:
+                giris_chk = musteri_giris_tarihi_db(mid)
+            red_kap = dogrula_kapanis_giris(kap_chk, giris_chk)
+            if red_kap:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "message": red_kap,
+                        "mesaj": red_kap,
+                        "musteri_id": mid,
+                    }
+                ), 400
             params.append(mid)
             cur.execute(
                 "UPDATE customers SET " + ", ".join(sets) + " WHERE id = %s",
@@ -2715,6 +2788,29 @@ def api_kyc_kaydet():
         sozlesme_bitis = parse_date(sozlesme_bitis)
         kira_artis_tarihi = parse_date(kira_artis_tarihi)
         kapanis_tarihi = alanlar["kapanis_tarihi"]
+
+        # kapanış < giriş engeli (aktifte kap=None → doğrulama yok).
+        # Giriş tarihi kaydırılırken mevcut/yazılacak kapanış girişten önce kalırsa reddet.
+        rent_eff = None
+        if musteri_id:
+            try:
+                _rr = fetch_one(
+                    "SELECT rent_start_date::date AS rent FROM customers WHERE id=%s",
+                    (int(musteri_id),),
+                )
+                rent_eff = (_rr or {}).get("rent")
+            except Exception:
+                rent_eff = None
+        giris_eff = resolve_giris_tarihi(sozlesme_tarihi, rent_eff)
+        if giris_eff is None and musteri_id:
+            giris_eff = musteri_giris_tarihi_db(musteri_id)
+        kap_eff = kapanis_tarihi
+        if kap_eff is None and durum_m == "pasif" and musteri_id:
+            # Form kap göndermediyse diskteki kapanış ile giriş çakışmasını da yakala
+            kap_eff = musteri_kapanis_tarihi_db(musteri_id)
+        red_kap = dogrula_kapanis_giris(kap_eff, giris_eff)
+        if red_kap:
+            return jsonify({"ok": False, "mesaj": red_kap}), 400
 
         # Sözleşme başlangıcı bugünden >3 ay ilerideyse soft-onay gerekir
         # (FE: confirm → sozlesme_ileri_tarih_onay=true). Kesin üst sınır yok.

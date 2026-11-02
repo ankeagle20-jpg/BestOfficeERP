@@ -18823,6 +18823,85 @@ function formKapanisSonrasiBorcAy() {
     return el ? kapanisSonrasiBorcAyDegeri(el.value) : null;
 }
 
+/** Formdan giriş tarihi: sozlesme_baslangic → yoksa rent_start / cache. */
+function girisTarihiFormdanISO() {
+    var sozEl = document.getElementById('sozlesme_baslangic');
+    var soz = sozEl ? String(sozEl.value || '').trim().substring(0, 10) : '';
+    if (soz && /^\d{4}-\d{2}-\d{2}$/.test(soz)) return soz;
+    try {
+        if (window.__girisMusteriCacheObj) {
+            var m = window.__girisMusteriCacheObj;
+            var k = (m.kyc_sozlesme_tarihi != null) ? String(m.kyc_sozlesme_tarihi).trim().substring(0, 10) : '';
+            if (k && /^\d{4}-\d{2}-\d{2}$/.test(k)) return k;
+            var r = (m.rent_start_date != null) ? String(m.rent_start_date).trim().substring(0, 10) : '';
+            if (r && /^\d{4}-\d{2}-\d{2}$/.test(r)) return r;
+        }
+    } catch (_eG) {}
+    return '';
+}
+
+function tarihTrFromISO(iso) {
+    var s = String(iso || '').trim().substring(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || '';
+    var p = s.split('-');
+    return p[2] + '.' + p[1] + '.' + p[0];
+}
+
+/** kapanış < giriş → mesaj; aksi null. Aktif / boş kapanış → null. */
+function dogrulaKapanisGirisMesaj(kapIso, girisIso) {
+    var k = String(kapIso || '').trim().substring(0, 10);
+    var g = String(girisIso || '').trim().substring(0, 10);
+    if (!k || !/^\d{4}-\d{2}-\d{2}$/.test(k)) return null;
+    if (!g || !/^\d{4}-\d{2}-\d{2}$/.test(g)) return null;
+    if (k < g) {
+        return 'Kapanış tarihi, giriş tarihinden önce olamaz (giriş: ' + tarihTrFromISO(g) + ')';
+    }
+    return null;
+}
+
+function kapanisGirisUIIsaretle(hataMesaj) {
+    var inp = document.getElementById('kapanis_tarihi');
+    var hint = document.getElementById('kapanis_giris_hata');
+    if (!hint && inp && inp.parentNode) {
+        hint = document.createElement('div');
+        hint.id = 'kapanis_giris_hata';
+        hint.style.color = '#b91c1c';
+        hint.style.fontSize = '12px';
+        hint.style.marginTop = '4px';
+        inp.parentNode.appendChild(hint);
+    }
+    if (inp) {
+        if (hataMesaj) {
+            inp.style.borderColor = '#dc2626';
+            inp.style.outlineColor = '#dc2626';
+        } else {
+            inp.style.borderColor = '';
+            inp.style.outlineColor = '';
+        }
+    }
+    if (hint) hint.textContent = hataMesaj || '';
+    return !hataMesaj;
+}
+
+function kapanisGirisFormKontrol(opts) {
+    opts = opts || {};
+    var mdEl = document.getElementById('musteri_durum');
+    var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
+    if (mdVal !== 'pasif') {
+        kapanisGirisUIIsaretle(null);
+        return true;
+    }
+    var kapInp = document.getElementById('kapanis_tarihi');
+    var kapIso = kapInp ? String(kapInp.value || '').trim() : '';
+    if (!kapIso) kapIso = (typeof bugunISO === 'function') ? bugunISO() : '';
+    var msg = dogrulaKapanisGirisMesaj(kapIso, girisTarihiFormdanISO());
+    kapanisGirisUIIsaretle(msg);
+    if (msg && opts.alert !== false) {
+        try { alert(msg); } catch (_eA) {}
+    }
+    return !msg;
+}
+
 /** opts.kapanis: API'den gelen kayıtlı tarih (YYYY-MM-DD), opts.kapanisAy: 1-12|0 */
 function syncDurumUI(d, opts) {
     opts = opts || {};
@@ -18857,6 +18936,20 @@ function syncDurumUI(d, opts) {
         sozlesmeBitisAktifKiraciIcinUzat(!!opts.skipAylikGrid);
         girisFormKiraArtisTarihiDoldur();
     }
+    if (inp && !inp._kapanisGirisBag) {
+        inp._kapanisGirisBag = true;
+        inp.addEventListener('change', function () {
+            if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
+        });
+    }
+    var sozEl = document.getElementById('sozlesme_baslangic');
+    if (sozEl && !sozEl._kapanisGirisBag) {
+        sozEl._kapanisGirisBag = true;
+        sozEl.addEventListener('change', function () {
+            if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
+        });
+    }
+    if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
     hesaplaYuzde(!!opts.skipAylikGrid);
 }
 
@@ -20686,6 +20779,10 @@ async function kaydet(event) {
     var kapBorcAy = (mdVal === 'pasif' && kapAySel) ? kapanisSonrasiBorcAyDegeri(kapAySel.value) : null;
     if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
         kapInp.value = bugunISO();
+    }
+    if (typeof kapanisGirisFormKontrol === 'function' && !kapanisGirisFormKontrol({ alert: true })) {
+        if (kapInp) try { kapInp.focus(); } catch (_eF) {}
+        return;
     }
     
     var aramaGuvenli = (typeof girisKaydetAramaAlanlariGuvenli === 'function') ? girisKaydetAramaAlanlariGuvenli() : null;
