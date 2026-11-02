@@ -162,8 +162,10 @@ def _payload_brut_n_sum(payload: dict | None) -> tuple[int, float]:
     return n, s
 
 
-def _pre_kap_rows(payload: dict | None, kap: date | None) -> list[tuple]:
-    """Kapanış ayı dahil öncesi: (iso, brut, odenen, kalan, te) sıralı."""
+def _pre_kap_rows(
+    payload: dict | None, kap: date | None, *, kap_dahil: bool = True
+) -> list[tuple]:
+    """Kapanış öncesi satırlar: varsayılan kap ayı dahil; kap_dahil=False → kap ayı hariç."""
     if not isinstance(payload, dict) or not kap:
         return []
     sinir = _ay1(kap)
@@ -172,8 +174,14 @@ def _pre_kap_rows(payload: dict | None, kap: date | None) -> list[tuple]:
         if not isinstance(a, dict):
             continue
         cur = _ay_cur(a)
-        if cur is None or cur > sinir:
+        if cur is None:
             continue
+        if kap_dahil:
+            if cur > sinir:
+                continue
+        else:
+            if cur >= sinir:
+                continue
         brut = _f(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil"))
         odenen = _f(a.get("odenen_tutar_kdv"))
         kalan_raw = a.get("kalan_tutar_kdv")
@@ -184,8 +192,10 @@ def _pre_kap_rows(payload: dict | None, kap: date | None) -> list[tuple]:
     return rows
 
 
-def _pre_kap_ay_tl(payload: dict | None, kap: date | None) -> tuple[int, float]:
-    """Kapanış öncesi (kap ayı dahil) borçlu ay/TL — unpaid benzeri."""
+def _pre_kap_ay_tl(
+    payload: dict | None, kap: date | None, *, kap_dahil: bool = True
+) -> tuple[int, float]:
+    """Kapanış öncesi borçlu ay/TL. Varsayılan kap ayı dahil; kap_dahil=False → hariç."""
     if not isinstance(payload, dict) or not kap:
         return 0, 0.0
     sinir = _ay1(kap)
@@ -194,8 +204,14 @@ def _pre_kap_ay_tl(payload: dict | None, kap: date | None) -> tuple[int, float]:
         if not isinstance(a, dict):
             continue
         cur = _ay_cur(a)
-        if cur is None or cur > sinir:
+        if cur is None:
             continue
+        if kap_dahil:
+            if cur > sinir:
+                continue
+        else:
+            if cur >= sinir:
+                continue
         brut = _f(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil"))
         if brut <= _TOL:
             continue
@@ -275,8 +291,14 @@ def sadece_kirp_hesapla(
         return out
 
     old_n, old_sum = _payload_brut_n_sum(disk_payload)
-    pre0 = _pre_kap_rows(disk_payload, kap)
-    pre0_ay, pre0_tl = _pre_kap_ay_tl(disk_payload, kap)
+    # Aday A (N0 haric + N=0): kapanış ayı bilinçli kırpılır → koruma kap ayı HARİÇ.
+    # Bayrak kapalı / N≠0: eski davranış (kap ayı dahil pre koruması).
+    from kira_kapanis_cap import _parse_n, n0_kapanis_ayi_haric_aktif
+
+    n_val = _parse_n((kyc or {}).get("kapanis_sonrasi_borc_ay"))
+    kap_dahil_pre = not (n0_kapanis_ayi_haric_aktif() and n_val == 0)
+    pre0 = _pre_kap_rows(disk_payload, kap, kap_dahil=kap_dahil_pre)
+    pre0_ay, pre0_tl = _pre_kap_ay_tl(disk_payload, kap, kap_dahil=kap_dahil_pre)
     a0_ay, a0_tl = _after_kap_ay_tl(disk_payload, kap, lim_son=None)
 
     trimmed = trim_fn(disk_payload, son, kyc)
@@ -287,8 +309,8 @@ def sadece_kirp_hesapla(
         out["old_sum"] = old_sum
         return out
 
-    pre1 = _pre_kap_rows(trimmed, kap)
-    pre1_ay, pre1_tl = _pre_kap_ay_tl(trimmed, kap)
+    pre1 = _pre_kap_rows(trimmed, kap, kap_dahil=kap_dahil_pre)
+    pre1_ay, pre1_tl = _pre_kap_ay_tl(trimmed, kap, kap_dahil=kap_dahil_pre)
     if pre0 != pre1 or pre0_ay != pre1_ay or abs(pre0_tl - pre1_tl) > _TOL:
         out["skip"] = True
         out["sebep"] = "pre_kap_degisti"
@@ -330,7 +352,11 @@ def sadece_kirp_hesapla(
 
 def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
     from db import execute, fetch_one
-    from kira_kapanis_cap import hepsi_sozlesme_yili_aktif, kira_son_borc_ayi
+    from kira_kapanis_cap import (
+        hepsi_sozlesme_yili_aktif,
+        kira_son_borc_ayi,
+        n0_kapanis_ayi_haric_aktif,
+    )
     from routes import giris_routes as gr
     from routes.giris_routes import (
         _aylik_grid_payload_is_healthy,
@@ -340,11 +366,14 @@ def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
     )
 
     flag = hepsi_sozlesme_yili_aktif()
+    flag_n0 = n0_kapanis_ayi_haric_aktif()
     rows = []
     skip_n = 0
     need_n = 0
     pre_fark = []
     sum_a = sum_b2 = 0.0
+    sum_kirp_ay = 0
+    sum_kirp_tl = 0.0
 
     for mid in mids:
         kyc = _musteri_kyc_grup_for_aylik_grid(mid) or {}
@@ -393,17 +422,22 @@ def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
             sum_b2 = round(sum_b2 + float(h.get("B2_tl") or 0), 2)
             if h.get("need_write"):
                 need_n += 1
+                sum_kirp_ay += int(h.get("kirpilan_ay") or 0)
+                sum_kirp_tl = round(sum_kirp_tl + float(h.get("kirpilan_tl") or 0), 2)
         rows.append(rec)
 
     _j(
         {
             "mode": ("APPLY" if do_apply else "DRY-RUN") + "-SADECE-KIRP",
             "flag_KAPANIS_HEPSI_SOZLESME_YILI": flag,
+            "flag_KAPANIS_N0_KAPANIS_AYI_HARIC": flag_n0,
             "mid_n": len(mids),
             "need_write_n": need_n,
             "skip_n": skip_n,
             "pre_kap_fark_n": len(pre_fark),
             "pre_kap_fark_mids": [r["mid"] for r in pre_fark],
+            "sum_kirpilan_ay": sum_kirp_ay,
+            "sum_kirpilan_tl": sum_kirp_tl,
             "sum_A_tl": sum_a,
             "sum_B2_tl": sum_b2,
             "rows": rows,

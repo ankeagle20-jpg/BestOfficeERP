@@ -6542,6 +6542,8 @@ def index():
         js_surum = js_surum or ""
         wa_surum = wa_surum or ""
         tahsilat_wa_surum = tahsilat_wa_surum or ""
+    from kira_kapanis_cap import n0_kapanis_ayi_haric_aktif
+
     return render_template(
         'giris/index.html',
         embed=embed,
@@ -6551,6 +6553,7 @@ def index():
         tahsilat_wa_js_surum=tahsilat_wa_surum,
         tufe_borc_tahsil_acik=tufe_borc_tahsil_acik(),
         kira_nakit_oranli_artis=kira_nakit_oranli_artis_aktif(),
+        kapanis_n0_kapanis_ayi_haric=n0_kapanis_ayi_haric_aktif(),
     )
 
 

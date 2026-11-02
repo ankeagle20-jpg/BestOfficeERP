@@ -10270,8 +10270,11 @@ function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
     var ekAy = kapanisSonrasiBorcAyDegeri(opts.kapanis_sonrasi_borc_ay);
     if (durum === 'pasif' && kap && !isNaN(kap.getTime()) && ekAy !== null && ekAy !== undefined) {
         // D2: N = kapanıştan sonra ek ay. 0=sadece kapanış; 1=kapanış+1.
-        // Dışlayıcı sınır: close_month + (N+1).
-        var sinir = new Date(kap.getFullYear(), kap.getMonth() + ekAy + 1, 1);
+        // Aday A: KAPANIS_N0_KAPANIS_AYI_HARIC=1 ve N=0 → kapanış ayı borç dışı (delta=-1).
+        // Dışlayıcı sınır: close_month + (delta+1). Bayrak kapalıyken delta=N (eski).
+        var n0Haric = !!(window.KAPANIS_N0_KAPANIS_AYI_HARIC);
+        var delta = (n0Haric && ekAy === 0) ? -1 : ekAy;
+        var sinir = new Date(kap.getFullYear(), kap.getMonth() + delta + 1, 1);
         if (!bit || isNaN(bit.getTime()) || sinir < bit) bit = sinir;
     }
     return (bit && !isNaN(bit.getTime())) ? bit : null;
