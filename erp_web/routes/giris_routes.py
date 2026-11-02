@@ -874,21 +874,10 @@ def sync_musteri_panel_from_tahsil_and_dagitim(
             logging.getLogger(__name__).exception(
                 "sync panel tahsil_guncelle musteri_id=%s", mid
             )
-        _ensure_aylik_grid_cache_table()
-        execute(
-            """
-            INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (musteri_id)
-            DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-            """,
-            (mid, json.dumps(payload, ensure_ascii=False)),
-        )
-        try:
-            _aylik_grid_mem_set(mid, payload)
-        except (TypeError, ValueError):
-            pass
-        _invalidate_aylik_grid_payload_mem(mid)
+        # Cache yokken build edilmiş payload kısmi/tam 0,01 yazmasın.
+        written = _aylik_grid_disk_insert_guarded(mid, payload)
+        if isinstance(written, dict):
+            payload = written
     return by_iso
 
 
@@ -1181,17 +1170,9 @@ def apply_makbuz_dagitim_to_panel_db(
         _save_musteri_panel_by_iso(mid, by_iso)
         if isinstance(payload, dict):
             _apply_panel_by_iso_to_grid_payload(payload, by_iso)
-            _ensure_aylik_grid_cache_table()
-            execute(
-                """
-                INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
-                VALUES (%s, %s, NOW())
-                ON CONFLICT (musteri_id)
-                DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-                """,
-                (mid, json.dumps(payload, ensure_ascii=False)),
-            )
-            _invalidate_aylik_grid_payload_mem(mid)
+            written = _aylik_grid_disk_insert_guarded(mid, payload)
+            if isinstance(written, dict):
+                payload = written
     # Tam prune: makbuz ekleme kurallarına dokunmadan panel/grid'i canlı map ile hizala.
     try:
         if not isinstance(payload, dict):
@@ -1215,17 +1196,9 @@ def apply_makbuz_dagitim_to_panel_db(
                 payload = _aylik_grid_cache_payload_tahsil_guncelle(
                     mid, payload, panel_by_iso=fresh
                 )
-                _ensure_aylik_grid_cache_table()
-                execute(
-                    """
-                    INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (musteri_id)
-                    DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-                    """,
-                    (mid, json.dumps(payload, ensure_ascii=False)),
-                )
-                _invalidate_aylik_grid_payload_mem(mid)
+                written2 = _aylik_grid_disk_insert_guarded(mid, payload)
+                if isinstance(written2, dict):
+                    payload = written2
     except Exception:
         logging.getLogger(__name__).exception(
             "apply_makbuz_dagitim prune/resync musteri_id=%s", mid
@@ -1565,6 +1538,124 @@ def _aylik_grid_payload_is_healthy(payload) -> bool:
     return True
 
 
+def _aylik_grid_payload_brut_by_iso(payload) -> dict[str, float]:
+    """payload.aylar → {YYYY-MM-01: brut}. Hata yutulur."""
+    out: dict[str, float] = {}
+    if not isinstance(payload, dict):
+        return out
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            iso = date(int(a.get("yil")), int(a.get("ay")), 1).isoformat()
+        except (TypeError, ValueError):
+            continue
+        try:
+            t = round(
+                float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2
+            )
+        except (TypeError, ValueError):
+            t = 0.0
+        if not math.isfinite(t):
+            t = 0.0
+        out[iso] = t
+    return out
+
+
+def _aylik_grid_partial_regression_lost_isos(
+    old_payload, new_payload, son_borc: date | None = None
+) -> list[str]:
+    """Eski gerçek (≥ PLACEHOLDER_BRUT_MAX) → yeni yer tutucu/altı ayların iso listesi.
+
+    Cap varsa yalnız son_borc dahil ve öncesi (eski ay kümesi; yeni eksik → 0).
+    Cap yoksa yalnız ortak (intersection) aylar.
+    Meşru kısalma / gerçek→gerçek fark tetiklemez.
+    """
+    old_m = _aylik_grid_payload_brut_by_iso(old_payload)
+    new_m = _aylik_grid_payload_brut_by_iso(new_payload)
+    thr = float(AYLIK_GRID_PLACEHOLDER_BRUT_MAX)
+    son_m = None
+    if isinstance(son_borc, date):
+        try:
+            son_m = date(int(son_borc.year), int(son_borc.month), 1)
+        except (TypeError, ValueError):
+            son_m = None
+    if son_m is not None:
+        keys = []
+        for iso in old_m:
+            try:
+                d = date.fromisoformat(str(iso)[:10])
+            except ValueError:
+                continue
+            if d <= son_m:
+                keys.append(iso)
+    else:
+        keys = [iso for iso in old_m if iso in new_m]
+    lost: list[str] = []
+    for iso in keys:
+        ov = float(old_m.get(iso) or 0)
+        nv = float(new_m.get(iso) or 0)
+        # Gerçek: thr ve üstü (brut_stats ph bandının dışı). Yeni çöküş: thr altı (0 / 0,01).
+        if ov >= thr and nv < thr:
+            lost.append(iso)
+    return lost
+
+
+def _aylik_grid_partial_placeholder_regression_action(
+    musteri_id,
+    new_payload,
+    *,
+    force_placeholder_collapse: bool = False,
+    old_payload=None,
+) -> tuple[dict | None, bool]:
+    """Kısmi yer tutucu regresyonu: (trim_payload|None, skip_write).
+
+    Eski healthy + en az bir ay eski gerçek → yeni ≤ yer tutucu bandı:
+      cap + trim ok → (trimmed, False)  # kırpılmış eski yazılsın
+      aksi → (None, True)               # yazma atla, eski kalsın
+    Tetiklenmezse (None, False).
+    """
+    if force_placeholder_collapse:
+        return None, False
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None, False
+    old = old_payload
+    if old is None:
+        old = _aylik_grid_cache_payload_from_db(mid)
+    if not _aylik_grid_payload_is_healthy(old):
+        return None, False
+    son, kyc = _aylik_grid_son_borc_for_mid(mid)
+    lost = _aylik_grid_partial_regression_lost_isos(old, new_payload, son)
+    if not lost:
+        return None, False
+    n_lost = len(lost)
+    if son is not None:
+        trimmed = _aylik_grid_trim_payload_to_son_borc(old, son, kyc)
+        if trimmed is not None:
+            try:
+                logging.getLogger(__name__).warning(
+                    "aylik_grid_cache partial_placeholder_regression_trim mid=%s "
+                    "lost_ay=%s son=%s",
+                    mid,
+                    n_lost,
+                    son.isoformat()[:7],
+                )
+            except Exception:
+                pass
+            return trimmed, False
+    try:
+        logging.getLogger(__name__).warning(
+            "aylik_grid_cache partial_placeholder_regression_skip mid=%s lost_ay=%s",
+            mid,
+            n_lost,
+        )
+    except Exception:
+        pass
+    return None, True
+
+
 def _aylik_grid_cache_payload_from_db(musteri_id) -> dict | None:
     """Guard için disk cache (mem/waterfall yok)."""
     try:
@@ -1785,9 +1876,106 @@ def _delete_aylik_grid_cache_guarded(
         except Exception:
             pass
         return False
+    # Kısmi regresyon: rebuild bazı gerçek ayları 0,01 yapacaksa silme.
+    if not force_placeholder_collapse and _aylik_grid_payload_is_healthy(old):
+        try:
+            son_del, _ = _aylik_grid_son_borc_for_mid(mid)
+        except Exception:
+            son_del = None
+        if _aylik_grid_partial_regression_lost_isos(old, preview, son_del):
+            try:
+                logging.getLogger(__name__).warning(
+                    "aylik_grid_cache partial_placeholder_regression_skip mid=%s "
+                    "reason=delete_blocked_partial",
+                    mid,
+                )
+            except Exception:
+                pass
+            return False
     execute("DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s", (mid,))
     _invalidate_aylik_grid_payload_mem(mid)
     return True
+
+
+def _aylik_grid_disk_insert_guarded(
+    musteri_id,
+    payload,
+    *,
+    force_placeholder_collapse: bool = False,
+    old_payload=None,
+) -> dict | None:
+    """Ham INSERT öncesi tam-ph + kısmi regresyon koruması; yazılan veya skip'te eski.
+
+    Panel sync / makbuz gibi upsert dışı yazma yolları için.
+    Skip → yazmadan old döner. Trim → kırpılmış eski yazılır.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    old = old_payload
+    if old is None:
+        old = _aylik_grid_cache_payload_from_db(mid)
+    trimmed = _aylik_grid_cap_trim_if_placeholder_collapse(
+        mid,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old,
+    )
+    if trimmed is not None:
+        payload = trimmed
+    elif _aylik_grid_should_skip_placeholder_collapse(
+        mid,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+        old_payload=old,
+    ):
+        return old
+    else:
+        p_trim, p_skip = _aylik_grid_partial_placeholder_regression_action(
+            mid,
+            payload,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old,
+        )
+        if p_trim is not None:
+            payload = p_trim
+        elif p_skip:
+            return old
+        elif (
+            not force_placeholder_collapse
+            and _aylik_grid_payload_is_placeholder(payload)
+            and _aylik_grid_payload_is_healthy(old)
+        ):
+            try:
+                s_, n_, _ = _aylik_grid_payload_brut_stats(old)
+                logging.getLogger(__name__).warning(
+                    "aylik_grid_cache partial_placeholder_regression_skip mid=%s "
+                    "lost_ay=%s reason=trim_failed_full_placeholder",
+                    mid,
+                    n_,
+                )
+            except Exception:
+                pass
+            return old
+    _ensure_aylik_grid_cache_table()
+    execute(
+        """
+        INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (musteri_id)
+        DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+        """,
+        (mid, json.dumps(payload, ensure_ascii=False)),
+    )
+    try:
+        _aylik_grid_mem_set(mid, payload)
+    except (TypeError, ValueError):
+        pass
+    _invalidate_aylik_grid_payload_mem(mid)
+    return payload
 
 
 def _persist_grid_cache_with_panel(
@@ -1825,6 +2013,33 @@ def _persist_grid_cache_with_panel(
         old_payload=old_disk,
     ):
         return old_disk
+    else:
+        p_trim, p_skip = _aylik_grid_partial_placeholder_regression_action(
+            mid,
+            payload,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old_disk,
+        )
+        if p_trim is not None:
+            payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, p_trim)
+        elif p_skip:
+            return old_disk
+        elif (
+            not force_placeholder_collapse
+            and _aylik_grid_payload_is_placeholder(payload)
+            and _aylik_grid_payload_is_healthy(old_disk)
+        ):
+            try:
+                s_, n_, _ = _aylik_grid_payload_brut_stats(old_disk)
+                logging.getLogger(__name__).warning(
+                    "aylik_grid_cache partial_placeholder_regression_skip mid=%s "
+                    "lost_ay=%s reason=trim_failed_full_placeholder",
+                    mid,
+                    n_,
+                )
+            except Exception:
+                pass
+            return old_disk
     _ensure_aylik_grid_cache_table()
     execute(
         """
@@ -5694,6 +5909,20 @@ def _upsert_aylik_grid_cache(
                 trimmed0,
                 force_placeholder_collapse=force_placeholder_collapse,
             )
+        p_trim0, p_skip0 = _aylik_grid_partial_placeholder_regression_action(
+            musteri_id,
+            None,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old,
+        )
+        if p_trim0 is not None:
+            return _persist_grid_cache_with_panel(
+                musteri_id,
+                p_trim0,
+                force_placeholder_collapse=force_placeholder_collapse,
+            )
+        if p_skip0:
+            return old
         return None
     trimmed = _aylik_grid_cap_trim_if_placeholder_collapse(
         musteri_id,
@@ -5710,6 +5939,36 @@ def _upsert_aylik_grid_cache(
         old_payload=old,
     ):
         return old
+    else:
+        # Kısmi yer tutucu (örn. yalnız ilk 12 ay 0,01) — tam-ph koruması yakalamaz.
+        p_trim, p_skip = _aylik_grid_partial_placeholder_regression_action(
+            musteri_id,
+            payload,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old,
+        )
+        if p_trim is not None:
+            payload = p_trim
+        elif p_skip:
+            return old
+        elif (
+            not force_placeholder_collapse
+            and _aylik_grid_payload_is_placeholder(payload)
+            and _aylik_grid_payload_is_healthy(old)
+        ):
+            # Cap vardı ama trim None (örn. tüm gerçek aylar cap sonrası) —
+            # placeholder yeni ASLA yazılmaz; eski disk korunur.
+            try:
+                s_, n_, _ = _aylik_grid_payload_brut_stats(old)
+                logging.getLogger(__name__).warning(
+                    "aylik_grid_cache partial_placeholder_regression_skip mid=%s "
+                    "lost_ay=%s reason=trim_failed_full_placeholder",
+                    musteri_id,
+                    n_,
+                )
+            except Exception:
+                pass
+            return old
     # Adım 1: rebuild sonrası FP damgası (flag/shadow açıksa) — persist paneli yazarken kalıcılaşır.
     try:
         if _aylik_grid_cache_skip_refresh_enabled() or _aylik_grid_freshness_shadow_log_enabled():
@@ -10806,21 +11065,10 @@ def _ekstre_invalidate_after_change(
         if isinstance(payload, dict):
             panel_now = _load_musteri_panel_by_iso(mid)
             _apply_panel_by_iso_to_grid_payload(payload, panel_now)
-            _ensure_aylik_grid_cache_table()
-            execute(
-                """
-                INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
-                VALUES (%s, %s, NOW())
-                ON CONFLICT (musteri_id)
-                DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-                """,
-                (mid, json.dumps(payload, ensure_ascii=False)),
-            )
-            try:
-                _aylik_grid_mem_set(mid, payload)
-            except (TypeError, ValueError):
-                pass
-            _invalidate_aylik_grid_payload_mem(mid)
+            # upsert zaten korumalı; panel merge sonrası ikinci yazım da aynı kapıdan geçsin.
+            written = _aylik_grid_disk_insert_guarded(mid, payload)
+            if isinstance(written, dict):
+                payload = written
         else:
             payload = _upsert_aylik_grid_cache(mid)
             if isinstance(payload, dict):
