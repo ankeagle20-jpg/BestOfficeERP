@@ -6427,6 +6427,47 @@ def _aylik_tahsil_edilen_aylar_from_payload(payload) -> set[str]:
     return out
 
 
+def _firma_ozet_kismi_kalan_by_ay_from_payload(payload) -> dict[str, float]:
+    """Grid payload: kısmi aylar için YYYY-M → kalan (fo_cache ile aynı min(brüt, max(kalan,0)))."""
+    out: dict[str, float] = {}
+    if not isinstance(payload, dict):
+        return out
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            odenen = float(a.get("odenen_tutar_kdv") or 0) if a.get("odenen_tutar_kdv") is not None else 0.0
+        except (TypeError, ValueError):
+            odenen = 0.0
+        try:
+            kalan = float(a.get("kalan_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            kalan = 0.0
+        try:
+            tut = float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if not math.isfinite(tut):
+            tut = 0.0
+        if not math.isfinite(kalan):
+            kalan = 0.0
+        kismi = bool(a.get("kismi_tahsilat")) or (odenen > tol and kalan > tol)
+        if not kismi:
+            continue
+        nk = _firma_ozet_normalize_tahsil_ay_key(
+            str(a.get("ay_key") or "")
+        ) or _firma_ozet_normalize_tahsil_ay_key(
+            f"{a.get('yil')}-{a.get('ay')}"
+        )
+        if not nk:
+            continue
+        add = min(tut, max(kalan, 0.0))
+        if add > tol:
+            out[nk] = round(add, 2)
+    return out
+
+
 def _aylik_tahsil_durum_finalize_ay_set(
     musteri_id: int,
     ay_set: set[str],
@@ -12236,6 +12277,35 @@ def firma_ozet_toplam_borc_ve_geciken_ay(
     if mid <= 0 or rm < 1 or rm > 12:
         return 0.0, 0
     kyc = dict(kyc_for_grid or {})
+    # Küçük sayfa ile aynı: usable fo_cache varsa sözleşme tarihinden önce dön
+    # (bazı kayıtlarda sozlesme_tarihi boş olsa da payload borcu vardır).
+    _fo_payload = None
+    if isinstance(tahsil_n_override, set):
+        tahsil_n = tahsil_n_override
+        _fo_payload = _read_aylik_grid_cache_payload(mid)
+    else:
+        _fo_payload = _read_aylik_grid_cache_payload(mid)
+        if _fo_payload is None:
+            try:
+                _fo_payload = _build_aylik_grid_cache_payload(
+                    mid, tufe_map=tufe_map
+                )
+            except Exception:
+                _fo_payload = None
+        _fo_oz = _firma_ozet_ozet_from_grid_cache_payload(
+            _fo_payload, ry, rm, kyc
+        )
+        if isinstance(_fo_oz, dict) and "toplam_borc" in _fo_oz:
+            try:
+                _tb = round(float(_fo_oz.get("toplam_borc") or 0), 2)
+            except (TypeError, ValueError):
+                _tb = 0.0
+            try:
+                _ga = int(_fo_oz.get("geciken_ay") or 0)
+            except (TypeError, ValueError):
+                _ga = 0
+            return _tb, _ga
+        tahsil_n = _aylik_tahsil_edilen_aylar_from_payload(_fo_payload)
     bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
     if not bas_soz:
         return 0.0, 0
@@ -12243,7 +12313,24 @@ def firma_ozet_toplam_borc_ve_geciken_ay(
     ref_first = date(ry, rm, 1)
     if ref_first < bas_first:
         return 0.0, 0
-    tahsil_n = tahsil_n_override if isinstance(tahsil_n_override, set) else _aylik_tahsil_edilen_aylar_set_normalized(mid)
+    kismi_kalan = _firma_ozet_kismi_kalan_by_ay_from_payload(_fo_payload)
+    # fo yok / override: canlı yol — kısmi ayda kalan; payload brütü tercih.
+    payload_acik_brut: dict[str, float] = {}
+    for _a in (_fo_payload or {}).get("aylar") or []:
+        if not isinstance(_a, dict):
+            continue
+        _nk = _firma_ozet_normalize_tahsil_ay_key(
+            str(_a.get("ay_key") or "")
+        ) or _firma_ozet_normalize_tahsil_ay_key(f"{_a.get('yil')}-{_a.get('ay')}")
+        if not _nk or _nk in tahsil_n or _nk in kismi_kalan:
+            continue
+        try:
+            _tut = float(_a.get("tutar_kdv_dahil") or _a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            _tut = 0.0
+        if not math.isfinite(_tut):
+            _tut = 0.0
+        payload_acik_brut[_nk] = round(max(_tut, 0.0), 2)
     reel = manual_reel_by_year if isinstance(manual_reel_by_year, dict) else {}
     artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
     artis_month = int(artis_d.month)
@@ -12272,16 +12359,24 @@ def firma_ozet_toplam_borc_ve_geciken_ay(
         if son_borc is not None and cur > son_borc:
             break
         ay_key = f"{cur.year}-{cur.month}"
-        if ay_key not in tahsil_n:
+        # Kısmi ay: fo_cache gibi kalan (brüt − ödenen); tahsil_n'de olsa bile say.
+        if ay_key in kismi_kalan:
+            v = float(kismi_kalan[ay_key])
+            if math.isfinite(v) and v > 0:
+                total += v
+                n_ay += 1
+        elif ay_key not in tahsil_n:
             v = 0.0
-            if ay_key in reel_map:
+            if ay_key in payload_acik_brut:
+                v = float(payload_acik_brut[ay_key])
+            elif ay_key in reel_map:
                 try:
                     rv = float(reel_map.get(ay_key) or 0)
                     if math.isfinite(rv) and rv > 0:
                         v = rv
                 except (TypeError, ValueError):
                     v = 0.0
-            if not v:
+            if not v and ay_key not in payload_acik_brut:
                 v = firma_ozet_aylik_grid_hucre_kdv_dahil(
                     mid,
                     cur.year,
@@ -13437,12 +13532,18 @@ def _ekstre_acilis_bakiyesi_fifo(
     batch_maps=None,
     manual_reel_by_year=None,
     musteri_id=None,
+    post_bit_mahsup=False,
+    bit_iso_cmp=None,
 ):
-    """Dönem başlangıcı öncesi net bakiye: FIFO ile yalnızca bas öncesi ödemeler mahsup edilir.
+    """Dönem başlangıcı öncesi net bakiye: FIFO ile bas öncesi ödemeler mahsup edilir.
 
     Ödeme seçimi, dönem içi satırlarla aynı görüntü tarihine göre yapılır
     (`_ekstre_satir_goruntu_tarihi` < bas). Marker ayı ile ödeme günü karışınca
     alacak hem Devreden'de hem dönemde sayılmasın.
+
+    post_bit_mahsup=True (kapanışlı, bit son borç ayına kırpılmış): görüntü tarihi
+    bit'ten sonra olan ödemeler de need'e FIFO mahsup edilir; açılış = kalan
+    pre_months. Dönem içi (bas..bit) ödemeler yine dönem satırında kalır.
     """
     if not isinstance(full_borc_for_fifo, dict):
         return 0.0
@@ -13454,6 +13555,7 @@ def _ekstre_acilis_bakiyesi_fifo(
         iso: round(float(full_borc_for_fifo.get(iso) or 0), 2)
         for iso in month_order_all
     }
+    bit_cmp = str(bit_iso_cmp or "")[:10]
     # Dönem içi sınıflandırma ile aynı: kendi satır → general; grid_toplu/TAH → marker.
     marker_pays = []
     general_pays = []
@@ -13471,10 +13573,18 @@ def _ekstre_acilis_bakiyesi_fifo(
             general_pays.append(pr)
 
     def _fifo_pay_alloc_open(pr, restrict_marker_months=False):
-        # Görüntü tarihi < bas → Devreden; aksi halde dönem satırında kalır.
+        # Görüntü tarihi < bas → Devreden; bas..bit → dönem satırı; bit sonrası →
+        # yalnız post_bit_mahsup ile açılış need'ine (kendi satır yok).
         goruntu = _ekstre_satir_goruntu_tarihi(pr)
-        if not goruntu or goruntu < floor_pay or goruntu >= str(bas_iso_cmp):
+        if not goruntu or goruntu < floor_pay:
             return
+        if goruntu >= str(bas_iso_cmp):
+            if not (
+                post_bit_mahsup
+                and bit_cmp
+                and goruntu > bit_cmp
+            ):
+                return
         try:
             v = round(float(pr.get("tutar") or 0), 2)
         except (TypeError, ValueError):
@@ -14488,23 +14598,51 @@ def _cari_ekstre_hareketler(
         fifo_harf = {iso: "B" for iso in month_order_all}
         fifo_ids = defaultdict(list)
         bit_iso_cmp = bit.isoformat()
-        pays_fifo = fetch_all(
-            f"""SELECT t.id,
-                  COALESCE(t.makbuz_no, 'Makbuz-' || t.id) AS belge_no,
-                  t.fatura_id,
-                  t.tahsilat_tarihi AS tarih,
-                  {_eslesme_sql} AS eslesme_tarihi,
-                  t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama,
-                  COALESCE(t.kaynak, '') AS kaynak
-           FROM tahsilatlar t
-           LEFT JOIN faturalar f ON f.id = t.fatura_id
-           WHERE (t.musteri_id = %s OR t.customer_id = %s)
-             AND COALESCE(t.tutar, 0) > 0
-             AND {_eslesme_sql} >= %s::date
-             AND {_eslesme_sql} <= %s::date
-           ORDER BY {_eslesme_sql}, t.tahsilat_tarihi, t.id""",
-            (musteri_id, musteri_id, floor_pay, bit),
-        ) or []
+        # Kapanışlı: bit son borç ayına kırpıldığında kapanış sonrası tahsilatlar
+        # eslesme≤bit dışında kalır; açılış mahsubu için tahsilat_tarihi>bit olanları da çek.
+        try:
+            _son_borc_fifo = kira_son_borc_ayi(kyc)
+        except Exception:
+            _son_borc_fifo = None
+        if _son_borc_fifo is not None:
+            pays_fifo = fetch_all(
+                f"""SELECT t.id,
+                      COALESCE(t.makbuz_no, 'Makbuz-' || t.id) AS belge_no,
+                      t.fatura_id,
+                      t.tahsilat_tarihi AS tarih,
+                      {_eslesme_sql} AS eslesme_tarihi,
+                      t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama,
+                      COALESCE(t.kaynak, '') AS kaynak
+               FROM tahsilatlar t
+               LEFT JOIN faturalar f ON f.id = t.fatura_id
+               WHERE (t.musteri_id = %s OR t.customer_id = %s)
+                 AND COALESCE(t.tutar, 0) > 0
+                 AND (
+                   ({_eslesme_sql} >= %s::date AND {_eslesme_sql} <= %s::date)
+                   OR (t.tahsilat_tarihi::date > %s::date
+                       AND t.tahsilat_tarihi::date <= CURRENT_DATE)
+                 )
+               ORDER BY {_eslesme_sql}, t.tahsilat_tarihi, t.id""",
+                (musteri_id, musteri_id, floor_pay, bit, bit),
+            ) or []
+        else:
+            pays_fifo = fetch_all(
+                f"""SELECT t.id,
+                      COALESCE(t.makbuz_no, 'Makbuz-' || t.id) AS belge_no,
+                      t.fatura_id,
+                      t.tahsilat_tarihi AS tarih,
+                      {_eslesme_sql} AS eslesme_tarihi,
+                      t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama,
+                      COALESCE(t.kaynak, '') AS kaynak
+               FROM tahsilatlar t
+               LEFT JOIN faturalar f ON f.id = t.fatura_id
+               WHERE (t.musteri_id = %s OR t.customer_id = %s)
+                 AND COALESCE(t.tutar, 0) > 0
+                 AND {_eslesme_sql} >= %s::date
+                 AND {_eslesme_sql} <= %s::date
+               ORDER BY {_eslesme_sql}, t.tahsilat_tarihi, t.id""",
+                (musteri_id, musteri_id, floor_pay, bit),
+            ) or []
         tol_f = 0.01
         marker_pays = []
         general_pays = []
@@ -14632,6 +14770,10 @@ def _cari_ekstre_hareketler(
                 fifo_general.append(pr)
         for pr in fifo_general:
             _fifo_pay_alloc(pr, restrict_marker_months=False)
+        # Faturasız direct_pay: FIFO ay id'lerini doldur ki ay satırı (grid odenen)
+        # aynı makbuzla çift sayılmasın; kendi satır yine yazılır, filtre atlar.
+        for pr in direct_pays:
+            _fifo_pay_alloc(pr, restrict_marker_months=False)
         # Serbest makbuzlar direkt satır (dönem dışı: açılış FIFO + Devreden'de; tekil satır ekleme)
         direct_pay_ids: set[int] = set()
         direct_pays_yazilan: list = []
@@ -14681,6 +14823,8 @@ def _cari_ekstre_hareketler(
             batch_maps=ekstre_batch_maps,
             manual_reel_by_year=manual_reel_pass,
             musteri_id=musteri_id,
+            post_bit_mahsup=(_son_borc_fifo is not None),
+            bit_iso_cmp=bit_iso_cmp,
         )
         dev_borc_r, dev_alacak_r = _ekstre_devreden_satir_toplamlari(
             full_borc_for_fifo,
