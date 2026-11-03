@@ -6,6 +6,7 @@
 {% block content %}
 <script>window.KIRA_NAKIT_ORANLI_ARTIS = {{ 1 if kira_nakit_oranli_artis else 0 }};</script>
 <script>window.KAPANIS_N0_KAPANIS_AYI_HARIC = {{ 1 if kapanis_n0_kapanis_ayi_haric else 0 }};</script>
+<script>window.KAPANIS_N_KAPANIS_AYI_DAHIL = {{ 1 if kapanis_n_kapanis_ayi_dahil else 0 }};</script>
 <style>
 .giris-container {
     display: block;
@@ -3345,6 +3346,21 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                             <input type="date" id="kapanis_tarihi" onchange="hesaplaYuzde()" title="Şirket kapanış tarihi (pasif seçildiğinde)">
                             <select id="kapanis_ay_secim" title="Kapanış sonrası ay filtresi" onchange="hesaplaYuzde()">
                                 <option value="">Hepsi</option>
+                                {% if kapanis_n_kapanis_ayi_dahil %}
+                                <option value="0">0 ay (kapanış ayı borç sayılmaz)</option>
+                                <option value="1">1 ay (yalnız kapanış ayı)</option>
+                                <option value="2">2 ay (kapanış ayı + 1 ay)</option>
+                                <option value="3">3 ay (kapanış ayı + 2 ay)</option>
+                                <option value="4">4 ay (kapanış ayı + 3 ay)</option>
+                                <option value="5">5 ay (kapanış ayı + 4 ay)</option>
+                                <option value="6">6 ay (kapanış ayı + 5 ay)</option>
+                                <option value="7">7 ay (kapanış ayı + 6 ay)</option>
+                                <option value="8">8 ay (kapanış ayı + 7 ay)</option>
+                                <option value="9">9 ay (kapanış ayı + 8 ay)</option>
+                                <option value="10">10 ay (kapanış ayı + 9 ay)</option>
+                                <option value="11">11 ay (kapanış ayı + 10 ay)</option>
+                                <option value="12">12 ay (kapanış ayı + 11 ay)</option>
+                                {% else %}
                                 <option value="0">{% if kapanis_n0_kapanis_ayi_haric %}0 ay (kapanış ayı borç sayılmaz){% else %}0 ay (sadece kapanış ayı){% endif %}</option>
                                 <option value="1">1 ay</option>
                                 <option value="2">2 ay</option>
@@ -3358,6 +3374,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                                 <option value="10">10 ay</option>
                                 <option value="11">11 ay</option>
                                 <option value="12">12 ay</option>
+                                {% endif %}
                             </select>
                         </div>
                         <label>Grup</label>
@@ -17683,7 +17700,10 @@ function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
         // Aday A: KAPANIS_N0_KAPANIS_AYI_HARIC=1 ve N=0 → kapanış ayı borç dışı (delta=-1).
         // Dışlayıcı sınır: close_month + (delta+1). Bayrak kapalıyken delta=N (eski).
         var n0Haric = !!(window.KAPANIS_N0_KAPANIS_AYI_HARIC);
-        var delta = (n0Haric && ekAy === 0) ? -1 : ekAy;
+        var nDahil = !!(window.KAPANIS_N_KAPANIS_AYI_DAHIL);
+        var delta = ekAy;
+        if (n0Haric && ekAy === 0) delta = -1;
+        else if (n0Haric && nDahil && ekAy >= 1) delta = ekAy - 1;
         var sinir = new Date(kap.getFullYear(), kap.getMonth() + delta + 1, 1);
         if (!bit || isNaN(bit.getTime()) || sinir < bit) bit = sinir;
     }

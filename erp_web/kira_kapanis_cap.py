@@ -4,11 +4,16 @@
 N = customers.kapanis_sonrasi_borc_ay
   0 → varsayılan: yalnız kapanış ayı
       KAPANIS_N0_KAPANIS_AYI_HARIC=1 → kapanış ayı − 1 (kapanış ayı borç sayılmaz; Aday A)
-  1..12 → kapanış ayı + N ek ay (Aday A'da değişmez)
+  1..12 → varsayılan (Aday B eski): kapanış ayı + N
+      KAPANIS_N0_KAPANIS_AYI_HARIC=1 ve KAPANIS_N_KAPANIS_AYI_DAHIL=1 →
+      kapanış ayı + (N−1)  (N=kapanış ayı DAHİL kaç ay; N=1→yalnız kap)
   None/boş → Hepsi:
     KAPANIS_HEPSI_SOZLESME_YILI!=1 → cap yok (None; eski)
     =1 → çıktığı ayı içeren sözleşme yılının sonuna
       (giriş ayı 1..12 ile hizalı; sozlesme_bitis / kira_suresi_ay kullanılmaz)
+
+KAPANIS_N_KAPANIS_AYI_DAHIL yalnız N0 bayrağı da açıkken anlamlı;
+N0 kapalı + yeni bayrak açık → yeni bayrak etkisiz + log uyarısı.
 
 Dönüş: son borç ayının 1. günü (dahil). None = cap yok.
 """
@@ -22,6 +27,8 @@ from typing import Any, Mapping
 _LOG = logging.getLogger(__name__)
 _ENV_HEPSI_SOZ = "KAPANIS_HEPSI_SOZLESME_YILI"
 _ENV_N0_HARIC = "KAPANIS_N0_KAPANIS_AYI_HARIC"
+_ENV_N_DAHIL = "KAPANIS_N_KAPANIS_AYI_DAHIL"
+_warned_dahil_sans_n0 = False
 
 
 def hepsi_sozlesme_yili_aktif() -> bool:
@@ -32,6 +39,27 @@ def hepsi_sozlesme_yili_aktif() -> bool:
 def n0_kapanis_ayi_haric_aktif() -> bool:
     """Aday A: N=0 iken kapanış ayı borç dışı. Yalnız tam '1' açık."""
     return str(os.environ.get(_ENV_N0_HARIC) or "").strip() == "1"
+
+
+def n_kapanis_ayi_dahil_aktif() -> bool:
+    """Env ham: N=k → kap+(k−1). Yalnız tam '1' açık. N0 olmadan etkili değil."""
+    return str(os.environ.get(_ENV_N_DAHIL) or "").strip() == "1"
+
+
+def n_kapanis_ayi_dahil_efektif() -> bool:
+    """Yeni semantik yalnız N0 da açıkken. Aksi halde etkisiz + tek sefer log."""
+    global _warned_dahil_sans_n0
+    if not n_kapanis_ayi_dahil_aktif():
+        return False
+    if not n0_kapanis_ayi_haric_aktif():
+        if not _warned_dahil_sans_n0:
+            _LOG.warning(
+                "KAPANIS_N_KAPANIS_AYI_DAHIL=1 ama KAPANIS_N0_KAPANIS_AYI_HARIC kapalı "
+                "— yeni bayrak etkisiz (N>=1 eski Aday B: kap+N)"
+            )
+            _warned_dahil_sans_n0 = True
+        return False
+    return True
 
 
 def _coerce_date(v) -> date | None:
@@ -92,6 +120,15 @@ def _parse_n(raw) -> int | None:
     return None
 
 
+def _n_delta(n: int) -> int:
+    """N → ay ofseti (kapanış ayı + delta = son borç ayı)."""
+    if n0_kapanis_ayi_haric_aktif() and n == 0:
+        return -1
+    if n_kapanis_ayi_dahil_efektif() and n >= 1:
+        return n - 1
+    return n
+
+
 def _giris_tarihi(musteri_row: Mapping[str, Any]) -> date | None:
     """Grid ile aynı öncelik: sozlesme_tarihi → rent_start_date."""
     return _coerce_date(musteri_row.get("sozlesme_tarihi")) or _coerce_date(
@@ -150,7 +187,7 @@ def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
     """Pasif + kapanış → son borç ayı (dahil); cap yoksa None.
 
     iptal=TRUE: bayraklardan bağımsız giriş ayı − 1 (borç penceresi boş).
-    N dolu: kapanış ayı + delta (delta=N; Aday A bayrak+N=0 → N−1).
+    N dolu: kapanış ayı + _n_delta(N).
     N NULL + bayrak kapalı: None.
     N NULL + bayrak açık + giriş var: sözleşme yılı sonu.
     N NULL + bayrak açık + giriş yok: None + log.
@@ -170,8 +207,7 @@ def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
         return None
     n = _parse_n(src.get("kapanis_sonrasi_borc_ay"))
     if n is not None:
-        delta = (n - 1) if (n0_kapanis_ayi_haric_aktif() and n == 0) else n
-        return _add_months(date(kap.year, kap.month, 1), delta)
+        return _add_months(date(kap.year, kap.month, 1), _n_delta(n))
     # Hepsi (N NULL)
     if not hepsi_sozlesme_yili_aktif():
         return None
@@ -211,8 +247,9 @@ def kapanis_ek_fingerprint(raw, iptal=None) -> str:
 
     iptal=TRUE → 'IPTAL' (bayrak/N'den bağımsız; cache bayat sayılır).
     N=0 + KAPANIS_N0_KAPANIS_AYI_HARIC=1 → '0x' (eski '0'dan farklı → cache bayat).
-    Bayrak kapalıyken N=0 → '0' (birebir eski). COMPUTE_REV artırmak yerine
-    fingerprint ayrımı: yalnız N=0 mid'ler invalid; N=1..12/Hepsi etkilenmez.
+    N=1..12 + N0 + KAPANIS_N_KAPANIS_AYI_DAHIL efektif → 'Nd' (eski 'N'den farklı).
+    Bayrak(lar) kapalıyken N=0 → '0', N=1..12 → '1'..'12' (birebir eski).
+    N=0 / Hepsi fingerprint yeni bayrakla DEĞİŞMEZ.
     """
     if musteri_iptal_mi(iptal):
         return "IPTAL"
@@ -220,5 +257,7 @@ def kapanis_ek_fingerprint(raw, iptal=None) -> str:
     if n is not None:
         if n == 0 and n0_kapanis_ayi_haric_aktif():
             return "0x"
+        if n >= 1 and n_kapanis_ayi_dahil_efektif():
+            return "%sd" % n
         return str(n)
     return "H12" if hepsi_sozlesme_yili_aktif() else "H"

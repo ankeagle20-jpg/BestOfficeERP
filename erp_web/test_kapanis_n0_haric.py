@@ -153,7 +153,10 @@ def test_e_f_g_senaryo_kalan():
 def test_fe_ve_sablon():
     tjs = (ROOT / "_t.js").read_text(encoding="utf-8")
     check("fe_n0Haric", "n0Haric" in tjs and "KAPANIS_N0_KAPANIS_AYI_HARIC" in tjs)
-    check("fe_delta", "delta = (n0Haric && ekAy === 0) ? -1 : ekAy" in tjs)
+    check(
+        "fe_delta",
+        "n0Haric && ekAy === 0" in tjs and "delta = -1" in tjs,
+    )
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     check("html_window_flag", "window.KAPANIS_N0_KAPANIS_AYI_HARIC" in html)
     check("html_jinja_flag", "kapanis_n0_kapanis_ayi_haric" in html)

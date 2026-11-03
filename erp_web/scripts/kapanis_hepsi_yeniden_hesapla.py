@@ -356,6 +356,8 @@ def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
         hepsi_sozlesme_yili_aktif,
         kira_son_borc_ayi,
         n0_kapanis_ayi_haric_aktif,
+        n_kapanis_ayi_dahil_aktif,
+        n_kapanis_ayi_dahil_efektif,
     )
     from routes import giris_routes as gr
     from routes.giris_routes import (
@@ -367,6 +369,8 @@ def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
 
     flag = hepsi_sozlesme_yili_aktif()
     flag_n0 = n0_kapanis_ayi_haric_aktif()
+    flag_nd = n_kapanis_ayi_dahil_aktif()
+    flag_nd_eff = n_kapanis_ayi_dahil_efektif()
     rows = []
     skip_n = 0
     need_n = 0
@@ -431,6 +435,8 @@ def _run_sadece_kirp(mids: list[int], *, do_apply: bool) -> int:
             "mode": ("APPLY" if do_apply else "DRY-RUN") + "-SADECE-KIRP",
             "flag_KAPANIS_HEPSI_SOZLESME_YILI": flag,
             "flag_KAPANIS_N0_KAPANIS_AYI_HARIC": flag_n0,
+            "flag_KAPANIS_N_KAPANIS_AYI_DAHIL": flag_nd,
+            "flag_KAPANIS_N_KAPANIS_AYI_DAHIL_efektif": flag_nd_eff,
             "mid_n": len(mids),
             "need_write_n": need_n,
             "skip_n": skip_n,
@@ -570,7 +576,17 @@ def main() -> int:
     ap.add_argument(
         "--force-flag",
         action="store_true",
-        help="dry-run sırasında KAPANIS_HEPSI_SOZLESME_YILI=1 simüle et (yazmaz)",
+        help="dry-run: yalnız KAPANIS_HEPSI_SOZLESME_YILI=1 (N0/N-dahil açmaz)",
+    )
+    ap.add_argument(
+        "--force-n0-flag",
+        action="store_true",
+        help="dry-run: KAPANIS_N0_KAPANIS_AYI_HARIC=1",
+    )
+    ap.add_argument(
+        "--force-n-dahil-flag",
+        action="store_true",
+        help="dry-run: KAPANIS_N_KAPANIS_AYI_DAHIL=1; N0 yoksa onu da açar (tutarlılık)",
     )
     ap.add_argument(
         "--sadece-kirp",
@@ -590,8 +606,20 @@ def main() -> int:
     if not args.apply:
         os.environ.pop("ALLOW_PROD_WRITE", None)
 
-    if args.force_flag and not args.apply:
-        os.environ["KAPANIS_HEPSI_SOZLESME_YILI"] = "1"
+    if not args.apply:
+        if args.force_flag:
+            os.environ["KAPANIS_HEPSI_SOZLESME_YILI"] = "1"
+        if args.force_n0_flag:
+            os.environ["KAPANIS_N0_KAPANIS_AYI_HARIC"] = "1"
+        if args.force_n_dahil_flag:
+            # Yeni semantik N0 olmadan etkisiz; yanlış «yazılacak» göstermemek için N0 da aç.
+            os.environ["KAPANIS_N_KAPANIS_AYI_DAHIL"] = "1"
+            if str(os.environ.get("KAPANIS_N0_KAPANIS_AYI_HARIC") or "").strip() != "1":
+                os.environ["KAPANIS_N0_KAPANIS_AYI_HARIC"] = "1"
+                print(
+                    "UYARI: --force-n-dahil-flag N0 gerektirir; "
+                    "KAPANIS_N0_KAPANIS_AYI_HARIC=1 da açıldı."
+                )
     if args.apply and args.sadece_kirp:
         # apply yolunda bayrak açık olmalı (son_borc Hepsi)
         os.environ.setdefault("KAPANIS_HEPSI_SOZLESME_YILI", "1")

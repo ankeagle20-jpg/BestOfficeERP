@@ -10352,7 +10352,10 @@ function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
         // Aday A: KAPANIS_N0_KAPANIS_AYI_HARIC=1 ve N=0 → kapanış ayı borç dışı (delta=-1).
         // Dışlayıcı sınır: close_month + (delta+1). Bayrak kapalıyken delta=N (eski).
         var n0Haric = !!(window.KAPANIS_N0_KAPANIS_AYI_HARIC);
-        var delta = (n0Haric && ekAy === 0) ? -1 : ekAy;
+        var nDahil = !!(window.KAPANIS_N_KAPANIS_AYI_DAHIL);
+        var delta = ekAy;
+        if (n0Haric && ekAy === 0) delta = -1;
+        else if (n0Haric && nDahil && ekAy >= 1) delta = ekAy - 1;
         var sinir = new Date(kap.getFullYear(), kap.getMonth() + delta + 1, 1);
         if (!bit || isNaN(bit.getTime()) || sinir < bit) bit = sinir;
     }
