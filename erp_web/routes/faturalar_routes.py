@@ -9792,6 +9792,14 @@ def api_secilen_aylar_fatura_kontrol():
     musteri_id = _opt_customer_id(data.get("musteri_id"))
     if not musteri_id:
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    try:
+        from routes.giris_routes import _iptal_musteri_islem_red_json
+
+        ok_iptal, red_iptal = _iptal_musteri_islem_red_json(musteri_id)
+        if not ok_iptal:
+            return red_iptal
+    except Exception:
+        pass
     aylar = data.get("aylar")
     if not isinstance(aylar, list) or not aylar:
         return jsonify({"ok": False, "mesaj": "aylar listesi gerekli."}), 400

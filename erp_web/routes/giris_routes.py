@@ -1072,6 +1072,56 @@ def _firma_ozet_batch_cache_invalidate_musteri(musteri_id: int) -> int:
     return len(sil)
 
 
+IPTAL_TAHSILAT_FATURA_MESAJ = (
+    "İptal edilmiş sözleşme için tahsilat/fatura oluşturulamaz."
+)
+
+
+def _musteri_sozlesme_iptal_mi(musteri_id) -> bool:
+    """customers.iptal — kolon yoksa False (ensure + safe SELECT)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    try:
+        ensure_customers_iptal()
+        if customers_iptal_column_ready():
+            row = fetch_one(
+                "SELECT COALESCE(iptal, FALSE) AS iptal FROM customers WHERE id=%s",
+                (mid,),
+            )
+        else:
+            return False
+        return _musteri_iptal_mi((row or {}).get("iptal"))
+    except Exception:
+        return False
+
+
+def _iptal_musteri_islem_red_json(musteri_id):
+    """İptalse (False, 400 json); değilse (True, None)."""
+    if _musteri_sozlesme_iptal_mi(musteri_id):
+        return False, (
+            jsonify({"ok": False, "mesaj": IPTAL_TAHSILAT_FATURA_MESAJ, "iptal": True}),
+            400,
+        )
+    return True, None
+
+
+def _aylik_grid_payload_iptal_stamp(musteri_id, payload: dict | None) -> dict:
+    """İptal müşteri: boş aylar + bayrak (FE canlı rebuild yapmasın)."""
+    out = dict(payload or {})
+    if not _musteri_sozlesme_iptal_mi(musteri_id):
+        out["iptal"] = bool(_musteri_iptal_mi(out.get("iptal")))
+        return out
+    out["iptal"] = True
+    out["aylar"] = []
+    out["bos_neden"] = "iptal"
+    out["iptal_mesaj"] = "Sözleşme iptal edildi: aylık borç oluşmaz."
+    return out
+
+
 def kapanis_borc_ufku_degisti(musteri_id: int) -> bool:
     """durum / kapanis_tarihi / kapanis_sonrasi_borc_ay değişince tek giriş.
 
@@ -2672,6 +2722,24 @@ def _aylik_grid_contract_core(kyc, tufe_map):
         bas = _aylik_grid_coerce_date(kyc.get("rent_start_date"))
     if not bas:
         return None
+
+    # İptal: borç penceresi boş (kira_son_borc = giriş−1 → exclusive = giriş ayı 1'i).
+    # Horizon / kira_suresi fallback'leri ayları doldurmasın.
+    if _musteri_iptal_mi(kyc.get("iptal")):
+        bit_iptal = date(bas.year, bas.month, 1)
+        return {
+            "bas": bas,
+            "bit": bit_iptal,
+            "ay_sayisi": 0,
+            "start_year": bas.year,
+            "yillik_map": {},
+            "ks_int": 0,
+            "kira_nakit": bool(kyc.get("kira_nakit")),
+            "aylik_net": 0.0,
+            "split_kira_odeme": False,
+            "artis_month": bas.month,
+            "iptal": True,
+        }
 
     try:
         ks_raw_early = kyc.get("kira_suresi_ay")
@@ -16548,6 +16616,9 @@ def api_aylik_tutarlardan_borclandir():
         musteri_id = int(musteri_id)
     except (TypeError, ValueError):
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    ok_iptal, red_iptal = _iptal_musteri_islem_red_json(musteri_id)
+    if not ok_iptal:
+        return red_iptal
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
@@ -17003,6 +17074,9 @@ def api_aylik_tutarlardan_tahsil_et():
         musteri_id = int(musteri_id)
     except (TypeError, ValueError):
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    ok_iptal, red_iptal = _iptal_musteri_islem_red_json(musteri_id)
+    if not ok_iptal:
+        return red_iptal
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
@@ -17831,6 +17905,23 @@ def api_aylik_grid_cache():
     force = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
     skip_match = str(request.args.get("skip_match") or "").lower() in ("1", "true", "yes", "on")
     _ensure_aylik_grid_cache_table()
+    # İptal: disk/mem ne olursa olsun boş grid + bayrak (FE canlı ufuk kurmasın).
+    if _musteri_sozlesme_iptal_mi(musteri_id):
+        empty = _aylik_grid_payload_iptal_stamp(
+            musteri_id,
+            {
+                "musteri_id": int(musteri_id),
+                "aylar": [],
+                "compute_rev": AYLIK_GRID_COMPUTE_REV,
+            },
+        )
+        try:
+            _aylik_grid_mem_set(musteri_id, empty)
+        except Exception:
+            pass
+        return _json_no_cache(
+            {"ok": True, "cache": empty, "cached": False, "iptal": True}
+        )
     if not force:
         try:
             mem_hit = _aylik_grid_mem_get(musteri_id)

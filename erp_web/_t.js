@@ -960,6 +960,10 @@ function sozlesmeAylikGridParalelYukle(mid) {
             if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
         } catch (eDr) {}
         var cj = triple[1];
+        if (cj && cj.ok && cj.cache && (cj.cache.iptal === true || cj.iptal === true || (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()))) {
+            if (typeof sozlesmelerAylikIptalBosGoster === 'function') sozlesmelerAylikIptalBosGoster();
+            return true;
+        }
         if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
             if (window.__musteriReelDonemTutarlari && Object.keys(window.__musteriReelDonemTutarlari).length
                 && typeof sozlesmelerAylikCacheReelDbEsasla === 'function') {
@@ -10262,11 +10266,86 @@ function sozlesmeAylikAddMonths(d, months) {
     return new Date(y, m, Math.min(day, sonGun));
 }
 
+
+/** Form veya müşteri cache: sözleşme iptal mi? */
+function girisFormMusteriIptalMi() {
+    try {
+        if (typeof girisApiMusteriIptalMi === 'function' && window.__girisMusteriCacheObj) {
+            if (girisApiMusteriIptalMi(window.__girisMusteriCacheObj)) return true;
+        }
+    } catch (_eI0) {}
+    var md = document.getElementById('musteri_durum');
+    var v = md ? String(md.value || '').trim().toLowerCase() : '';
+    return v === 'iptal';
+}
+
+function sozlesmelerAylikIptalUiUygula(iptalMi) {
+    var msg = 'Sözleşme iptal edildi: aylık borç oluşmaz.';
+    ['sozlesmeler-aylik-bos', 'sozlesmeler-reel-aylik-bos'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (iptalMi) {
+            if (!el.getAttribute('data-bos-default')) {
+                el.setAttribute('data-bos-default', el.textContent || '');
+            }
+            el.textContent = msg;
+        } else if (el.getAttribute('data-bos-default')) {
+            el.textContent = el.getAttribute('data-bos-default');
+        }
+    });
+    var mAlt = document.getElementById('sozlesmeler-aylik-makbuz-alt');
+    if (mAlt) mAlt.style.display = iptalMi ? 'none' : '';
+    document.querySelectorAll(
+        'button.btn-aylik-tahsil, button.btn-aylik-tahsil-alt, button.btn-aylik-fatura-alt'
+    ).forEach(function (b) {
+        if (!b) return;
+        if (iptalMi) {
+            if (b.getAttribute('data-iptal-prev-display') == null) {
+                b.setAttribute('data-iptal-prev-display', b.style.display || '');
+            }
+            b.style.display = 'none';
+            b.disabled = true;
+        } else {
+            var prev = b.getAttribute('data-iptal-prev-display');
+            if (prev != null) {
+                b.style.display = prev;
+                b.removeAttribute('data-iptal-prev-display');
+            }
+            b.disabled = false;
+        }
+    });
+}
+
+function sozlesmelerAylikIptalBosGoster() {
+    sozlesmelerAylikIptalUiUygula(true);
+    if (typeof sozlesmelerAylikTwinGridHtml === 'function') sozlesmelerAylikTwinGridHtml('');
+    if (typeof sozlesmelerAylikTwinBosVisible === 'function') sozlesmelerAylikTwinBosVisible(true);
+    if (typeof sozlesmeAylikSeciliAnahtarlar !== 'undefined' && sozlesmeAylikSeciliAnahtarlar.clear) {
+        sozlesmeAylikSeciliAnahtarlar.clear();
+    }
+    try { window.__girisAylikVarsayilanSecilenAnahtar = null; } catch (_eV) {}
+    if (typeof sozlesmeAylikSecimOzetSpanlariYaz === 'function') sozlesmeAylikSecimOzetSpanlariYaz('Seçim yok');
+    if (typeof tahsilatMakbuzTutarlariniGuncelle === 'function') tahsilatMakbuzTutarlariniGuncelle(null, null);
+    try {
+        window.__sozlesmelerAylikSonCacheObj = { iptal: true, aylar: [], musteri_id: selectedId };
+        window.__sozlesmelerAylikYilSig = null;
+        window.__sozlesmelerAylikSonYilListesi = [];
+    } catch (_eC) {}
+}
+
 function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
     opts = opts || {};
     var bit = bitStr ? (parseTarihStr(bitStr) || new Date(bitStr)) : null;
     var kap = opts.kapanis_tarihi ? (parseTarihStr(opts.kapanis_tarihi) || new Date(opts.kapanis_tarihi)) : null;
     var durum = String(opts.durum || '').toLowerCase().trim();
+    if (durum === 'iptal' || opts.iptal === true || opts.iptal === 1 || opts.iptal === '1') {
+        /* Borç penceresi boş: dışlayıcı sınır = giriş ayının 1'i (giriş ayı dahil değil). */
+        var gIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        var g = gIso ? (parseTarihStr(gIso) || new Date(gIso)) : null;
+        if (g && !isNaN(g.getTime())) return new Date(g.getFullYear(), g.getMonth(), 1);
+        if (kap && !isNaN(kap.getTime())) return new Date(kap.getFullYear(), kap.getMonth(), 1);
+        return bit;
+    }
     var ekAy = kapanisSonrasiBorcAyDegeri(opts.kapanis_sonrasi_borc_ay);
     if (durum === 'pasif' && kap && !isNaN(kap.getTime()) && ekAy !== null && ekAy !== undefined) {
         // D2: N = kapanıştan sonra ek ay. 0=sadece kapanış; 1=kapanış+1.
@@ -10467,6 +10546,11 @@ function sozlesmelerOdemeDuzeniManuelUygula() {
 function sozlesmelerAylikGuncelle() {
     var grid = document.getElementById('sozlesmeler-aylik-grid');
     if (!grid) return;
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
+        if (typeof sozlesmelerAylikIptalBosGoster === 'function') sozlesmelerAylikIptalBosGoster();
+        return;
+    }
+    if (typeof sozlesmelerAylikIptalUiUygula === 'function') sozlesmelerAylikIptalUiUygula(false);
     if (sozlesmelerOdemeDuzeniManuelMi()) {
         sozlesmelerAylikTwinGridHtml('');
         sozlesmelerAylikTwinBosVisible(false);
@@ -11505,6 +11589,10 @@ function girisTahsilFazlaTutarOnayMetni(j) {
 }
 
 function sozlesmeAylikTahsilEt(onayFazla) {
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
+        alert('İptal edilmiş sözleşme için tahsilat/fatura oluşturulamaz.');
+        return;
+    }
     if (window.__aylikTahsilInFlight) {
         return;
     }
@@ -11983,6 +12071,10 @@ function sozlesmeSeciliYilFaturaAc() {
  * @param {boolean} zorunluGridSecimi true ise seçili ay yoksa uyarı; false ise KYC varsayılanıyla açılır.
  */
 async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
+        alert('İptal edilmiş sözleşme için tahsilat/fatura oluşturulamaz.');
+        return;
+    }
     var midStr = sozlesmeFaturaMusteriIdStr();
     if (!midStr) {
         alert('Önce müşteri seçin (soldan liste veya tahsilat formu).');
