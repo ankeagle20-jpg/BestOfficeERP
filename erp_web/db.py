@@ -988,6 +988,7 @@ def init_schema():
     ensure_customers_calisma_sekli()
     ensure_customers_kapanis_tarihi()
     ensure_customers_kapanis_sonrasi_borc_ay()
+    ensure_customers_iptal()
     ensure_customers_bizim_hesap()
     ensure_grup2_etiketleri_table()
     ensure_customers_grup2_secimleri()
@@ -2503,6 +2504,65 @@ def ensure_customers_kapanis_sonrasi_borc_ay():
         _customers_kapanis_sonrasi_borc_ay_ensured = True
     except Exception as e:
         print(f"customers.kapanis_sonrasi_borc_ay: {e}")
+
+
+def ensure_customers_iptal():
+    """customers.iptal — sözleşme iptali (durum pasif kalır; borç penceresi boş).
+
+    Idempotent IF NOT EXISTS. Multi-tenant: _run_ensure_ddl_once ile
+    (tenant search_path + key) şema başına process ömründe bir kez — aynı
+    bağlantı modelindeki diğer DDL ensure'leriyle uyumlu.
+    ALTER hata verirse yutulur; süreç çökmez.
+    """
+
+    def _do():
+        try:
+            execute(
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS iptal BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        except Exception as e:
+            print(f"customers.iptal: {e}")
+
+    try:
+        _run_ensure_ddl_once("customers.iptal", _do)
+    except Exception as e:
+        print(f"customers.iptal: {e}")
+
+
+_customers_iptal_col_ready: dict[str, bool] = {}
+
+
+def customers_iptal_column_ready() -> bool:
+    """ensure sonrası kolon var mı (şema başına cache). Yoksa SELECT kırılmasın."""
+    ensure_customers_iptal()
+    schema = _tenant_schema_for_request() or "__no_tenant__"
+    cached = _customers_iptal_col_ready.get(schema)
+    if cached is not None:
+        return cached
+    ok = False
+    try:
+        row = fetch_one(
+            """
+            SELECT 1 AS x FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'customers'
+              AND column_name = 'iptal'
+            LIMIT 1
+            """
+        )
+        ok = bool(row)
+    except Exception:
+        ok = False
+    _customers_iptal_col_ready[schema] = ok
+    return ok
+
+
+def customers_iptal_select_sql(alias: str = "c") -> str:
+    """SELECT listesi: kolon varsa alias.iptal, yoksa FALSE AS iptal."""
+    a = (alias or "c").strip() or "c"
+    if customers_iptal_column_ready():
+        return f"{a}.iptal"
+    return "FALSE AS iptal"
 
 
 _customers_bizim_hesap_ensured = False

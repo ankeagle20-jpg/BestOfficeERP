@@ -8,6 +8,7 @@ from db import (
     ensure_faturalar_amount_columns,
     ensure_customers_durum,
     ensure_customers_is_active,
+    ensure_customers_iptal,
     ensure_customers_kapanis_sonrasi_borc_ay,
     ensure_customers_arsivli,
     ensure_customers_quick_edit_columns,
@@ -39,10 +40,13 @@ import sys
 import re
 import threading
 from musteri_durum_yaz import (
+    IPTAL_TAHSILAT_MESAJ,
     dogrula_kapanis_giris,
+    iptal_icin_kapanis_giris_ayarla,
     musteri_durum_yaz_alanlari,
     musteri_giris_tarihi_db,
     musteri_kapanis_tarihi_db,
+    musteri_tahsilat_var_mi,
     parse_kapanis_tarihi,
     resolve_giris_tarihi,
 )
@@ -2484,6 +2488,7 @@ def api_bulk_update():
             sets = []
             params = []
             rent_start_date_val = None
+            bulk_iptal = None  # None=dokunma; True/False yaz
             for key, col in (
                 ("yetkili_kisi", "yetkili_kisi"),
                 ("hizmet_turu", "hizmet_turu"),
@@ -2523,10 +2528,52 @@ def api_bulk_update():
                         rent_start_date_val = val  # date objesi veya parse edilmiş if hasattr(val, "year") else val
                 if key == "durum" and val is not None:
                     val = (str(val).strip().lower() or None)
-                    if val and val not in ("aktif", "pasif"):
+                    if val == "iptal":
+                        if musteri_tahsilat_var_mi(mid):
+                            return jsonify(
+                                {
+                                    "ok": False,
+                                    "message": IPTAL_TAHSILAT_MESAJ,
+                                    "mesaj": IPTAL_TAHSILAT_MESAJ,
+                                    "musteri_id": mid,
+                                }
+                            ), 400
+                        val = "pasif"
+                        bulk_iptal = True
+                        sets.append("kapanis_sonrasi_borc_ay = %s")
+                        params.append(0)
+                    elif val in ("aktif", "pasif"):
+                        bulk_iptal = False
+                    else:
                         val = None
+                if key == "durum" and val is None:
+                    continue
                 sets.append(f"{col} = %s")
                 params.append(val)
+            if bulk_iptal is not None:
+                ensure_customers_iptal()
+                sets.append("iptal = %s")
+                params.append(bool(bulk_iptal))
+                if bulk_iptal is True:
+                    giris_b = musteri_giris_tarihi_db(mid)
+                    if not isinstance(giris_b, date):
+                        return jsonify(
+                            {
+                                "ok": False,
+                                "message": "İptal için giriş (sözleşme) tarihi gerekli.",
+                                "mesaj": "İptal için giriş (sözleşme) tarihi gerekli.",
+                                "musteri_id": mid,
+                            }
+                        ), 400
+                    # kapanış = giriş (Excel kapanışı yok sayılır)
+                    if "kapanis_tarihi" in {s.split(" = ", 1)[0].strip() for s in sets}:
+                        for ii, s_expr in enumerate(list(sets)):
+                            if s_expr.split(" = ", 1)[0].strip() == "kapanis_tarihi":
+                                params[ii] = giris_b
+                                break
+                    else:
+                        sets.append("kapanis_tarihi = %s")
+                        params.append(giris_b)
             if "grup2_secimleri" in row:
                 raw = row.get("grup2_secimleri")
                 g2_list = []
@@ -2760,7 +2807,31 @@ def api_kyc_kaydet():
         odeme_duzeni_manuel_txt = (
             (data.get("odeme_duzeni_manuel") or "").strip()[:200] if _odemd == "manuel" else ""
         )
+        if str((data or {}).get("durum") or "").strip().lower() == "iptal" and musteri_id:
+            if musteri_tahsilat_var_mi(musteri_id):
+                return jsonify({"ok": False, "mesaj": IPTAL_TAHSILAT_MESAJ}), 400
+        ensure_customers_iptal()
         alanlar = musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)
+        # Giriş: KYC sozlesme / customers rent
+        _rent_kyc = None
+        if musteri_id:
+            try:
+                _rrk = fetch_one(
+                    "SELECT rent_start_date::date AS rent FROM customers WHERE id=%s",
+                    (int(musteri_id),),
+                )
+                _rent_kyc = (_rrk or {}).get("rent")
+            except Exception:
+                _rent_kyc = None
+        _giris_kyc = resolve_giris_tarihi(
+            data.get("sozlesme_tarihi") or data.get("sozlesme_baslangic"),
+            _rent_kyc,
+        )
+        if _giris_kyc is None and musteri_id:
+            _giris_kyc = musteri_giris_tarihi_db(musteri_id)
+        _iptal_e = iptal_icin_kapanis_giris_ayarla(alanlar, _giris_kyc)
+        if _iptal_e:
+            return jsonify({"ok": False, "mesaj": _iptal_e}), 400
         durum_m = alanlar["durum"]
         aylik_kira = float(str(data.get("aylik_kira") or 0).replace(",", ".") or 0)
         yillik_kira = float(str(data.get("yillik_kira") or 0).replace(",", ".") or 0)
@@ -2984,9 +3055,9 @@ def api_kyc_kaydet():
             if musteri_id:
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, iptal=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], bool(alanlar.get("iptal")), hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
                 )
         else:
             if musteri_id:
@@ -3001,9 +3072,9 @@ def api_kyc_kaydet():
                     ), 409
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, iptal=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], bool(alanlar.get("iptal")), hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
                 )
             else:
                 # Yeni müşteri oluştur (oda çakışması: kayıt öncesi, başka aktif kartta aynı oda var mı)
@@ -3101,6 +3172,14 @@ def api_kyc_kaydet():
                         "mesaj": "Yetkililer kaydedilemedi: %s" % (str(e) or "hata"),
                     }
                 ), 400
+
+        if alanlar.get("iptal") and musteri_id:
+            try:
+                from routes.giris_routes import _iptal_hayalet_grid_temizle
+
+                _iptal_hayalet_grid_temizle(int(musteri_id))
+            except Exception:
+                pass
 
         return jsonify({"ok": True, "kyc_id": kyc_id})
     except Exception as e:

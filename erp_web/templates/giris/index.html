@@ -1596,6 +1596,7 @@
 .sirket-durum-etiket { font-size: 11px; font-weight: 700; margin-left: 6px; }
 .sirket-durum-etiket--aktif { color: #81c784; }
 .sirket-durum-etiket--pasif { color: #ef9a9a; }
+.sirket-durum-etiket--iptal { color: #fbbf24; }
 .sirket-unvani-dropdown div.sirket-bos { padding: 12px; color: #90a4ae; font-size: 12px; text-align: center; }
 .sirket-unvani-dropdown div.sirket-bos-manuel { padding: 10px 12px; font-size: 12px; color: #4fc3f7; border-top: 1px solid #2d4060; cursor: pointer; }
 .sirket-unvani-dropdown div.sirket-bos-manuel:hover { background: #2d4060; color: #b3e5fc; }
@@ -3335,8 +3336,10 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         <select id="musteri_durum" name="musteri_durum" onfocus="planDurumOdak()" onchange="musteriDurumSecildi(this.value)" style="padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
                             <option value="aktif" selected>Aktif</option>
                             <option value="pasif">Pasif</option>
+                            <option value="iptal">İptal</option>
                         </select>
                         </div>
+                        <div id="iptal_durum_uyari" style="display:none;grid-column:1/-1;color:#fbbf24;font-size:12px;margin:2px 0 6px;">Sözleşme iptal edildi: borç oluşmaz, müşteri bizde kalmadı.</div>
                         <label id="kapanis_tarihi_label" style="display:none;">Kapanış Tarihi</label>
                         <div id="kapanis_tarihi_wrap" class="kapanis-tarihi-row" style="display:none;">
                             <input type="date" id="kapanis_tarihi" onchange="hesaplaYuzde()" title="Şirket kapanış tarihi (pasif seçildiğinde)">
@@ -26811,43 +26814,137 @@ function formKapanisSonrasiBorcAy() {
     return el ? kapanisSonrasiBorcAyDegeri(el.value) : null;
 }
 
-/** opts.kapanis: API'den gelen kayıtlı tarih (YYYY-MM-DD), opts.kapanisAy: 1-12|0 */
+function girisTarihiFormdanISO() {
+    var sozEl = document.getElementById('sozlesme_baslangic');
+    var soz = sozEl ? String(sozEl.value || '').trim().substring(0, 10) : '';
+    if (soz && /^\d{4}-\d{2}-\d{2}$/.test(soz)) return soz;
+    try {
+        if (window.__girisMusteriCacheObj) {
+            var m = window.__girisMusteriCacheObj;
+            var k = (m.kyc_sozlesme_tarihi != null) ? String(m.kyc_sozlesme_tarihi).trim().substring(0, 10) : '';
+            if (k && /^\d{4}-\d{2}-\d{2}$/.test(k)) return k;
+            var r = (m.rent_start_date != null) ? String(m.rent_start_date).trim().substring(0, 10) : '';
+            if (r && /^\d{4}-\d{2}-\d{2}$/.test(r)) return r;
+        }
+    } catch (_eG) {}
+    return '';
+}
+
+function formMusteriDurumDegeri() {
+    var mdEl = document.getElementById('musteri_durum');
+    var raw = mdEl ? String(mdEl.value || '').trim().toLowerCase() : 'aktif';
+    if (raw === 'iptal' || raw === 'pasif') return raw;
+    return 'aktif';
+}
+
+function kapanisGirisFormKontrol(opts) {
+    opts = opts || {};
+    var mdVal = (typeof formMusteriDurumDegeri === 'function') ? formMusteriDurumDegeri() : 'aktif';
+    if (mdVal !== 'pasif' && mdVal !== 'iptal') {
+        if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(null);
+        return true;
+    }
+    var kapInp = document.getElementById('kapanis_tarihi');
+    var kapIso = kapInp ? String(kapInp.value || '').trim() : '';
+    if (!kapIso) kapIso = (typeof bugunISO === 'function') ? bugunISO() : '';
+    if (mdVal === 'iptal') {
+        var girisIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        if (girisIso && kapIso && kapIso.substring(0, 7) !== girisIso.substring(0, 7)) {
+            var msgAy = 'İptal için kapanış tarihi giriş ayı içinde olmalıdır';
+            if (typeof tarihTrFromISO === 'function') {
+                msgAy += ' (giriş: ' + tarihTrFromISO(girisIso) + ')';
+            }
+            if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(msgAy);
+            if (opts.alert !== false) {
+                try { alert(msgAy); } catch (_eA2) {}
+            }
+            return false;
+        }
+        if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(null);
+        return true;
+    }
+    var msg = (typeof dogrulaKapanisGirisMesaj === 'function')
+        ? dogrulaKapanisGirisMesaj(kapIso, girisTarihiFormdanISO())
+        : null;
+    if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(msg);
+    if (msg && opts.alert !== false) {
+        try { alert(msg); } catch (_eA) {}
+    }
+    return !msg;
+}
+
 function syncDurumUI(d, opts) {
     opts = opts || {};
-    var v = (d === 'pasif') ? 'pasif' : 'aktif';
+    var raw = String(d || '').trim().toLowerCase();
+    var v = (raw === 'iptal') ? 'iptal' : ((raw === 'pasif') ? 'pasif' : 'aktif');
     var sel = document.getElementById('musteri_durum');
     if (sel) sel.value = v;
     var lbl = document.getElementById('kapanis_tarihi_label');
     var inp = document.getElementById('kapanis_tarihi');
     var wrap = document.getElementById('kapanis_tarihi_wrap');
     var aySel = document.getElementById('kapanis_ay_secim');
-    var showKap = v === 'pasif';
+    var uyari = document.getElementById('iptal_durum_uyari');
+    var showKap = (v === 'pasif' || v === 'iptal');
     if (lbl) lbl.style.display = showKap ? '' : 'none';
     if (wrap) wrap.style.display = showKap ? '' : 'none';
+    if (uyari) uyari.style.display = (v === 'iptal') ? '' : 'none';
     if (inp) {
-        if (showKap) {
+        if (v === 'iptal') {
+            var girisIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+            var ksI = opts.kapanis != null ? String(opts.kapanis).trim().substring(0, 10) : '';
+            if (girisIso) inp.value = girisIso;
+            else if (ksI) inp.value = ksI;
+            else if (!inp.value || !String(inp.value).trim()) inp.value = bugunISO();
+            try { inp.readOnly = true; } catch (_eRo) {}
+        } else if (v === 'pasif') {
+            try { inp.readOnly = false; } catch (_eRo2) {}
             var ks = opts.kapanis != null ? String(opts.kapanis).trim().substring(0, 10) : '';
             if (ks) inp.value = ks;
             else if (!inp.value || !String(inp.value).trim()) inp.value = bugunISO();
         } else {
+            try { inp.readOnly = false; } catch (_eRo3) {}
             inp.value = '';
         }
     }
-    if (typeof kapanisAySecimYaz === 'function') kapanisAySecimYaz(aySel, opts, showKap);
-    else if (aySel) {
-        if (showKap) {
-            var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
-            aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
+    if (aySel) {
+        if (v === 'iptal') {
+            aySel.value = '0';
+            aySel.disabled = true;
+            aySel.style.display = 'none';
         } else {
-            aySel.value = '';
+            aySel.disabled = false;
+            aySel.style.display = '';
+            if (typeof kapanisAySecimYaz === 'function') {
+                kapanisAySecimYaz(aySel, opts, showKap);
+            } else if (showKap) {
+                var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
+                aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
+            } else {
+                aySel.value = '';
+            }
         }
     }
     if (v === 'aktif') {
         sozlesmeBitisAktifKiraciIcinUzat(!!opts.skipAylikGrid);
         girisFormKiraArtisTarihiDoldur();
     }
+    if (inp && !inp._kapanisGirisBound) {
+        inp._kapanisGirisBound = true;
+        inp.addEventListener('change', function () {
+            if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
+        });
+    }
+    var sozEl = document.getElementById('sozlesme_baslangic');
+    if (sozEl && !sozEl._kapanisGirisBound) {
+        sozEl._kapanisGirisBound = true;
+        sozEl.addEventListener('change', function () {
+            if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
+        });
+    }
+    if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
     hesaplaYuzde(!!opts.skipAylikGrid);
 }
+
 
 async function hizmetTuruYeniEkle() {
     var inp = document.getElementById('hizmet_turu_yeni');
@@ -27296,8 +27393,11 @@ function selectMusteri(id) {
                 if (manInp) manInp.value = (m.odeme_duzeni_manuel != null && m.odeme_duzeni_manuel !== undefined) ? String(m.odeme_duzeni_manuel) : '';
                 if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') sozlesmelerOdemeDuzeniManuelUygula();
             })();
-            var dnorm = (m.durum && String(m.durum).toLowerCase().trim() === 'pasif') ? 'pasif' : 'aktif';
-            if (dnorm === 'pasif') {
+            var _dr = (m.durum != null) ? String(m.durum).toLowerCase().trim() : '';
+            var dnorm = (_dr === 'iptal' || (m.iptal === true || m.iptal === 1 || m.iptal === '1')) ? 'iptal' : ((_dr === 'pasif') ? 'pasif' : 'aktif');
+            if (dnorm === 'iptal') {
+                syncDurumUI('iptal', { kapanis: m.kapanis_tarihi, kapanisAy: 0 });
+            } else if (dnorm === 'pasif') {
                 syncDurumUI('pasif', { kapanis: m.kapanis_tarihi, kapanisAy: m.kapanis_sonrasi_borc_ay });
             } else {
                 syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9 });
@@ -28857,8 +28957,15 @@ function girisApiMusteriSozlesmeBaslangicGoster(m) {
     return s.slice(0, 12);
 }
 /** Şirket durumu (durum) + isteğe bağlı kart pasif uyarısı */
+function girisApiMusteriIptalMi(m) {
+    if (!m) return false;
+    if (m.iptal === true || m.iptal === 1 || m.iptal === '1' || m.iptal === 'true') return true;
+    var d = (m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    return d === 'iptal';
+}
 function girisApiMusteriDurumOzetMetni(m) {
     var d = (m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    if (girisApiMusteriIptalMi(m) || d === 'iptal') return 'İptal';
     var sirketPasif = (d === 'pasif');
     var kartPasif = (m.is_active === false || m.is_active === 0 || m.is_active === '0');
     var t = sirketPasif ? 'Pasif' : 'Aktif';
@@ -28866,9 +28973,11 @@ function girisApiMusteriDurumOzetMetni(m) {
     return t;
 }
 function girisApiMusteriDurumSinifi(m) {
+    if (girisApiMusteriIptalMi(m)) return 'sirket-durum-etiket sirket-durum-etiket--iptal';
     var d = (m && m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
     return d === 'pasif' ? 'sirket-durum-etiket sirket-durum-etiket--pasif' : 'sirket-durum-etiket sirket-durum-etiket--aktif';
 }
+
 
 /* Müşteri kartı için hover-prefetch (A1): sadece hafif /api/musteri.
    Grid/tahsil/reel tıklamada musteri-kart-bundle ile gelir; hover'da tetiklenmez. */
@@ -29395,11 +29504,18 @@ async function kaydet(event) {
     }
 
     var mdEl = document.getElementById('musteri_durum');
-    var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
+    var mdVal = (typeof formMusteriDurumDegeri === 'function')
+        ? formMusteriDurumDegeri()
+        : ((mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif');
     var kapInp = document.getElementById('kapanis_tarihi');
     var kapAySel = document.getElementById('kapanis_ay_secim');
     var kapBorcAy = (mdVal === 'pasif' && kapAySel) ? kapanisSonrasiBorcAyDegeri(kapAySel.value) : null;
-    if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
+    if (mdVal === 'iptal') {
+        kapBorcAy = 0;
+        var gIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        if (kapInp && gIso) kapInp.value = gIso;
+        else if (kapInp && (!kapInp.value || !String(kapInp.value).trim())) kapInp.value = bugunISO();
+    } else if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
         kapInp.value = bugunISO();
     }
     
@@ -29418,8 +29534,8 @@ async function kaydet(event) {
         ev_adres: document.getElementById('ev_adres').value,
         notes: document.getElementById('notes').value,
         durum: mdVal,
-        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
+        kapanis_tarihi: (kapInp && (mdVal === 'pasif' || mdVal === 'iptal')) ? kapInp.value : '',
+        kapanis_sonrasi_borc_ay: ((mdVal === 'pasif' || mdVal === 'iptal') && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         grup2_secimleri: (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [],
         bizim_hesap: (function () {
             var sl = (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [];
@@ -29440,8 +29556,8 @@ async function kaydet(event) {
         musteri_id: data.id,
         musteri_adi: aramaGuvenli ? aramaGuvenli.musteri_adi : (document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : ''),
         durum: mdVal,
-        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
+        kapanis_tarihi: (kapInp && (mdVal === 'pasif' || mdVal === 'iptal')) ? kapInp.value : '',
+        kapanis_sonrasi_borc_ay: ((mdVal === 'pasif' || mdVal === 'iptal') && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         sirket_unvani: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         vergi_no: vergiNo,
         uyruk_yabanci: !!uyrukYabanci,

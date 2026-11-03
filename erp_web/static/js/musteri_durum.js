@@ -38,6 +38,7 @@ function girisMusteriKartOnbellekYazDurum(mid, alanlar) {
             data.musteri.kapanis_tarihi = alanlar.kapanis_tarihi || "";
             data.musteri.kapanis_sonrasi_borc_ay = alanlar.kapanis_sonrasi_borc_ay;
             data.musteri.is_active = alanlar.is_active;
+            if (alanlar.iptal != null) data.musteri.iptal = !!alanlar.iptal;
         });
     } catch (_eY) {}
 }

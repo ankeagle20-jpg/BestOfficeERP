@@ -29,6 +29,9 @@ from db import (
     ensure_customers_arsivli,
     ensure_customers_durum,
     ensure_customers_is_active,
+    ensure_customers_iptal,
+    customers_iptal_column_ready,
+    customers_iptal_select_sql,
     ensure_customers_kapanis_sonrasi_borc_ay,
     ensure_customers_musteri_no,
     ensure_customers_hazir_ofis_oda,
@@ -52,10 +55,13 @@ from db import (
     sql_expr_fatura_gib_no_tasindi_degil,
 )
 from musteri_durum_yaz import (
+    IPTAL_TAHSILAT_MESAJ,
     dogrula_kapanis_giris,
+    iptal_icin_kapanis_giris_ayarla,
     musteri_durum_yaz_alanlari,
     musteri_durum_yaz_json,
     musteri_giris_tarihi_db,
+    musteri_tahsilat_var_mi,
     normalize_kapanis_sonrasi_borc_ay as _normalize_kapanis_sonrasi_borc_ay,
     normalize_musteri_durum_kapanis as _normalize_musteri_durum_kapanis,
     parse_kapanis_tarihi as _parse_kapanis_tarihi,
@@ -66,6 +72,7 @@ from kira_kapanis_cap import (
     kapanis_ek_fingerprint as _kapanis_ek_fingerprint,
     kira_borc_cap_exclusive as _kira_borc_cap_exclusive,
     kira_son_borc_ayi,
+    musteri_iptal_mi as _musteri_iptal_mi,
 )
 from datetime import datetime, date, timedelta
 import calendar
@@ -1713,8 +1720,11 @@ def _aylik_grid_trim_payload_to_son_borc(payload, son_borc: date, kyc=None) -> d
     if "kapanis_sonrasi_borc_ay" in kyc or kyc.get("kapanis_sonrasi_borc_ay") is not None:
         src["kapanis_sonrasi_borc_ay"] = kyc.get("kapanis_sonrasi_borc_ay")
     # Fingerprint damgası (H / H12 / N) — env+N ile uyumlu okuma
+    if "iptal" in kyc or kyc.get("iptal") is not None:
+        src["iptal"] = bool(_musteri_iptal_mi(kyc.get("iptal")))
     src["kapanis_ek_fingerprint"] = _kapanis_ek_fingerprint(
-        src.get("kapanis_sonrasi_borc_ay")
+        src.get("kapanis_sonrasi_borc_ay"),
+        iptal=src.get("iptal"),
     )
     src["cap_kirpildi"] = True
     return src
@@ -2073,12 +2083,13 @@ def _kyc_date_iso(v):
 def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     if not isinstance(cache_obj, dict):
         return False
+    _iptal_sel = customers_iptal_select_sql("c")
     kyc_row = fetch_one(
-        """
+        f"""
         SELECT mk.id AS musteri_kyc_id,
                mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.kira_suresi_ay, mk.aylik_kira, mk.kira_nakit, mk.kira_artis_tarihi,
                mk.kira_nakit_tutar, mk.kira_banka_tutar, mk.kdv_oran,
-               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, c.rent_start_date,
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, {_iptal_sel}, c.rent_start_date,
                c.ilk_kira_bedeli
         FROM customers c
         LEFT JOIN LATERAL (
@@ -2172,8 +2183,10 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     kap_cache = _aylik_grid_coerce_date(cache_obj.get("kapanis_tarihi"))
     if _kyc_date_iso(kap_db) != _kyc_date_iso(kap_cache):
         return False
-    if _kapanis_ek_fingerprint(kyc.get("kapanis_sonrasi_borc_ay")) != _kapanis_ek_fingerprint(
-        cache_obj.get("kapanis_sonrasi_borc_ay")
+    if _kapanis_ek_fingerprint(
+        kyc.get("kapanis_sonrasi_borc_ay"), iptal=kyc.get("iptal")
+    ) != _kapanis_ek_fingerprint(
+        cache_obj.get("kapanis_sonrasi_borc_ay"), iptal=cache_obj.get("iptal")
     ):
         return False
 
@@ -4000,12 +4013,13 @@ def _musteri_kyc_grup_for_aylik_grid(musteri_id: int):
     hit = _musteri_kyc_grid_mem.get(mid)
     if hit and (now - float(hit.get("ts") or 0)) < 45.0 and hit.get("row") is not None:
         return dict(hit["row"])
+    _iptal_sel = customers_iptal_select_sql("c")
     row = fetch_one(
-        """
+        f"""
         SELECT mk.id AS musteri_kyc_id,
                mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi, mk.kira_suresi_ay, mk.kira_nakit,
                mk.kira_nakit_tutar, mk.kira_banka_tutar, mk.kdv_oran,
-               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, c.rent_start_date,
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, {_iptal_sel}, c.rent_start_date,
                c.ilk_kira_bedeli
         FROM customers c
         LEFT JOIN LATERAL (
@@ -4656,7 +4670,9 @@ def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
     except (TypeError, ValueError):
         sure = None
     kap = _kyc_date_iso(_aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))) or ""
-    ek = _kapanis_ek_fingerprint(kyc.get("kapanis_sonrasi_borc_ay"))
+    ek = _kapanis_ek_fingerprint(
+        kyc.get("kapanis_sonrasi_borc_ay"), iptal=kyc.get("iptal")
+    )
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
         f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}"
@@ -4687,7 +4703,9 @@ def _aylik_grid_freshness_k_from_payload(payload) -> str:
     if _aylik_grid_rev_uyumlu(payload):
         rev = AYLIK_GRID_COMPUTE_REV  # rev 30 plansiz payload == 31 (hesap ayni): parmak izi sabit kalir
     kap = str(payload.get("kapanis_tarihi") or "")[:10]
-    ek = _kapanis_ek_fingerprint(payload.get("kapanis_sonrasi_borc_ay"))
+    ek = _kapanis_ek_fingerprint(
+        payload.get("kapanis_sonrasi_borc_ay"), iptal=payload.get("iptal")
+    )
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
         f"{artis_ay}|{sure}|{rev}|{kap}|{ek}"
@@ -6047,6 +6065,7 @@ def _giris_kaydet_schema_ensure_once() -> None:
         ensure_customers_bizim_hesap()
         ensure_customers_grup2_secimleri()
         ensure_customers_kapanis_sonrasi_borc_ay()
+        ensure_customers_iptal()
         ensure_customers_durum()
         ensure_customers_is_active()
         ensure_customers_hazir_ofis_oda()
@@ -6796,10 +6815,16 @@ def api_musteriler():
     else:
         pasifleri_dahil = request_pasifleri_dahil()
         gor = musteri_liste_gorunur_sql("", pasifleri_dahil=pasifleri_dahil)
+    _iptal_liste = (
+        "COALESCE(iptal, FALSE) AS iptal"
+        if customers_iptal_column_ready()
+        else "FALSE AS iptal"
+    )
     base = (
         "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code, yetkili_kisi, "
         "NULLIF(TRIM(COALESCE(durum, '')), '') AS durum, "
         "COALESCE(is_active, TRUE) AS is_active, "
+        f"{_iptal_liste}, "
         "rent_start_date, "
         "(SELECT mk.sozlesme_tarihi FROM musteri_kyc mk WHERE mk.musteri_id = customers.id "
         "ORDER BY mk.id DESC NULLS LAST LIMIT 1) AS kyc_sozlesme_tarihi "
@@ -8194,6 +8219,7 @@ def api_musteri_detay(mid):
     ensure_customers_bizim_hesap()
     ensure_customers_grup2_secimleri()
     ensure_customers_kapanis_sonrasi_borc_ay()
+    ensure_customers_iptal()
     ensure_grup2_etiketleri_table()
     ensure_grup2_bizim_hesap_into_array()
     ensure_musteri_kyc_uyruk_column()
@@ -8246,6 +8272,11 @@ def api_musteri_detay(mid):
         if k == "grup2_secimleri":
             continue
         out[k] = _musteri_serialize_val(v)
+    # UI dropdown: iptal bayrağı → durum=iptal (DB'de durum pasif kalır)
+    _iptal_b = _musteri_iptal_mi(row.get("iptal"))
+    out["iptal"] = bool(_iptal_b)
+    if _iptal_b:
+        out["durum"] = "iptal"
     out["is_group"] = bool(row.get("is_group"))
     out["parent_cari_id"] = ""
     if row.get("parent_id"):
@@ -8431,23 +8462,61 @@ def api_hazir_ofis_durum():
     return jsonify({"ok": True, "dolu": dolu, "bos": bos})
 
 
+def _iptal_hayalet_grid_temizle(musteri_id: int) -> None:
+    """İptal sonrası hayalet grid/panel — dar force bypass; global koruma gevşetilmez."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return
+    if mid <= 0:
+        return
+    try:
+        _delete_aylik_grid_cache_guarded(mid, force_placeholder_collapse=True)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "iptal hayalet grid sil mid=%s", mid
+        )
+    try:
+        execute(
+            "DELETE FROM musteri_tahsilat_panel_detay WHERE musteri_id=%s",
+            (mid,),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "iptal panel sil mid=%s", mid
+        )
+    try:
+        _invalidate_aylik_grid_payload_mem(mid)
+    except Exception:
+        pass
+
+
 @bp.route("/api/musteri/<int:mid>/durum", methods=["POST"])
 @giris_gerekli
 def api_musteri_durum_guncelle(mid):
-    """customers.durum + kapanis_tarihi + kapanış sonrası ek borç ayı + is_active."""
+    """customers.durum + kapanis_tarihi + kapanış sonrası ek borç ayı + is_active (+ iptal)."""
     data = request.get_json(silent=True) or {}
+    raw_durum = str((data or {}).get("durum") or "").strip().lower()
+    if raw_durum == "iptal" and musteri_tahsilat_var_mi(mid):
+        return jsonify({"ok": False, "mesaj": IPTAL_TAHSILAT_MESAJ}), 400
     alanlar = musteri_durum_yaz_alanlari(data, kati=True, oda_bosalt=True)
     if not alanlar:
-        return jsonify({"ok": False, "mesaj": "durum aktif veya pasif olmalıdır."}), 400
+        return jsonify(
+            {"ok": False, "mesaj": "durum aktif, pasif veya iptal olmalıdır."}
+        ), 400
+    giris_db = musteri_giris_tarihi_db(mid)
+    iptal_err = iptal_icin_kapanis_giris_ayarla(alanlar, giris_db)
+    if iptal_err:
+        return jsonify({"ok": False, "mesaj": iptal_err}), 400
     # Aktifte kapanış None → doğrulama yok (yeniden giriş / temizleme bozulmaz).
-    red = dogrula_kapanis_giris(
-        alanlar.get("kapanis_tarihi"), musteri_giris_tarihi_db(mid)
-    )
+    # İptal: kapanış=giriş eşit → dogrula geçer.
+    red = dogrula_kapanis_giris(alanlar.get("kapanis_tarihi"), giris_db)
     if red:
         return jsonify({"ok": False, "mesaj": red}), 400
     ensure_customers_durum()
     ensure_customers_is_active()
     ensure_customers_kapanis_sonrasi_borc_ay()
+    ensure_customers_iptal()
     ensure_customers_hazir_ofis_oda()
     row = fetch_one("SELECT id FROM customers WHERE id = %s", (mid,))
     if not row:
@@ -8456,6 +8525,7 @@ def api_musteri_durum_guncelle(mid):
         """
         UPDATE customers
         SET durum = %s, kapanis_tarihi = %s, kapanis_sonrasi_borc_ay = %s, is_active = %s,
+            iptal = %s,
             hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END
         WHERE id = %s
         """,
@@ -8464,6 +8534,7 @@ def api_musteri_durum_guncelle(mid):
             alanlar["kapanis_tarihi"],
             alanlar["kapanis_sonrasi_borc_ay"],
             alanlar["is_active"],
+            bool(alanlar.get("iptal")),
             alanlar["oda_sil"],
             int(mid),
         ),
@@ -8476,6 +8547,8 @@ def api_musteri_durum_guncelle(mid):
                 "mesaj": "Kayıt güncellenemedi (satır yok veya veritabanı kısıtı). Yöneticiye bildirin.",
             }
         ), 409
+    if alanlar.get("iptal"):
+        _iptal_hayalet_grid_temizle(int(mid))
     try:
         kapanis_borc_ufku_degisti(int(mid))
     except Exception:
@@ -8483,7 +8556,8 @@ def api_musteri_durum_guncelle(mid):
             "api_musteri_durum_guncelle kapanis_borc_ufku_degisti mid=%s", mid
         )
         try:
-            _upsert_aylik_grid_cache(int(mid))
+            if not alanlar.get("iptal"):
+                _upsert_aylik_grid_cache(int(mid))
         except Exception:
             logging.getLogger(__name__).exception(
                 "api_musteri_durum_guncelle upsert yedek mid=%s", mid
@@ -8745,11 +8819,10 @@ def kaydet():
             return jsonify({"ok": False, "mesaj": vergi_err}), 400
 
         musteri_id = data.get('id')
+        if str((data or {}).get("durum") or "").strip().lower() == "iptal" and musteri_id:
+            if musteri_tahsilat_var_mi(musteri_id):
+                return jsonify({"ok": False, "mesaj": IPTAL_TAHSILAT_MESAJ}), 400
         alanlar = musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)
-        dr = alanlar["durum"]
-        kap = alanlar["kapanis_tarihi"]
-        kap_borc_ay = alanlar["kapanis_sonrasi_borc_ay"]
-        kart_aktif = alanlar["is_active"]
         # Giriş: istekte sozlesme/rent varsa onları kullan; yoksa DB (mevcut kart).
         giris_eff = resolve_giris_tarihi(
             data.get("sozlesme_tarihi") or data.get("sozlesme_baslangic"),
@@ -8757,6 +8830,14 @@ def kaydet():
         )
         if giris_eff is None and musteri_id:
             giris_eff = musteri_giris_tarihi_db(musteri_id)
+        iptal_err = iptal_icin_kapanis_giris_ayarla(alanlar, giris_eff)
+        if iptal_err:
+            return jsonify({"ok": False, "mesaj": iptal_err}), 400
+        dr = alanlar["durum"]
+        kap = alanlar["kapanis_tarihi"]
+        kap_borc_ay = alanlar["kapanis_sonrasi_borc_ay"]
+        kart_aktif = alanlar["is_active"]
+        kart_iptal = bool(alanlar.get("iptal"))
         red_kap = dogrula_kapanis_giris(kap, giris_eff)
         if red_kap:
             return jsonify({"ok": False, "mesaj": red_kap}), 400
@@ -8789,6 +8870,7 @@ def kaydet():
                     kapanis_tarihi = %s,
                     kapanis_sonrasi_borc_ay = %s,
                     is_active = %s,
+                    iptal = %s,
                     bizim_hesap = %s,
                     grup2_secimleri = %s,
                     calisma_sekli = %s
@@ -8806,12 +8888,15 @@ def kaydet():
                 kap,
                 kap_borc_ay,
                 kart_aktif,
+                kart_iptal,
                 bizim_hesap,
                 g2_list,
                 calisma_sekli,
                 musteri_id
             ))
             _persist_musteri_kyc_uyruk(musteri_id, uyruk_yabanci)
+            if kart_iptal:
+                _iptal_hayalet_grid_temizle(int(musteri_id))
             try:
                 kapanis_borc_ufku_degisti(int(musteri_id))
             except Exception:
@@ -8836,6 +8921,7 @@ def kaydet():
                 kap,
                 kap_borc_ay,
                 kart_aktif,
+                kart_iptal,
                 bizim_hesap,
                 g2_list,
                 calisma_sekli,
@@ -8866,9 +8952,9 @@ def kaydet():
                             INSERT INTO customers (
                                 id, name, musteri_adi, tax_number, phone, email, address,
                                 ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
-                                is_active, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
+                                is_active, iptal, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                             """,
                             (rezerve_id,) + insert_params,
@@ -8879,9 +8965,9 @@ def kaydet():
                             INSERT INTO customers (
                                 name, musteri_adi, tax_number, phone, email, address,
                                 ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
-                                is_active, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
+                                is_active, iptal, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                             """,
                             insert_params,

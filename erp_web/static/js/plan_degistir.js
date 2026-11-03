@@ -1,20 +1,22 @@
 /* Plan değiştir. Kapı kapalıyken seçenek ve bölüm oluşturulmaz. Durum kaydı yapmaz. */
 function planDurumKarari(secilen, onceki, kapiAcik) {
-    var geri = (onceki === "pasif") ? "pasif" : "aktif";
+    var geri = (onceki === "iptal") ? "iptal" : ((onceki === "pasif") ? "pasif" : "aktif");
     if (!kapiAcik) {
+        var d0 = (secilen === "iptal") ? "iptal" : ((secilen === "pasif") ? "pasif" : "aktif");
         return {
             goster: false,
-            durum: (secilen === "pasif") ? "pasif" : "aktif",
+            durum: d0,
             modal: false,
-            kaydetDurum: secilen === "aktif" || secilen === "pasif"
+            kaydetDurum: secilen === "aktif" || secilen === "pasif" || secilen === "iptal"
         };
     }
     if (secilen === "plan" || secilen === "dondur") {
         return { goster: true, durum: geri, modal: true, kaydetDurum: false, dondur: secilen === "dondur" };
     }
+    var d1 = (secilen === "iptal") ? "iptal" : ((secilen === "pasif") ? "pasif" : "aktif");
     return {
         goster: true,
-        durum: (secilen === "pasif") ? "pasif" : "aktif",
+        durum: d1,
         modal: false,
         kaydetDurum: true
     };
@@ -33,7 +35,7 @@ function planSecenekEklensin(kapiAcik) {
 function planDurumOdak() {
     var sel = document.getElementById("musteri_durum");
     if (!sel) return;
-    if (sel.value === "aktif" || sel.value === "pasif") sel.setAttribute("data-onceki", sel.value);
+    if (sel.value === "aktif" || sel.value === "pasif" || sel.value === "iptal") sel.setAttribute("data-onceki", sel.value);
 }
 
 function musteriDurumSecildi(secilen) {
@@ -47,8 +49,13 @@ function musteriDurumSecildi(secilen) {
         planDegistirModalAc(karar.dondur ? "dondur" : "plan");
         return;
     }
-    if (sel && (karar.durum === "aktif" || karar.durum === "pasif")) sel.setAttribute("data-onceki", karar.durum);
-    if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, (karar.durum === "pasif" && onceki !== "pasif") ? { yeniPasif: true } : {});
+    if (sel && (karar.durum === "aktif" || karar.durum === "pasif" || karar.durum === "iptal")) sel.setAttribute("data-onceki", karar.durum);
+    if (typeof syncDurumUI === "function") {
+        var opts = {};
+        if (karar.durum === "iptal") opts = { kapanisAy: 0 };
+        else if (karar.durum === "pasif" && onceki !== "pasif") opts = { yeniPasif: true };
+        syncDurumUI(karar.durum, opts);
+    }
     dondurmaPasifUygula();
 }
 
@@ -1027,7 +1034,7 @@ function planKayitSonrasi(mid) {
 /* Geçmiş listesi sunucu cevabından yenilenir; grid/borç/ekstre güncellenir. Popup'a dokunmaz (İptal popup içinde kalır). */
 function planPasifMi() {
     var sel = document.getElementById("musteri_durum");
-    return !!(sel && sel.value === "pasif");
+    return !!(sel && (sel.value === "pasif" || sel.value === "iptal"));
 }
 
 function dondurmaPasifUygula() {

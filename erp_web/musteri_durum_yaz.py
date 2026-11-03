@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+IPTAL_TAHSILAT_MESAJ = (
+    "Bu müşterinin tahsilat kaydı var; önce tahsilat iade/silinmeli."
+)
+
 
 def parse_kapanis_tarihi(s):
     """Formdan gelen kapanış tarihi (YYYY-MM-DD veya GG.AA.YYYY)."""
@@ -105,6 +109,30 @@ def musteri_kapanis_tarihi_db(musteri_id) -> date | None:
     return kap if isinstance(kap, date) else parse_kapanis_tarihi(kap)
 
 
+def musteri_tahsilat_var_mi(musteri_id) -> bool:
+    """Silinmemiş tahsilat satırı var mı (iptal koruması)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    try:
+        from db import fetch_one
+
+        row = fetch_one(
+            """
+            SELECT 1 AS x FROM tahsilatlar
+            WHERE musteri_id = %s OR customer_id = %s
+            LIMIT 1
+            """,
+            (mid, mid),
+        )
+        return bool(row)
+    except Exception:
+        return False
+
+
 def normalize_musteri_durum_kapanis(data):
     """durum: aktif|pasif; pasif değilse kapanis_tarihi None."""
     dr = (data.get("durum") or "aktif").strip().lower()
@@ -145,17 +173,24 @@ def normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
 
 
 def musteri_durum_yaz_alanlari(data, *, kati: bool = False, oda_bosalt: bool = True):
-    """durum + kapanış + is_active; oda_bosalt=True ise pasifte oda_sil.
+    """durum + kapanış + is_active (+ iptal); oda_bosalt=True ise pasifte oda_sil.
 
-    kati=True: durum aktif|pasif değilse None (400).
+    kati=True: durum aktif|pasif|iptal değilse None (400).
     kati=False: geçersiz durum aktif sayılır (kart kaydet varsayılanı).
     oda_bosalt=True: /durum (pill/toplu) — pasifte oda NULL.
     oda_bosalt=False: /giris/kaydet — oda kolonuna dokunma (oda_sil False).
     Pasifte boş kapanış → bugün. Aktifte kapanış alanları None, is_active True.
+    durum=iptal → DB durum=pasif, iptal=True, N=0 (kapanış çağıran taraf girişe çeker).
     """
     payload = dict(data or {})
     raw = (payload.get("durum") or "").strip().lower()
-    if raw not in ("aktif", "pasif"):
+    iptal = False
+    if raw == "iptal":
+        iptal = True
+        raw = "pasif"
+        payload["durum"] = "pasif"
+        payload["kapanis_sonrasi_borc_ay"] = 0
+    elif raw not in ("aktif", "pasif"):
         if kati:
             return None
         raw = "aktif"
@@ -163,24 +198,43 @@ def musteri_durum_yaz_alanlari(data, *, kati: bool = False, oda_bosalt: bool = T
     if raw == "pasif" and not str(payload.get("kapanis_tarihi") or "").strip():
         payload["kapanis_tarihi"] = date.today().isoformat()
     dr, kap = normalize_musteri_durum_kapanis(payload)
-    kap_borc = normalize_kapanis_sonrasi_borc_ay(payload, dr)
+    if iptal:
+        kap_borc = 0
+    else:
+        kap_borc = normalize_kapanis_sonrasi_borc_ay(payload, dr)
     return {
         "durum": dr,
         "kapanis_tarihi": kap,
         "kapanis_sonrasi_borc_ay": kap_borc,
         "is_active": dr == "aktif",
         "oda_sil": bool(oda_bosalt) and dr == "pasif",
+        "iptal": bool(iptal) if dr == "pasif" else False,
+        "ui_durum": "iptal" if iptal else dr,
     }
 
 
 def musteri_durum_yaz_json(alanlar) -> dict:
-    """API cevabı: tarih ISO, yoksa None."""
+    """API cevabı: tarih ISO, yoksa None. UI için durum=iptal olabilir."""
     if not alanlar:
         return {}
     kap = alanlar.get("kapanis_tarihi")
+    iptal = bool(alanlar.get("iptal"))
+    ui = alanlar.get("ui_durum") or ("iptal" if iptal else alanlar.get("durum"))
     return {
-        "durum": alanlar["durum"],
+        "durum": ui,
         "kapanis_tarihi": kap.isoformat() if kap else None,
         "kapanis_sonrasi_borc_ay": alanlar.get("kapanis_sonrasi_borc_ay"),
         "is_active": bool(alanlar.get("is_active")),
+        "iptal": iptal,
     }
+
+
+def iptal_icin_kapanis_giris_ayarla(alanlar: dict, giris: date | None) -> str | None:
+    """İptal alanlarında kapanış = giriş. Giriş yoksa Türkçe hata; aksi None."""
+    if not alanlar or not alanlar.get("iptal"):
+        return None
+    if not isinstance(giris, date):
+        return "İptal için giriş (sözleşme) tarihi gerekli."
+    alanlar["kapanis_tarihi"] = giris
+    alanlar["kapanis_sonrasi_borc_ay"] = 0
+    return None

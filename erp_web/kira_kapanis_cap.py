@@ -133,9 +133,23 @@ def hepsi_sozlesme_yili_son_borc_ayi(giris: date, kap: date) -> date:
     return _add_months(k, delta)
 
 
+def musteri_iptal_mi(v) -> bool:
+    """customers.iptal / satır bayrağı — 0/false/None güvenli False."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        try:
+            return int(v) == 1
+        except (TypeError, ValueError):
+            return False
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "on", "t")
+
+
 def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
     """Pasif + kapanış → son borç ayı (dahil); cap yoksa None.
 
+    iptal=TRUE: bayraklardan bağımsız giriş ayı − 1 (borç penceresi boş).
     N dolu: kapanış ayı + delta (delta=N; Aday A bayrak+N=0 → N−1).
     N NULL + bayrak kapalı: None.
     N NULL + bayrak açık + giriş var: sözleşme yılı sonu.
@@ -145,6 +159,12 @@ def kira_son_borc_ayi(musteri_row: Mapping[str, Any] | None) -> date | None:
     durum = str(src.get("durum") or src.get("musteri_durum") or "").strip().lower()
     if durum != "pasif":
         return None
+    # Sözleşme iptali: borç yok (giriş ayından önceki ay).
+    if musteri_iptal_mi(src.get("iptal")):
+        giris_i = _giris_tarihi(src)
+        if not giris_i:
+            return None
+        return _add_months(date(giris_i.year, giris_i.month, 1), -1)
     kap = _coerce_date(src.get("kapanis_tarihi"))
     if not kap:
         return None
@@ -186,13 +206,16 @@ def ay_kira_borc_dahil_mi(musteri_row: Mapping[str, Any] | None, yil: int, ay: i
     return cur <= son
 
 
-def kapanis_ek_fingerprint(raw) -> str:
+def kapanis_ek_fingerprint(raw, iptal=None) -> str:
     """Cache/parmak izi: N dolu → rakam; Hepsi → 'H' (eski) veya 'H12' (bayrak açık).
 
+    iptal=TRUE → 'IPTAL' (bayrak/N'den bağımsız; cache bayat sayılır).
     N=0 + KAPANIS_N0_KAPANIS_AYI_HARIC=1 → '0x' (eski '0'dan farklı → cache bayat).
     Bayrak kapalıyken N=0 → '0' (birebir eski). COMPUTE_REV artırmak yerine
     fingerprint ayrımı: yalnız N=0 mid'ler invalid; N=1..12/Hepsi etkilenmez.
     """
+    if musteri_iptal_mi(iptal):
+        return "IPTAL"
     n = _parse_n(raw)
     if n is not None:
         if n == 0 and n0_kapanis_ayi_haric_aktif():

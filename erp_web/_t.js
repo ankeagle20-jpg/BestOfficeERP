@@ -18886,68 +18886,114 @@ function kapanisGirisUIIsaretle(hataMesaj) {
     return !hataMesaj;
 }
 
+function formMusteriDurumDegeri() {
+    var mdEl = document.getElementById('musteri_durum');
+    var raw = mdEl ? String(mdEl.value || '').trim().toLowerCase() : 'aktif';
+    if (raw === 'iptal' || raw === 'pasif') return raw;
+    return 'aktif';
+}
+
 function kapanisGirisFormKontrol(opts) {
     opts = opts || {};
-    var mdEl = document.getElementById('musteri_durum');
-    var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
-    if (mdVal !== 'pasif') {
-        kapanisGirisUIIsaretle(null);
+    var mdVal = (typeof formMusteriDurumDegeri === 'function') ? formMusteriDurumDegeri() : 'aktif';
+    if (mdVal !== 'pasif' && mdVal !== 'iptal') {
+        if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(null);
         return true;
     }
     var kapInp = document.getElementById('kapanis_tarihi');
     var kapIso = kapInp ? String(kapInp.value || '').trim() : '';
     if (!kapIso) kapIso = (typeof bugunISO === 'function') ? bugunISO() : '';
-    var msg = dogrulaKapanisGirisMesaj(kapIso, girisTarihiFormdanISO());
-    kapanisGirisUIIsaretle(msg);
+    if (mdVal === 'iptal') {
+        var girisIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        if (girisIso && kapIso && kapIso.substring(0, 7) !== girisIso.substring(0, 7)) {
+            var msgAy = 'İptal için kapanış tarihi giriş ayı içinde olmalıdır';
+            if (typeof tarihTrFromISO === 'function') {
+                msgAy += ' (giriş: ' + tarihTrFromISO(girisIso) + ')';
+            }
+            if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(msgAy);
+            if (opts.alert !== false) {
+                try { alert(msgAy); } catch (_eA2) {}
+            }
+            return false;
+        }
+        if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(null);
+        return true;
+    }
+    var msg = (typeof dogrulaKapanisGirisMesaj === 'function')
+        ? dogrulaKapanisGirisMesaj(kapIso, girisTarihiFormdanISO())
+        : null;
+    if (typeof kapanisGirisUIIsaretle === 'function') kapanisGirisUIIsaretle(msg);
     if (msg && opts.alert !== false) {
         try { alert(msg); } catch (_eA) {}
     }
     return !msg;
 }
 
-/** opts.kapanis: API'den gelen kayıtlı tarih (YYYY-MM-DD), opts.kapanisAy: 1-12|0 */
+
 function syncDurumUI(d, opts) {
     opts = opts || {};
-    var v = (d === 'pasif') ? 'pasif' : 'aktif';
+    var raw = String(d || '').trim().toLowerCase();
+    var v = (raw === 'iptal') ? 'iptal' : ((raw === 'pasif') ? 'pasif' : 'aktif');
     var sel = document.getElementById('musteri_durum');
     if (sel) sel.value = v;
     var lbl = document.getElementById('kapanis_tarihi_label');
     var inp = document.getElementById('kapanis_tarihi');
     var wrap = document.getElementById('kapanis_tarihi_wrap');
     var aySel = document.getElementById('kapanis_ay_secim');
-    var showKap = v === 'pasif';
+    var uyari = document.getElementById('iptal_durum_uyari');
+    var showKap = (v === 'pasif' || v === 'iptal');
     if (lbl) lbl.style.display = showKap ? '' : 'none';
     if (wrap) wrap.style.display = showKap ? '' : 'none';
+    if (uyari) uyari.style.display = (v === 'iptal') ? '' : 'none';
     if (inp) {
-        if (showKap) {
+        if (v === 'iptal') {
+            var girisIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+            var ksI = opts.kapanis != null ? String(opts.kapanis).trim().substring(0, 10) : '';
+            if (girisIso) inp.value = girisIso;
+            else if (ksI) inp.value = ksI;
+            else if (!inp.value || !String(inp.value).trim()) inp.value = bugunISO();
+            try { inp.readOnly = true; } catch (_eRo) {}
+        } else if (v === 'pasif') {
+            try { inp.readOnly = false; } catch (_eRo2) {}
             var ks = opts.kapanis != null ? String(opts.kapanis).trim().substring(0, 10) : '';
             if (ks) inp.value = ks;
             else if (!inp.value || !String(inp.value).trim()) inp.value = bugunISO();
         } else {
+            try { inp.readOnly = false; } catch (_eRo3) {}
             inp.value = '';
         }
     }
     if (aySel) {
-        if (showKap) {
-            var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
-            aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
+        if (v === 'iptal') {
+            aySel.value = '0';
+            aySel.disabled = true;
+            aySel.style.display = 'none';
         } else {
-            aySel.value = '';
+            aySel.disabled = false;
+            aySel.style.display = '';
+            if (typeof kapanisAySecimYaz === 'function') {
+                kapanisAySecimYaz(aySel, opts, showKap);
+            } else if (showKap) {
+                var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
+                aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
+            } else {
+                aySel.value = '';
+            }
         }
     }
     if (v === 'aktif') {
         sozlesmeBitisAktifKiraciIcinUzat(!!opts.skipAylikGrid);
         girisFormKiraArtisTarihiDoldur();
     }
-    if (inp && !inp._kapanisGirisBag) {
-        inp._kapanisGirisBag = true;
+    if (inp && !inp._kapanisGirisBound) {
+        inp._kapanisGirisBound = true;
         inp.addEventListener('change', function () {
             if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
         });
     }
     var sozEl = document.getElementById('sozlesme_baslangic');
-    if (sozEl && !sozEl._kapanisGirisBag) {
-        sozEl._kapanisGirisBag = true;
+    if (sozEl && !sozEl._kapanisGirisBound) {
+        sozEl._kapanisGirisBound = true;
         sozEl.addEventListener('change', function () {
             if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
         });
@@ -18955,6 +19001,7 @@ function syncDurumUI(d, opts) {
     if (typeof kapanisGirisFormKontrol === 'function') kapanisGirisFormKontrol({ alert: false });
     hesaplaYuzde(!!opts.skipAylikGrid);
 }
+
 
 async function hizmetTuruYeniEkle() {
     var inp = document.getElementById('hizmet_turu_yeni');
@@ -19355,8 +19402,11 @@ function selectMusteri(id) {
                 if (manInp) manInp.value = (m.odeme_duzeni_manuel != null && m.odeme_duzeni_manuel !== undefined) ? String(m.odeme_duzeni_manuel) : '';
                 if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') sozlesmelerOdemeDuzeniManuelUygula();
             })();
-            var dnorm = (m.durum && String(m.durum).toLowerCase().trim() === 'pasif') ? 'pasif' : 'aktif';
-            if (dnorm === 'pasif') {
+            var _dr = (m.durum != null) ? String(m.durum).toLowerCase().trim() : '';
+            var dnorm = (_dr === 'iptal' || (m.iptal === true || m.iptal === 1 || m.iptal === '1')) ? 'iptal' : ((_dr === 'pasif') ? 'pasif' : 'aktif');
+            if (dnorm === 'iptal') {
+                syncDurumUI('iptal', { kapanis: m.kapanis_tarihi, kapanisAy: 0 });
+            } else if (dnorm === 'pasif') {
                 syncDurumUI('pasif', { kapanis: m.kapanis_tarihi, kapanisAy: m.kapanis_sonrasi_borc_ay });
             } else {
                 syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9 });
@@ -20460,8 +20510,15 @@ function girisApiMusteriSozlesmeBaslangicGoster(m) {
     return s.slice(0, 12);
 }
 /** Şirket durumu (durum) + isteğe bağlı kart pasif uyarısı */
+function girisApiMusteriIptalMi(m) {
+    if (!m) return false;
+    if (m.iptal === true || m.iptal === 1 || m.iptal === '1' || m.iptal === 'true') return true;
+    var d = (m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    return d === 'iptal';
+}
 function girisApiMusteriDurumOzetMetni(m) {
     var d = (m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    if (girisApiMusteriIptalMi(m) || d === 'iptal') return 'İptal';
     var sirketPasif = (d === 'pasif');
     var kartPasif = (m.is_active === false || m.is_active === 0 || m.is_active === '0');
     var t = sirketPasif ? 'Pasif' : 'Aktif';
@@ -20469,9 +20526,11 @@ function girisApiMusteriDurumOzetMetni(m) {
     return t;
 }
 function girisApiMusteriDurumSinifi(m) {
+    if (girisApiMusteriIptalMi(m)) return 'sirket-durum-etiket sirket-durum-etiket--iptal';
     var d = (m && m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
     return d === 'pasif' ? 'sirket-durum-etiket sirket-durum-etiket--pasif' : 'sirket-durum-etiket sirket-durum-etiket--aktif';
 }
+
 
 /* Müşteri kartı için hover-prefetch (A1): sadece hafif /api/musteri.
    Grid/tahsil/reel tıklamada musteri-kart-bundle ile gelir; hover'da tetiklenmez. */
@@ -20776,11 +20835,18 @@ async function kaydet(event) {
     }
 
     var mdEl = document.getElementById('musteri_durum');
-    var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
+    var mdVal = (typeof formMusteriDurumDegeri === 'function')
+        ? formMusteriDurumDegeri()
+        : ((mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif');
     var kapInp = document.getElementById('kapanis_tarihi');
     var kapAySel = document.getElementById('kapanis_ay_secim');
     var kapBorcAy = (mdVal === 'pasif' && kapAySel) ? kapanisSonrasiBorcAyDegeri(kapAySel.value) : null;
-    if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
+    if (mdVal === 'iptal') {
+        kapBorcAy = 0;
+        var gIso = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        if (kapInp && gIso) kapInp.value = gIso;
+        else if (kapInp && (!kapInp.value || !String(kapInp.value).trim())) kapInp.value = bugunISO();
+    } else if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
         kapInp.value = bugunISO();
     }
     if (typeof kapanisGirisFormKontrol === 'function' && !kapanisGirisFormKontrol({ alert: true })) {
@@ -20801,8 +20867,8 @@ async function kaydet(event) {
         ev_adres: document.getElementById('ev_adres').value,
         notes: document.getElementById('notes').value,
         durum: mdVal,
-        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
+        kapanis_tarihi: (kapInp && (mdVal === 'pasif' || mdVal === 'iptal')) ? kapInp.value : '',
+        kapanis_sonrasi_borc_ay: ((mdVal === 'pasif' || mdVal === 'iptal') && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         grup2_secimleri: (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [],
         bizim_hesap: (function () {
             var sl = (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [];
@@ -20815,8 +20881,8 @@ async function kaydet(event) {
         musteri_id: data.id,
         musteri_adi: aramaGuvenli ? aramaGuvenli.musteri_adi : (document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : ''),
         durum: mdVal,
-        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
+        kapanis_tarihi: (kapInp && (mdVal === 'pasif' || mdVal === 'iptal')) ? kapInp.value : '',
+        kapanis_sonrasi_borc_ay: ((mdVal === 'pasif' || mdVal === 'iptal') && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         sirket_unvani: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         vergi_no: vergiNo,
         vergi_dairesi: (function () {
