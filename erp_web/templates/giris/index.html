@@ -2960,7 +2960,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
     <div class="giris-secili-toolbar-actions">
         <label id="sozlesmeler-durum-filtre-wrap" class="giris-sozlesmeler-durum-filtre" style="display:none;align-items:center;gap:6px;color:#b0bec5;font-size:12px;white-space:nowrap;">
             Durum
-            <select id="sozlesmeler-durum-filtre" aria-label="Sözleşmeler durum filtresi" onchange="if(typeof musteriAra==='function')musteriAra();">
+            <select id="sozlesmeler-durum-filtre" aria-label="Sözleşmeler durum filtresi" onchange="if(typeof girisDurumFiltreDegisti==='function')girisDurumFiltreDegisti();else if(typeof musteriAra==='function')musteriAra();">
                 <option value="aktif" selected>Aktif</option>
                 <option value="pasif">Pasif</option>
                 <option value="hepsi">Hepsi</option>
@@ -26163,6 +26163,21 @@ function girisMusteriApiUrl(q) {
     }
     return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
 }
+function girisDurumFiltreDegisti() {
+    if (typeof musteriAra === 'function') musteriAra();
+    var nameEl = document.getElementById('name');
+    var nameDd = document.getElementById('sirket-unvani-dropdown');
+    var nameOpen = !!(nameDd && nameDd.style && nameDd.style.display === 'block');
+    if (typeof sirketUnvaniAutocomplete === 'function' && nameEl && (((nameEl.value || '').trim()) || nameOpen)) {
+        sirketUnvaniAutocomplete();
+    }
+    var maEl = document.getElementById('musteri_adi');
+    var maDd = document.getElementById('musteri-adi-dropdown');
+    var maOpen = !!(maDd && maDd.style && maDd.style.display === 'block');
+    if (typeof musteriAdiAutocomplete === 'function' && maEl && (((maEl.value || '').trim()) || maOpen)) {
+        musteriAdiAutocomplete();
+    }
+}
 function girisPasifleriDahilBind() {
     var el = document.getElementById('giris-pasifleri-dahil');
     if (!el || el._a2bound) return;
@@ -28973,7 +28988,7 @@ function sirketUnvaniAutocomplete() {
         }
         sirketUnvaniAutocompleteAbort = new AbortController();
         var qNow = (input.value || '').trim();
-        girisFetchAgKopmasinaKarsi('/giris/api/musteriler?q=' + encodeURIComponent(qNow), { credentials: 'same-origin', signal: sirketUnvaniAutocompleteAbort.signal }, 2)
+        girisFetchAgKopmasinaKarsi((typeof girisMusteriApiUrl === 'function' ? girisMusteriApiUrl(qNow) : ('/giris/api/musteriler?q=' + encodeURIComponent(qNow))), { credentials: 'same-origin', signal: sirketUnvaniAutocompleteAbort.signal }, 2)
             .then(function(r) {
                 return girisFetchJsonSafely(r);
             })
@@ -29182,7 +29197,7 @@ function musteriAdiAutocomplete() {
         musteriAdiAutocompleteAbort = new AbortController();
         var qNow = (input.value || '').trim();
         var req = null;
-        var qUrl = '/giris/api/musteriler?q=' + encodeURIComponent(qNow);
+        var qUrl = (typeof girisMusteriApiUrl === 'function') ? girisMusteriApiUrl(qNow) : ('/giris/api/musteriler?q=' + encodeURIComponent(qNow));
         if (typeof girisFetchJsonCached === 'function') {
             req = girisFetchJsonCached(qUrl, {
                 ttlMs: 15000,

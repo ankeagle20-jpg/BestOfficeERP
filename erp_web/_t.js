@@ -18181,9 +18181,29 @@ function girisPasifleriDahilAktif() {
 function girisMusteriApiUrl(q) {
     var params = [];
     if (q != null && String(q).length) params.push('q=' + encodeURIComponent(String(q)));
-    if (girisPasifleriDahilAktif()) params.push('pasifleri_dahil=1');
+    if (typeof sozlesmelerDurumFiltreAktifMi === 'function' && sozlesmelerDurumFiltreAktifMi()) {
+        params.push('durum=' + encodeURIComponent(sozlesmelerDurumFiltreDegeri()));
+    } else if (girisPasifleriDahilAktif()) {
+        params.push('pasifleri_dahil=1');
+    }
     return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
 }
+function girisDurumFiltreDegisti() {
+    if (typeof musteriAra === 'function') musteriAra();
+    var nameEl = document.getElementById('name');
+    var nameDd = document.getElementById('sirket-unvani-dropdown');
+    var nameOpen = !!(nameDd && nameDd.style && nameDd.style.display === 'block');
+    if (typeof sirketUnvaniAutocomplete === 'function' && nameEl && (((nameEl.value || '').trim()) || nameOpen)) {
+        sirketUnvaniAutocomplete();
+    }
+    var maEl = document.getElementById('musteri_adi');
+    var maDd = document.getElementById('musteri-adi-dropdown');
+    var maOpen = !!(maDd && maDd.style && maDd.style.display === 'block');
+    if (typeof musteriAdiAutocomplete === 'function' && maEl && (((maEl.value || '').trim()) || maOpen)) {
+        musteriAdiAutocomplete();
+    }
+}
+
 function girisPasifleriDahilBind() {
     var el = document.getElementById('giris-pasifleri-dahil');
     if (!el || el._a2bound) return;
@@ -20532,7 +20552,7 @@ function sirketUnvaniAutocomplete() {
         }
         sirketUnvaniAutocompleteAbort = new AbortController();
         var qNow = (input.value || '').trim();
-        girisFetchAgKopmasinaKarsi('/giris/api/musteriler?q=' + encodeURIComponent(qNow), { credentials: 'same-origin', signal: sirketUnvaniAutocompleteAbort.signal }, 2)
+        girisFetchAgKopmasinaKarsi((typeof girisMusteriApiUrl === 'function' ? girisMusteriApiUrl(qNow) : ('/giris/api/musteriler?q=' + encodeURIComponent(qNow))), { credentials: 'same-origin', signal: sirketUnvaniAutocompleteAbort.signal }, 2)
             .then(function(r) {
                 return girisFetchJsonSafely(r);
             })
@@ -20737,7 +20757,7 @@ function musteriAdiAutocomplete() {
         musteriAdiAutocompleteAbort = new AbortController();
         var qNow = (input.value || '').trim();
         var req = null;
-        var qUrl = '/giris/api/musteriler?q=' + encodeURIComponent(qNow);
+        var qUrl = (typeof girisMusteriApiUrl === 'function') ? girisMusteriApiUrl(qNow) : ('/giris/api/musteriler?q=' + encodeURIComponent(qNow));
         if (typeof girisFetchJsonCached === 'function') {
             req = girisFetchJsonCached(qUrl, {
                 ttlMs: 15000,
