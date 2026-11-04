@@ -27,6 +27,9 @@ from odeme_linki import (
     link_wa_gonderilebilir,
     mask_ad,
     normalize_wa_telefon,
+    odeme_linki_create_guard_musteri,
+    odeme_linki_kalan_gosterim,
+    odeme_linki_kalan_uygun,
     ofis_imzasi,
     ozellik_acik,
     public_odeme_base,
@@ -248,16 +251,23 @@ def api_kalan():
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı"}), 404
     try:
-        kalan = ekstre_kalan(mid)
+        kalan_raw = ekstre_kalan(mid)
     except Exception:
         logger.exception("odeme linki kalan")
-        kalan = 0.0
-    if kalan < 0:
-        kalan = 0.0
+        kalan_raw = 0.0
+    # Gösterim: eksi→0 herkeste (HEAD). Create engeli yalnız kapanışlı/iptal.
+    kalan = odeme_linki_kalan_gosterim(kalan_raw)
+    guard = odeme_linki_create_guard_musteri(mid)
+    if guard:
+        uygun = odeme_linki_kalan_uygun(kalan_raw)
+    else:
+        uygun = True  # aktif / kapanışsız: HEAD — tutar serbest
     return jsonify(
         {
             "ok": True,
             "tutar": kalan,
+            "link_uygun": uygun,
+            "borc_yok": bool(guard and not uygun),
             "ad": cust.get("name") or "",
             "kisiler": _wa_kisiler(mid),
         }
@@ -310,6 +320,22 @@ def api_link():
         return jsonify({"ok": False, "mesaj": "Müşteri, tutar ve süre gerekli"}), 400
     if not _musteri(mid):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı"}), 404
+    # Kalan≤0 create engeli yalnız kapanışlı/iptal (aktif peşin/avans HEAD gibi serbest).
+    if odeme_linki_create_guard_musteri(mid):
+        try:
+            kalan_raw = float(ekstre_kalan(mid) or 0)
+        except Exception:
+            logger.exception("odeme linki create kalan")
+            kalan_raw = 0.0
+        if not odeme_linki_kalan_uygun(kalan_raw):
+            return jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Borç bulunmadığı için ödeme linki oluşturulamaz",
+                    "link_uygun": False,
+                    "borc_yok": True,
+                }
+            ), 400
     soz = data.get("sozlesme_id")
     try:
         sozlesme_id = int(soz) if soz not in (None, "") else None

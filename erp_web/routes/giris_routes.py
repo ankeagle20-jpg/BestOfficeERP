@@ -13774,6 +13774,7 @@ def _ekstre_acilis_bakiyesi_fifo(
     musteri_id=None,
     post_bit_mahsup=False,
     bit_iso_cmp=None,
+    force_mahsup_ids=None,
 ):
     """Dönem başlangıcı öncesi net bakiye: FIFO ile bas öncesi ödemeler mahsup edilir.
 
@@ -13784,6 +13785,9 @@ def _ekstre_acilis_bakiyesi_fifo(
     post_bit_mahsup=True (kapanışlı, bit son borç ayına kırpılmış): görüntü tarihi
     bit'ten sonra olan ödemeler de need'e FIFO mahsup edilir; açılış = kalan
     pre_months. Dönem içi (bas..bit) ödemeler yine dönem satırında kalır.
+
+    force_mahsup_ids: bit uzatılınca dönem içinde satır/FIFO etkisi olmayan
+    tavan-sonrası (peel edilmeyen) tahsilat id'leri — açılışta yine mahsup.
     """
     if not isinstance(full_borc_for_fifo, dict):
         return 0.0
@@ -13796,6 +13800,14 @@ def _ekstre_acilis_bakiyesi_fifo(
         for iso in month_order_all
     }
     bit_cmp = str(bit_iso_cmp or "")[:10]
+    _force_ids = set()
+    for _x in force_mahsup_ids or []:
+        try:
+            _xi = int(_x)
+        except (TypeError, ValueError):
+            continue
+        if _xi > 0:
+            _force_ids.add(_xi)
     # Dönem içi sınıflandırma ile aynı: kendi satır → general; grid_toplu/TAH → marker.
     marker_pays = []
     general_pays = []
@@ -13815,14 +13827,23 @@ def _ekstre_acilis_bakiyesi_fifo(
     def _fifo_pay_alloc_open(pr, restrict_marker_months=False):
         # Görüntü tarihi < bas → Devreden; bas..bit → dönem satırı; bit sonrası →
         # yalnız post_bit_mahsup ile açılış need'ine (kendi satır yok).
+        # force_mahsup_ids: tavan-sonrası yetim (satır/FIFO yok) yine açılış.
         goruntu = _ekstre_satir_goruntu_tarihi(pr)
         if not goruntu or goruntu < floor_pay:
             return
         if goruntu >= str(bas_iso_cmp):
+            try:
+                _pid_f = int(pr.get("id") or 0)
+            except (TypeError, ValueError):
+                _pid_f = 0
+            _force = bool(_pid_f and _pid_f in _force_ids)
             if not (
-                post_bit_mahsup
-                and bit_cmp
-                and goruntu > bit_cmp
+                (
+                    post_bit_mahsup
+                    and bit_cmp
+                    and goruntu > bit_cmp
+                )
+                or _force
             ):
                 return
         try:
@@ -14900,6 +14921,63 @@ def _cari_ekstre_hareketler(
             else:
                 general_pays.append(pr)
 
+        # Kapanış tavanı sonrası gerçek ödeme günü: ayrı satır (FIFO Tahsilat B'de ikinci kez yok).
+        tavan_bit_iso = None
+        if _son_borc_fifo is not None:
+            try:
+                _tv = _ekstre_ay_sonu(_son_borc_fifo.year, _son_borc_fifo.month)
+                tavan_bit_iso = _tv.isoformat()
+            except Exception:
+                tavan_bit_iso = None
+
+        def _pay_tahsil_iso(pr0) -> str:
+            return str(
+                pr0.get("tahsilat_tarihi") or pr0.get("tarih") or ""
+            )[:10]
+
+        def _is_post_tavan_pay(pr0) -> bool:
+            """Ödeme günü tavan sonrası; ve (markersız veya en az bir marker ≤ tavan).
+
+            Yalnız tavan sonrası marker'ı olan (kira satırı olmayan ay) ödemeler
+            peel edilmez — aksi halde bakiyeyi şişiren hayalet alacak satırı doğar.
+            """
+            if not tavan_bit_iso or _son_borc_fifo is None:
+                return False
+            td = _pay_tahsil_iso(pr0)
+            if not (td and td > tavan_bit_iso):
+                return False
+            ac_m = str(pr0.get("tahsilat_aciklama") or pr0.get("aciklama") or "")
+            raw_m = re.findall(
+                r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac_m
+            )
+            raw_m += [
+                m
+                for m, _t in re.findall(
+                    r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|",
+                    ac_m,
+                )
+            ]
+            if not raw_m:
+                return True
+            son_ym = (_son_borc_fifo.year, _son_borc_fifo.month)
+            for iso_raw in raw_m:
+                try:
+                    dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                if (dd.year, dd.month) <= son_ym:
+                    return True
+            return False
+
+        post_tavan_pays = []
+        if tavan_bit_iso:
+            _mk2, _gn2 = [], []
+            for pr in marker_pays:
+                (post_tavan_pays if _is_post_tavan_pay(pr) else _mk2).append(pr)
+            for pr in general_pays:
+                (post_tavan_pays if _is_post_tavan_pay(pr) else _gn2).append(pr)
+            marker_pays, general_pays = _mk2, _gn2
+
         def _fifo_pay_alloc(pr, restrict_marker_months=False):
             es = str(pr.get("eslesme_tarihi") or "")[:10]
             if not es or es < floor_pay or es > bit_iso_cmp:
@@ -15014,13 +15092,20 @@ def _cari_ekstre_hareketler(
         # aynı makbuzla çift sayılmasın; kendi satır yine yazılır, filtre atlar.
         for pr in direct_pays:
             _fifo_pay_alloc(pr, restrict_marker_months=False)
-        # Serbest makbuzlar direkt satır (dönem dışı: açılış FIFO + Devreden'de; tekil satır ekleme)
+        # Tavan sonrası: need FIFO (bakiye/hizalama) + kendi satır; ay Tahsilat B
+        # direct_pay_ids ile ikinci kez üretilmez.
+        for pr in post_tavan_pays:
+            _fifo_pay_alloc(pr, restrict_marker_months=False)
+        # Serbest makbuzlar + tavan-sonrası: direkt satır (dönem dışı → açılış mahsubu)
         direct_pay_ids: set[int] = set()
         direct_pays_yazilan: list = []
-        for pr in direct_pays:
+
+        def _ekstre_kendi_tahsil_satir_yaz(pr, *, log_tag: str) -> None:
             logging.getLogger(__name__).warning(
-                "direct_pay: id=%s tutar=%s aciklama=%s",
-                pr.get("id"), pr.get("tutar"),
+                "%s: id=%s tutar=%s aciklama=%s",
+                log_tag,
+                pr.get("id"),
+                pr.get("tutar"),
                 pr.get("tahsilat_aciklama"),
             )
             t_tarih = str(pr.get("tahsilat_tarihi") or pr.get("tarih") or "")[:10]
@@ -15029,13 +15114,15 @@ def _cari_ekstre_hareketler(
             except Exception:
                 t_dt = None
             if t_dt is None or t_dt < bas or t_dt > bit:
-                continue
+                return
             t_tutar = round(float(pr.get("tutar") or 0), 2)
             if t_tutar <= tol_f:
-                continue
+                return
             t_aciklama_raw = (pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
             t_aciklama = _tahsilat_aciklama_aylik_okunabilir(t_aciklama_raw)
-            t_belge = (pr.get("belge_no") or pr.get("makbuz_no") or f"Makbuz-{pr.get('id')}")
+            t_belge = (
+                pr.get("belge_no") or pr.get("makbuz_no") or f"Makbuz-{pr.get('id')}"
+            )
             try:
                 _dp_id = int(pr.get("id") or 0)
             except (TypeError, ValueError):
@@ -15043,21 +15130,66 @@ def _cari_ekstre_hareketler(
             if _dp_id > 0:
                 direct_pay_ids.add(_dp_id)
             direct_pays_yazilan.append(pr)
-            rows.append({
-                "tarih": t_tarih,
-                "aciklama": t_aciklama,
-                "belge_no": str(t_belge),
-                "tur": "Tahsilat",
-                "borc": 0,
-                "alacak": t_tutar,
-                "bakiye": None,
-                "tahsilat_ids": [pr.get("id")],
-            })
+            rows.append(
+                {
+                    "tarih": t_tarih,
+                    "aciklama": t_aciklama,
+                    "belge_no": str(t_belge),
+                    "tur": "Tahsilat",
+                    "borc": 0,
+                    "alacak": t_tutar,
+                    "bakiye": None,
+                    "tahsilat_ids": [pr.get("id")],
+                }
+            )
+
+        for pr in direct_pays:
+            _ekstre_kendi_tahsil_satir_yaz(pr, log_tag="direct_pay")
+        for pr in post_tavan_pays:
+            _ekstre_kendi_tahsil_satir_yaz(pr, log_tag="post_tavan_pay")
         direct_pay_marker_isos = _ekstre_direct_pay_marker_isos(direct_pays_yazilan)
+        # Dönemde kendi satır yazılan tavan-sonrası ödeme açılışa tekrar mahsup edilmesin
+        # (aksi halde marker ayları + gerçek tarih satırı çift sayılır).
+        _acilis_pays = pays_fifo
+        if direct_pay_ids:
+            _acilis_pays = []
+            for _pr_a in pays_fifo or []:
+                try:
+                    _pid_a = int(_pr_a.get("id") or 0)
+                except (TypeError, ValueError):
+                    _pid_a = 0
+                if _pid_a > 0 and _pid_a in direct_pay_ids:
+                    continue
+                _acilis_pays.append(_pr_a)
+        # Bit tavanın ötesine uzayınca: peel edilmeyen (yalnız tavan-sonrası marker)
+        # ödemeler dönem FIFO/satırda etkisiz kalır; açılışta zorla mahsup et.
+        _fifo_tid_set: set[int] = set()
+        for _ids_f in (fifo_ids or {}).values():
+            for _t_f in _ids_f or []:
+                try:
+                    _ti = int(_t_f)
+                except (TypeError, ValueError):
+                    continue
+                if _ti > 0:
+                    _fifo_tid_set.add(_ti)
+        _force_mahsup_ids: set[int] = set()
+        if tavan_bit_iso and _son_borc_fifo is not None:
+            for _pr_o in pays_fifo or []:
+                try:
+                    _oid = int(_pr_o.get("id") or 0)
+                except (TypeError, ValueError):
+                    _oid = 0
+                if _oid <= 0 or _oid in direct_pay_ids or _oid in _fifo_tid_set:
+                    continue
+                _td_o = str(
+                    _pr_o.get("tahsilat_tarihi") or _pr_o.get("tarih") or ""
+                )[:10]
+                if _td_o and _td_o > tavan_bit_iso:
+                    _force_mahsup_ids.add(_oid)
         acilis_fifo = _ekstre_acilis_bakiyesi_fifo(
             full_borc_for_fifo,
             dev_cutoff_iso,
-            pays_fifo,
+            _acilis_pays,
             floor_pay,
             tol=tol_f,
             batch_maps=ekstre_batch_maps,
@@ -15065,6 +15197,7 @@ def _cari_ekstre_hareketler(
             musteri_id=musteri_id,
             post_bit_mahsup=(_son_borc_fifo is not None),
             bit_iso_cmp=bit_iso_cmp,
+            force_mahsup_ids=_force_mahsup_ids,
         )
         dev_borc_r, dev_alacak_r = _ekstre_devreden_satir_toplamlari(
             full_borc_for_fifo,
@@ -15804,6 +15937,37 @@ def _ekstre_ay_sonu(yil: int, ay: int) -> date:
     return date(int(yil), int(ay), int(son))
 
 
+def _ekstre_son_tahsilat_hareket_tarihi(musteri_id: int) -> date | None:
+    """Müşterinin en son tahsilat_tarihi (gün). Yoksa None."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    if mid <= 0:
+        return None
+    row = fetch_one(
+        """
+        SELECT MAX(tahsilat_tarihi::date) AS d
+        FROM tahsilatlar
+        WHERE (musteri_id = %s OR customer_id = %s)
+          AND COALESCE(tutar, 0) > 0
+          AND tahsilat_tarihi IS NOT NULL
+        """,
+        (mid, mid),
+    )
+    d = (row or {}).get("d")
+    if isinstance(d, datetime):
+        return d.date()
+    if isinstance(d, date):
+        return d
+    if d:
+        try:
+            return datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return None
+
+
 def _ekstre_son_tahsil_marker_ayi(musteri_id: int) -> date | None:
     """Tahsilatlardaki en ileri |AYLIK_TAH| / |AYLIK_PAY| marker ayı (ayın 1'i).
 
@@ -16021,9 +16185,19 @@ def _cari_ekstre_varsayilan_bas_bit(musteri_id: int) -> tuple[date, date]:
         bit = _ekstre_tarih_gunu(son_ay.year, son_ay.month, gun)
     son_borc = kira_son_borc_ayi(kyc)
     if isinstance(son_borc, date):
+        # Kira tavanı ay sonu; kapanış sonrası tahsilat varsa bit oraya uzar (borç satırı yine tavanda).
         bit_cap = _ekstre_ay_sonu(son_borc.year, son_borc.month)
         if bit > bit_cap:
             bit = bit_cap
+        try:
+            son_tah = _ekstre_son_tahsilat_hareket_tarihi(int(musteri_id))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "ekstre varsayilan son tahsilat mid=%s", musteri_id
+            )
+            son_tah = None
+        if isinstance(son_tah, date) and son_tah > bit:
+            bit = son_tah
     if bas > bit:
         bas = bit
     return bas, bit
@@ -16081,7 +16255,17 @@ def _cari_ekstre_build_payload_from_request():
         if str(cust_durum).strip().lower() == "pasif":
             cap = _aylik_grid_effective_bitis(kyc, def_bit)
             if isinstance(cap, date):
-                def_bit = min(def_bit, cap - timedelta(days=1))
+                tavan_end = cap - timedelta(days=1)
+                if def_bit > tavan_end:
+                    # Tavan altına çek; son tahsilat tavan sonrasıysa o güne kadar koru.
+                    try:
+                        son_tah = _ekstre_son_tahsilat_hareket_tarihi(int(musteri_id))
+                    except Exception:
+                        son_tah = None
+                    limit = tavan_end
+                    if isinstance(son_tah, date) and son_tah > tavan_end:
+                        limit = son_tah
+                    def_bit = min(def_bit, limit)
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
         bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit

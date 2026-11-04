@@ -411,6 +411,54 @@ def ekstre_kalan(musteri_id: int) -> float:
         return 0.0
 
 
+def odeme_linki_kalan_uygun(kalan) -> bool:
+    """Pozitif ekstre bakiyesi var mı (eksi/0 = borç yok)."""
+    try:
+        return round(float(kalan or 0), 2) > 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def odeme_linki_kalan_gosterim(kalan) -> float:
+    """API/UI tutarı: eksi bakiye 0'a kıskaç (HEAD ile aynı; her müşteri)."""
+    try:
+        v = round(float(kalan or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if v > 0.0 else 0.0
+
+
+def odeme_linki_create_guard_musteri(musteri_id: int) -> bool:
+    """Create kalan≤0 engeli yalnız kapanışlı (pasif+kapanış) veya iptal müşteride.
+
+    Aktif ve kapanışsız pasifte HEAD gibi tutar serbest (peşin/avans/manuel).
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    row = fetch_one(
+        """
+        SELECT LOWER(TRIM(COALESCE(durum, ''))) AS durum,
+               kapanis_tarihi,
+               COALESCE(iptal, FALSE) AS iptal
+        FROM customers
+        WHERE id = %s
+        """,
+        (mid,),
+    )
+    if not row:
+        return False
+    if bool(row.get("iptal")):
+        return True
+    durum = str(row.get("durum") or "").strip().lower()
+    if durum == "pasif" and row.get("kapanis_tarihi") is not None:
+        return True
+    return False
+
+
 def _olay(cur, link_id: int, olay: str, merchant_oid: str, gelen: str) -> None:
     cur.execute(
         """
