@@ -1109,6 +1109,86 @@ def _iptal_musteri_islem_red_json(musteri_id):
     return True, None
 
 
+KAPANIS_SONRASI_AY_MESAJ = "Kapanış sonrası aylar için işlem yapılamaz."
+IPTAL_PANEL_MESAJ = "Sözleşme iptal edildi: aylık borç oluşmaz."
+
+
+def _panel_by_iso_cap_kirp_okuma(musteri_id, by_iso) -> dict:
+    """Okuma kırpma — disk yazmaz. İptal → {}; cap sonrası ISO düşer; cap yoksa aynen."""
+    if not isinstance(by_iso, dict):
+        return {}
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return dict(by_iso)
+    if mid <= 0:
+        return dict(by_iso)
+    if _musteri_sozlesme_iptal_mi(mid):
+        return {}
+    son, _kyc = _aylik_grid_son_borc_for_mid(mid)
+    if son is None:
+        return dict(by_iso)
+    out = {}
+    for iso, cell in by_iso.items():
+        if str(iso).startswith("__"):
+            out[iso] = cell
+            continue
+        try:
+            d = date.fromisoformat(str(iso)[:10]).replace(day=1)
+        except Exception:
+            continue
+        if d <= son:
+            out[iso] = cell
+    return out
+
+
+def _kapanis_cap_sonrasi_satir_red(musteri_id, satirlar):
+    """Cap sonrası ay varsa (False, 400-yanıt); yoksa / cap yoksa (True, None)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return True, None
+    son, _kyc = _aylik_grid_son_borc_for_mid(mid)
+    if son is None:
+        return True, None
+    for raw in satirlar or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            yil = int(raw.get("yil"))
+            ay = int(raw.get("ay"))
+            ay_bir = date(yil, ay, 1)
+        except (TypeError, ValueError):
+            continue
+        if ay_bir > son:
+            return False, (
+                jsonify({"ok": False, "mesaj": KAPANIS_SONRASI_AY_MESAJ}),
+                400,
+            )
+    return True, None
+
+
+def _tahsilat_panel_detay_okuma_yaniti(mid, by_iso):
+    """GET/POST yanıt: iptal boş+mesaj; kapanışlıda cap kırp (disk yazılmaz)."""
+    if _musteri_sozlesme_iptal_mi(mid):
+        return _json_no_cache(
+            {
+                "ok": True,
+                "by_iso": {},
+                "musteri_id": mid,
+                "iptal": True,
+                "iptal_mesaj": IPTAL_PANEL_MESAJ,
+            }
+        )
+    return _json_no_cache(
+        {
+            "ok": True,
+            "by_iso": _panel_by_iso_cap_kirp_okuma(mid, by_iso or {}),
+            "musteri_id": mid,
+        }
+    )
+
+
 def _aylik_grid_payload_iptal_stamp(musteri_id, payload: dict | None) -> dict:
     """İptal müşteri: boş aylar + bayrak (FE canlı rebuild yapmasın)."""
     out = dict(payload or {})
@@ -6670,7 +6750,11 @@ def index():
         js_surum = js_surum or ""
         wa_surum = wa_surum or ""
         tahsilat_wa_surum = tahsilat_wa_surum or ""
-    from kira_kapanis_cap import n0_kapanis_ayi_haric_aktif, n_kapanis_ayi_dahil_efektif
+    from kira_kapanis_cap import (
+        hepsi_sozlesme_yili_aktif,
+        n0_kapanis_ayi_haric_aktif,
+        n_kapanis_ayi_dahil_efektif,
+    )
 
     return render_template(
         'giris/index.html',
@@ -6683,6 +6767,7 @@ def index():
         kira_nakit_oranli_artis=kira_nakit_oranli_artis_aktif(),
         kapanis_n0_kapanis_ayi_haric=n0_kapanis_ayi_haric_aktif(),
         kapanis_n_kapanis_ayi_dahil=n_kapanis_ayi_dahil_efektif(),
+        kapanis_hepsi_sozlesme_yili=hepsi_sozlesme_yili_aktif(),
     )
 
 
@@ -16627,6 +16712,9 @@ def api_aylik_tutarlardan_borclandir():
     satirlar = data.get("satirlar")
     if not isinstance(satirlar, list) or not satirlar:
         return jsonify({"ok": False, "mesaj": "En az bir ay satırı gerekli."}), 400
+    ok_cap, red_cap = _kapanis_cap_sonrasi_satir_red(musteri_id, satirlar)
+    if not ok_cap:
+        return red_cap
 
     KDV_ORAN = 20.0
     raw_nakit = data.get("kira_nakit")
@@ -17085,6 +17173,9 @@ def api_aylik_tutarlardan_tahsil_et():
     satirlar = data.get("satirlar")
     if not isinstance(satirlar, list) or not satirlar:
         return jsonify({"ok": False, "mesaj": "En az bir ay satırı gerekli."}), 400
+    ok_cap, red_cap = _kapanis_cap_sonrasi_satir_red(musteri_id, satirlar)
+    if not ok_cap:
+        return red_cap
 
     varsayilan_tahsilat_tarihi = date.today()
     raw_tarih = (data.get("tahsilat_tarihi") or "").strip()
@@ -20363,18 +20454,20 @@ def api_tahsilat_panel_detay():
         else:
             _upsert_aylik_grid_cache(mid)
         by_iso = _load_musteri_panel_by_iso(mid)
-        return _json_no_cache({"ok": True, "by_iso": by_iso, "musteri_id": mid})
+        return _tahsilat_panel_detay_okuma_yaniti(mid, by_iso)
 
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
+    if _musteri_sozlesme_iptal_mi(mid):
+        return _tahsilat_panel_detay_okuma_yaniti(mid, {})
     # KYC işareti: formül aynı, yalnız bu okumada mevcut resync çalışır.
     if _panel_bayat_isaretli_mi(mid):
         tahsilat_degisti(mid)
     by_iso = _load_musteri_panel_by_iso(mid)
     if by_iso:
-        return _json_no_cache({"ok": True, "by_iso": by_iso, "musteri_id": mid})
+        return _tahsilat_panel_detay_okuma_yaniti(mid, by_iso)
     payload = _read_aylik_grid_cache_payload(mid)
     if payload is None:
         try:
@@ -20418,7 +20511,7 @@ def api_tahsilat_panel_detay():
                 if changed:
                     _save_musteri_panel_by_iso(mid, merged)
                     by_iso = merged
-    return _json_no_cache({"ok": True, "by_iso": by_iso or {}, "musteri_id": mid})
+    return _tahsilat_panel_detay_okuma_yaniti(mid, by_iso or {})
 
 
 @bp.route('/api/aylik-tahsil-durum')

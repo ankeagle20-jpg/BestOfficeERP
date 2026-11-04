@@ -10314,6 +10314,100 @@ function sozlesmelerAylikIptalUiUygula(iptalMi) {
             b.disabled = false;
         }
     });
+    if (typeof girisPanellerIptalUygula === 'function') girisPanellerIptalUygula(iptalMi);
+}
+/** Borçlandırma + tahsilat panelleri: iptalde boş + mesaj, butonlar gizli. */
+function girisPanellerIptalUygula(iptalMi) {
+    var msg = 'Sözleşme iptal edildi: aylık borç oluşmaz.';
+    ['aylik_kira_yil_panel', 'tahsilat_yil_panel'].forEach(function (id) {
+        var p = document.getElementById(id);
+        if (!p) return;
+        if (iptalMi) {
+            p.innerHTML = '<div style="padding:10px 8px;color:#ef9a9a;font-size:12px;">' + msg + '</div>';
+            p.style.display = 'none';
+        }
+    });
+    ['aylik_kira_yil_select', 'tahsilat_yil_select'].forEach(function (sid) {
+        var sel = document.getElementById(sid);
+        if (!sel) return;
+        if (iptalMi) {
+            sel.innerHTML = '<option value="">—</option>';
+            sel.disabled = true;
+            sel.value = '';
+        }
+    });
+    ['aylik_kira_yil_btn', 'tahsilat_yil_btn'].forEach(function (bid) {
+        var btn = document.getElementById(bid);
+        if (!btn) return;
+        if (iptalMi) {
+            if (btn.getAttribute('data-iptal-prev-display') == null) {
+                btn.setAttribute('data-iptal-prev-display', btn.style.display || '');
+            }
+            btn.style.display = 'none';
+            btn.disabled = true;
+        } else {
+            var prevB = btn.getAttribute('data-iptal-prev-display');
+            if (prevB != null) {
+                btn.style.display = prevB;
+                btn.removeAttribute('data-iptal-prev-display');
+            }
+            btn.disabled = false;
+        }
+    });
+}
+/** Kapanış/cap dışlayıcı sınır (grid ile aynı efektif bitiş). */
+function girisPanelCapExclusiveDate() {
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var bitEl = document.getElementById('sozlesme_bitis');
+    var basStr = basEl && basEl.value ? String(basEl.value).trim() : '';
+    var bitStr = bitEl && bitEl.value ? String(bitEl.value).trim().slice(0, 10) : '';
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!basStr && sco && sco.baslangic) basStr = String(sco.baslangic).trim();
+    if (!bitStr && sco && sco.bitis) bitStr = String(sco.bitis).trim().slice(0, 10);
+    var opts = {
+        durum: (document.getElementById('musteri_durum') || {}).value || '',
+        kapanis_tarihi: (document.getElementById('kapanis_tarihi') || {}).value || '',
+        kapanis_sonrasi_borc_ay: (typeof formKapanisSonrasiBorcAy === 'function') ? formKapanisSonrasiBorcAy() : null,
+        iptal: (typeof girisFormMusteriIptalMi === 'function') ? girisFormMusteriIptalMi() : false
+    };
+    if (typeof sozlesmeAylikEfektifBitisTarihi !== 'function') return null;
+    return sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts);
+}
+/** Ay anahtarlarını grid ayları ve/veya cap ile sınırla. */
+function girisPanelAyKeysCapFiltre(keys) {
+    if (!keys || !keys.length) return keys || [];
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) return [];
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (sco && Array.isArray(sco.aylar) && sco.aylar.length) {
+        var allow = {};
+        sco.aylar.forEach(function (a) {
+            if (!a || typeof a !== 'object') return;
+            var ak = (typeof sozlesmeAylikAyKeyFromYilAy === 'function')
+                ? sozlesmeAylikAyKeyFromYilAy(a.yil, a.ay) : (a.yil + '-' + a.ay);
+            if (ak) allow[String(ak)] = true;
+        });
+        var fromGrid = [];
+        for (var i = 0; i < keys.length; i++) {
+            if (allow[String(keys[i])]) fromGrid.push(keys[i]);
+        }
+        var ySet = {};
+        keys.forEach(function (ak) {
+            var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ak) : null;
+            if (ya && !isNaN(ya.yil)) ySet[ya.yil] = true;
+        });
+        var gridHitsYear = sco.aylar.some(function (a) {
+            return ySet[parseInt(a.yil, 10)];
+        });
+        if (gridHitsYear || fromGrid.length) return fromGrid;
+    }
+    var cap = girisPanelCapExclusiveDate();
+    if (!cap || isNaN(cap.getTime())) return keys;
+    var capIso = (typeof tarihISOYerel === 'function') ? tarihISOYerel(cap) : '';
+    if (!capIso) return keys;
+    return keys.filter(function (ak) {
+        var iso = (typeof girisTahsilatYilAyIsoOneri === 'function') ? girisTahsilatYilAyIsoOneri(ak) : '';
+        return iso && iso < capIso;
+    });
 }
 
 function sozlesmelerAylikIptalBosGoster() {
@@ -10358,6 +10452,22 @@ function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
         else if (n0Haric && nDahil && ekAy >= 1) delta = ekAy - 1;
         var sinir = new Date(kap.getFullYear(), kap.getMonth() + delta + 1, 1);
         if (!bit || isNaN(bit.getTime()) || sinir < bit) bit = sinir;
+    } else if (durum === 'pasif' && kap && !isNaN(kap.getTime()) && (ekAy === null || ekAy === undefined) && window.KAPANIS_HEPSI_SOZLESME_YILI) {
+        /* Hepsi+bayrak: sunucu hepsi_sozlesme_yili_son_borc_ayi → dışlayıcı = son+1. */
+        var gIsoH = (typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '';
+        var gH = gIsoH ? (parseTarihStr(gIsoH) || new Date(gIsoH)) : null;
+        if (gH && !isNaN(gH.getTime())) {
+            var anchor = gH.getMonth() + 1;
+            var yearEndM = (anchor === 1) ? 12 : (anchor - 1);
+            var kM = kap.getMonth() + 1;
+            var deltaH;
+            if (kM === yearEndM) deltaH = 0;
+            else if (kM < yearEndM) deltaH = yearEndM - kM;
+            else deltaH = 12 - kM + yearEndM;
+            var sonH = new Date(kap.getFullYear(), kap.getMonth() + deltaH, 1);
+            var sinirH = new Date(sonH.getFullYear(), sonH.getMonth() + 1, 1);
+            if (!bit || isNaN(bit.getTime()) || sinirH < bit) bit = sinirH;
+        }
     }
     return (bit && !isNaN(bit.getTime())) ? bit : null;
 }
@@ -12508,6 +12618,9 @@ function girisAylikKiraToplamGuncelle() {
     } catch (_eTpGrid) {}
 }
 function girisAylikSatirYilYilListesi() {
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
+        return { yStart: NaN, yEnd: NaN, years: [] };
+    }
     var basEl = document.getElementById('sozlesme_baslangic');
     var v = basEl && basEl.value ? basEl.value.trim() : '';
     if (!v) return { yStart: NaN, yEnd: NaN, years: [] };
@@ -12538,6 +12651,29 @@ function girisAylikSatirYilYilListesi() {
             }
             years = yearsF;
             if (years.length) yEnd = years[years.length - 1];
+        }
+    }
+    /* Cap: grid ayları ve/veya efektif kapanış sınırı (cap yılı dahil, sonrası yok). */
+    var scoY = window.__sozlesmelerAylikSonCacheObj;
+    if (scoY && Array.isArray(scoY.aylar) && scoY.aylar.length) {
+        var yMaxG = null;
+        scoY.aylar.forEach(function (a) {
+            var yi = parseInt(a && a.yil, 10);
+            if (!isNaN(yi) && (yMaxG == null || yi > yMaxG)) yMaxG = yi;
+        });
+        if (yMaxG != null) {
+            years = years.filter(function (y) { return y <= yMaxG; });
+            if (years.length) yEnd = years[years.length - 1];
+            else return { yStart: yStart, yEnd: yStart, years: [] };
+        }
+    } else if (typeof girisPanelCapExclusiveDate === 'function') {
+        var capEx = girisPanelCapExclusiveDate();
+        if (capEx && !isNaN(capEx.getTime())) {
+            var lastInc = new Date(capEx.getFullYear(), capEx.getMonth() - 1, 1);
+            var yCap = lastInc.getFullYear();
+            years = years.filter(function (y) { return y <= yCap; });
+            if (years.length) yEnd = years[years.length - 1];
+            else return { yStart: yStart, yEnd: yStart, years: [] };
         }
     }
     return { yStart: yStart, yEnd: yEnd, years: years };
@@ -14656,6 +14792,9 @@ function girisTahsilatYilAyKeysFiltered(donemYil) {
             return iso && iso <= bitStr;
         });
     }
+    if (typeof girisPanelAyKeysCapFiltre === 'function') {
+        keys = girisPanelAyKeysCapFiltre(keys);
+    }
     return keys;
 }
 function girisTahsilatAyKeyToYilAy(ayKey) {
@@ -15639,31 +15778,40 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
                 ? selectedMusteriId
                 : (document.getElementById('selected_musteri_id') || {}).value || '');
         } catch (_eMk) {}
-        var keysCacheKey = String(yilNum) + '|' + sunMidK;
+        var keysCacheKey = String(yilNum) + '|' + sunMidK + '|cap';
         var cached = (window.__tahsilPanelKeysCache || {})[keysCacheKey];
         if (cached && cached.length) return cached.slice(0, 12);
         var keysOut = [];
-        var basElFk = document.getElementById('sozlesme_baslangic');
-        var basFk = basElFk && basElFk.value ? String(basElFk.value).trim() : '';
-        if (!basFk) {
-            var scoFk0 = window.__sozlesmelerAylikSonCacheObj;
-            if (scoFk0 && scoFk0.baslangic) basFk = String(scoFk0.baslangic).trim();
-        }
-        if (basFk && typeof sozlesmeReelDonemAyKeys === 'function') {
-            keysOut = sozlesmeReelDonemAyKeys(basFk, yilNum) || [];
+        /* Önce grid ayları (cap ile hizalı); yoksa reel dönem → cap filtre. */
+        if (typeof girisTahsilatYilAyKeysFiltered === 'function') {
+            keysOut = girisTahsilatYilAyKeysFiltered(yilNum) || [];
         }
         if (!keysOut.length) {
-            var scoIso = window.__sozlesmelerAylikSonCacheObj;
-            var byIsoK = (scoIso && scoIso.panel_by_iso) ? scoIso.panel_by_iso : {};
-            var yyK = parseInt(yilNum, 10);
-            if (!isNaN(yyK)) {
-                for (var mK = 1; mK <= 12; mK++) {
-                    var isoK = yyK + '-' + String(mK).padStart(2, '0') + '-01';
-                    if (!byIsoK[isoK]) continue;
-                    var akK = (typeof sozlesmeAylikAyKeyFromYilAy === 'function')
-                        ? sozlesmeAylikAyKeyFromYilAy(yyK, mK) : (yyK + '-' + mK);
-                    if (akK) keysOut.push(akK);
+            var basElFk = document.getElementById('sozlesme_baslangic');
+            var basFk = basElFk && basElFk.value ? String(basElFk.value).trim() : '';
+            if (!basFk) {
+                var scoFk0 = window.__sozlesmelerAylikSonCacheObj;
+                if (scoFk0 && scoFk0.baslangic) basFk = String(scoFk0.baslangic).trim();
+            }
+            if (basFk && typeof sozlesmeReelDonemAyKeys === 'function') {
+                keysOut = sozlesmeReelDonemAyKeys(basFk, yilNum) || [];
+            }
+            if (!keysOut.length) {
+                var scoIso = window.__sozlesmelerAylikSonCacheObj;
+                var byIsoK = (scoIso && scoIso.panel_by_iso) ? scoIso.panel_by_iso : {};
+                var yyK = parseInt(yilNum, 10);
+                if (!isNaN(yyK)) {
+                    for (var mK = 1; mK <= 12; mK++) {
+                        var isoK = yyK + '-' + String(mK).padStart(2, '0') + '-01';
+                        if (!byIsoK[isoK]) continue;
+                        var akK = (typeof sozlesmeAylikAyKeyFromYilAy === 'function')
+                            ? sozlesmeAylikAyKeyFromYilAy(yyK, mK) : (yyK + '-' + mK);
+                        if (akK) keysOut.push(akK);
+                    }
                 }
+            }
+            if (typeof girisPanelAyKeysCapFiltre === 'function') {
+                keysOut = girisPanelAyKeysCapFiltre(keysOut);
             }
         }
         if (keysOut.length > 12) keysOut = keysOut.slice(0, 12);
@@ -17498,7 +17646,12 @@ function girisAylikSatirYilAyPanelGuncelle(donemYil) {
     if (!panel) return;
     panel.style.display = acik ? 'block' : 'none';
     if (!acik) return;
+    if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
+        panel.innerHTML = '<div style="padding:6px 8px;color:#ef9a9a;font-size:11px;">Sözleşme iptal edildi: aylık borç oluşmaz.</div>';
+        return;
+    }
     var keys = (typeof sozlesmeReelDonemAyKeys === 'function') ? sozlesmeReelDonemAyKeys(basStr, donemYil) : [];
+    if (typeof girisPanelAyKeysCapFiltre === 'function') keys = girisPanelAyKeysCapFiltre(keys);
     if (!keys.length) {
         panel.innerHTML = '<div style="padding:6px 8px;color:#90a4ae;font-size:11px;">Önce sözleşme başlangıç tarihi girin.</div>';
         return;
