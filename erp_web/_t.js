@@ -7822,7 +7822,13 @@ function faturaRaporBosHazirOfisOdaPanelRender(doluArr) {
     var used = {};
     (doluArr || []).forEach(function (d) {
         var o = parseInt(d.oda, 10);
-        if (!isNaN(o)) used[o] = true;
+        if (isNaN(o)) return;
+        var nMus = parseInt(d.n, 10);
+        if (isNaN(nMus) || nMus < 1) {
+            nMus = Array.isArray(d.musteriler) && d.musteriler.length ? d.musteriler.length : 1;
+        }
+        if (!used[o]) used[o] = { n: nMus };
+        else used[o].n = Math.max(used[o].n || 0, nMus);
     });
     var parts = [];
     parts.push('<span class="fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--hepsi" data-fatura-rapor-oda-pill data-oda="hepsi" role="button" tabindex="0" title="Oda numarası atanmış tüm müşteriler · Aynı seçim: süzgeci kaldır">Hepsi</span>');
@@ -7831,8 +7837,12 @@ function faturaRaporBosHazirOfisOdaPanelRender(doluArr) {
         var cls = used[n]
             ? 'fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--dolu'
             : 'fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--bos';
+        var _cnt = used[n] && used[n].n ? used[n].n : (used[n] ? 1 : 0);
+        var _ttl = used[n]
+            ? ('Dolu' + (_cnt > 1 ? ' (' + _cnt + ' müşteri)' : '') + ' — sadece oda ' + n + ' · Aynı seçim: tümü')
+            : ('Boş — sadece oda ' + n + ' · Aynı seçim: tümü');
         parts.push('<span class="' + cls + '" data-fatura-rapor-oda-pill data-oda="' + n + '" role="button" tabindex="0" title="' +
-            (used[n] ? 'Dolu' : 'Boş') + ' — sadece oda ' + n + ' · Aynı seçim: tümü">' + n + '</span>');
+            _ttl + '">' + n + '</span>');
     }
     row.innerHTML = parts.join('');
     row.onclick = function (ev) {
@@ -18891,16 +18901,34 @@ function girisHazirOfisOdaPopMaxWidthClamp() {
     pop.style.maxWidth = Math.min(420, Math.max(240, avail)) + 'px';
 }
 
-/** Başka aktif müşteride dolu odalar (bu kartın müşteri id'si hariç). */
+/** Başka aktif müşteride dolu odalar (bu kartın müşteri id'si hariç). Değer: {n, title}. */
 function girisHazirOfisOdaDoluBaskaMusteriHaritasi(doluList) {
     var mid = parseInt((document.getElementById('musteri-id') || {}).value, 10);
     var map = {};
     (doluList || []).forEach(function (d) {
         var oid = parseInt(d.oda, 10);
-        var midO = parseInt(d.musteri_id, 10);
         if (isNaN(oid)) return;
-        if (!isNaN(mid) && mid > 0 && !isNaN(midO) && midO === mid) return;
-        map[oid] = true;
+        var mus = Array.isArray(d.musteriler) ? d.musteriler.slice() : null;
+        var nApi = parseInt(d.n, 10);
+        if (!mus || !mus.length) {
+            var midO = parseInt(d.musteri_id, 10);
+            if (!isNaN(mid) && mid > 0 && !isNaN(midO) && midO === mid) return;
+            map[oid] = { n: 1, title: 'Dolu' };
+            return;
+        }
+        var baska = mus.filter(function (m) {
+            var midO = parseInt(m.mid != null ? m.mid : m.musteri_id, 10);
+            if (!isNaN(mid) && mid > 0 && !isNaN(midO) && midO === mid) return false;
+            return true;
+        });
+        if (!baska.length) return;
+        var n = baska.length;
+        var adlar = baska.slice(0, 4).map(function (m) { return (m.ad || '—'); }).join(', ');
+        if (baska.length > 4) adlar += ', …';
+        map[oid] = {
+            n: (!isNaN(nApi) && nApi > 0 ? Math.max(nApi - (mus.length - baska.length), n) : n),
+            title: 'Aynı odada ' + n + ' müşteri daha' + (adlar ? ': ' + adlar : '')
+        };
     });
     return map;
 }
@@ -18922,8 +18950,17 @@ function girisHazirOfisOdaPanelRenkVeSecim() {
             return;
         }
         if (!isNaN(sv) && v === sv) b.classList.add('giris-hazir-ofis-oda-pill--secili');
-        if (doluMap[v]) b.classList.add('giris-hazir-ofis-oda-pill--dolu');
-        else b.classList.add('giris-hazir-ofis-oda-pill--bos');
+        if (doluMap[v]) {
+            b.classList.add('giris-hazir-ofis-oda-pill--dolu');
+            try {
+                var info = doluMap[v];
+                if (info && typeof info === 'object' && info.title) b.title = String(info.title);
+                else if (info) b.title = 'Dolu';
+            } catch (eTit) {}
+        } else {
+            b.classList.add('giris-hazir-ofis-oda-pill--bos');
+            try { b.removeAttribute('title'); } catch (eClr) {}
+        }
     });
 }
 
@@ -21268,6 +21305,38 @@ async function kaydet(event) {
                             console.warn('KYC kaydı iptal: sözleşme bilgileri kaydedilmedi (sözleşme başlangıç tarihi çok ileri görünüyor, onaylanmadı). Tarihi kontrol edip tekrar deneyin.');
                         }
                         // İptal: sözleşme kaydı yapılmaz; kullanıcı formda kalır.
+                    } else if (kycResult && (kycResult.oda_cakisma === true || kycResult.kod === 'oda_cakisma')) {
+                        var _mev = Array.isArray(kycResult.mevcut) ? kycResult.mevcut : [];
+                        var _nOda = _mev.length || 1;
+                        var _liste = _mev.slice(0, 8).map(function (m) {
+                            return (m.ad || '—') + (m.mid != null ? ' (ID ' + m.mid + ')' : '');
+                        }).join(', ');
+                        if (_mev.length > 8) _liste += ', …';
+                        var _odaMsg = 'Bu odada zaten ' + _nOda + ' kayıtlı müşteri var'
+                            + (_liste ? ': ' + _liste : '')
+                            + '. Yine de eklemek istiyor musunuz?';
+                        if (window.confirm(_odaMsg)) {
+                            var kycDataOda = Object.assign({}, kycData, { oda_cakisma_onay: 1 });
+                            const kycRespOda = await girisFetchAgKopmasinaKarsi('/musteriler/api/kyc/kaydet', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'same-origin',
+                                body: JSON.stringify(kycDataOda)
+                            }, 3);
+                            const kycTextOda = await kycRespOda.text();
+                            let kycResultOda = {};
+                            try {
+                                kycResultOda = kycTextOda ? JSON.parse(kycTextOda) : {};
+                            } catch (eKo) {
+                                console.warn('KYC oda onay yanıtı JSON değil:', kycRespOda.status);
+                            }
+                            if (!kycRespOda.ok || !kycResultOda.ok) {
+                                alert(kycResultOda.mesaj || ('Oda kaydı reddedildi (HTTP ' + kycRespOda.status + ').'));
+                                console.warn('KYC kaydı (oda onaylı) sorunlu:', kycResultOda.mesaj || kycRespOda.status);
+                            }
+                        } else {
+                            console.warn('KYC oda kaydı iptal: kullanıcı çoklu oda onayını reddetti.');
+                        }
                     } else {
                         console.warn('KYC kaydı sorunlu:', kycResult.mesaj || kycResp.status);
                     }

@@ -8583,8 +8583,16 @@ def api_musteri_detay(mid):
 @bp.route("/api/hazir-ofis-durum", methods=["GET"])
 @giris_gerekli
 def api_hazir_ofis_durum():
-    """200–230 odalar: dolu (aktif kart + atanmış oda) ve boş liste."""
+    """200–230 odalar: dolu (aktif kart + atanmış oda) ve boş liste.
+
+    Aynı odada birden fazla aktif müşteri olabilir: dolu listesi oda başına
+    bir satır (n, musteriler); geriye dönük musteri_id/firma_adi = ilk kayıt.
+    """
     ensure_customers_hazir_ofis_oda()
+    try:
+        ensure_customers_iptal()
+    except Exception:
+        pass
     rows = fetch_all(
         """
         SELECT c.id,
@@ -8595,20 +8603,32 @@ def api_hazir_ofis_durum():
           AND c.hazir_ofis_oda_no BETWEEN 200 AND 230
           AND COALESCE(c.is_active, TRUE) = TRUE
           AND LOWER(TRIM(COALESCE(c.durum, ''))) = 'aktif'
-        ORDER BY c.hazir_ofis_oda_no
+          AND COALESCE(c.iptal, FALSE) = FALSE
+        ORDER BY c.hazir_ofis_oda_no, c.id
         """
     ) or []
-    dolu = []
+    by_oda: dict = {}
     for r in rows:
         try:
             oda = int(r.get("hazir_ofis_oda_no"))
         except (TypeError, ValueError):
             continue
+        mid = r.get("id")
+        ad = (r.get("firma_adi") or "—").strip()
+        slot = by_oda.setdefault(oda, {"musteriler": []})
+        slot["musteriler"].append({"mid": mid, "ad": ad})
+    dolu = []
+    for oda in sorted(by_oda.keys()):
+        mus = by_oda[oda]["musteriler"]
+        n = len(mus)
+        first = mus[0] if mus else {}
         dolu.append(
             {
                 "oda": oda,
-                "musteri_id": r.get("id"),
-                "firma_adi": (r.get("firma_adi") or "—").strip(),
+                "musteri_id": first.get("mid"),
+                "firma_adi": first.get("ad") or "—",
+                "n": n,
+                "musteriler": mus,
             }
         )
     used = {d["oda"] for d in dolu}

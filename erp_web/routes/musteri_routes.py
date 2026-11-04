@@ -58,6 +58,100 @@ _kyc_kaydet_schema_ready = False
 _kyc_kaydet_schema_lock = threading.Lock()
 
 
+def oda_coklu_musteri_acik() -> bool:
+    """ODA_COKLU_MUSTERI yalnızca tam '1' iken açık; aksi halde mevcut engelleme."""
+    return (os.environ.get("ODA_COKLU_MUSTERI") or "").strip() == "1"
+
+
+def _oda_cakisma_onay_istendi(data) -> bool:
+    if not isinstance(data, dict):
+        return False
+    v = data.get("oda_cakisma_onay")
+    if v is True or v == 1:
+        return True
+    s = str(v or "").strip().lower()
+    return s in ("1", "true", "yes", "on", "evet")
+
+
+def _hazir_oda_aktif_cakismalar(oda_no: int, haric_mid=None) -> list[dict]:
+    """Aynı odadaki diğer AKTİF (iptal olmayan) müşteriler. Pasif/iptal çakışma sayılmaz."""
+    try:
+        oda = int(oda_no)
+    except (TypeError, ValueError):
+        return []
+    params: list = [oda]
+    haric_sql = ""
+    if haric_mid is not None:
+        try:
+            hid = int(haric_mid)
+        except (TypeError, ValueError):
+            hid = 0
+        if hid > 0:
+            haric_sql = " AND id <> %s"
+            params.append(hid)
+    rows = (
+        fetch_all(
+            f"""
+            SELECT id AS mid,
+                   COALESCE(NULLIF(TRIM(musteri_adi), ''), NULLIF(TRIM(name), ''), '') AS ad,
+                   LOWER(TRIM(COALESCE(durum, ''))) AS durum
+            FROM customers
+            WHERE hazir_ofis_oda_no = %s
+              AND COALESCE(is_active, TRUE) = TRUE
+              AND LOWER(TRIM(COALESCE(durum, ''))) = 'aktif'
+              AND COALESCE(iptal, FALSE) = FALSE
+              {haric_sql}
+            ORDER BY id
+            """,
+            tuple(params),
+        )
+        or []
+    )
+    out = []
+    for r in rows:
+        try:
+            mid = int(r.get("mid"))
+        except (TypeError, ValueError):
+            continue
+        out.append(
+            {
+                "mid": mid,
+                "ad": (str(r.get("ad") or "").strip() or "—"),
+                "durum": str(r.get("durum") or "aktif"),
+            }
+        )
+    return out
+
+
+def _oda_cakisma_yanit(oda_no: int, mevcut: list[dict], *, onay_mumkun: bool):
+    """409 JSON. onay_mumkun=True iken UI confirm + oda_cakisma_onay; kapalıda eski engelleme."""
+    n = len(mevcut or [])
+    adlar = ", ".join(
+        "%s (ID %s)" % ((m.get("ad") or "—"), m.get("mid")) for m in (mevcut or [])[:8]
+    )
+    if n > 8:
+        adlar += ", …"
+    mesaj = "Oda %s başka aktif müşteride (%s kayıt): %s." % (oda_no, n, adlar or "—")
+    if n == 1 and mevcut:
+        m0 = mevcut[0]
+        mesaj = "Oda %s başka aktif müşteride (ID: %s, %s)." % (
+            oda_no,
+            m0.get("mid"),
+            (m0.get("ad") or "—"),
+        )
+    body = {
+        "ok": False,
+        "mesaj": mesaj,
+        "oda": int(oda_no),
+        "mevcut": mevcut or [],
+    }
+    if onay_mumkun:
+        body["oda_cakisma"] = True
+        body["kod"] = "oda_cakisma"
+        body["oda_cakisma_onay_mumkun"] = True
+    return jsonify(body), 409
+
+
 def _kyc_kaydet_schema_ensure_once() -> None:
     global _kyc_kaydet_schema_ready
     if _kyc_kaydet_schema_ready:
@@ -3000,33 +3094,23 @@ def api_kyc_kaydet():
 
         mevcut = fetch_one("SELECT id FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1", (musteri_id,)) if musteri_id else None
 
-        def _hazir_oda_cakisma_kontrol(mid):
-            if hazir_oda_val is None or not mid:
+        def _hazir_oda_cakisma_engel(mid):
+            """Çakışma varsa 409 response tuple; yoksa / onaylıysa None."""
+            if hazir_oda_val is None:
                 return None
-            crow = fetch_one(
-                """
-                SELECT id,
-                    COALESCE(NULLIF(TRIM(musteri_adi), ''), NULLIF(TRIM(name), ''), '') AS ad_gor
-                FROM customers
-                WHERE id <> %s AND hazir_ofis_oda_no = %s
-                  AND COALESCE(is_active, TRUE) = TRUE
-                  AND LOWER(TRIM(COALESCE(durum, ''))) = 'aktif'
-                LIMIT 1
-                """,
-                (int(mid), hazir_oda_val),
-            )
-            return crow
+            mevcut = _hazir_oda_aktif_cakismalar(hazir_oda_val, haric_mid=mid)
+            if not mevcut:
+                return None
+            coklu = oda_coklu_musteri_acik()
+            # Bayrak açık + istemci onayı → kayda izin
+            if coklu and _oda_cakisma_onay_istendi(data if isinstance(data, dict) else {}):
+                return None
+            return _oda_cakisma_yanit(hazir_oda_val, mevcut, onay_mumkun=coklu)
 
         if mevcut:
-            ck = _hazir_oda_cakisma_kontrol(musteri_id)
-            if ck:
-                return jsonify(
-                    {
-                        "ok": False,
-                        "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
-                        % (hazir_oda_val, ck["id"], (ck.get("ad_gor") or "—").strip() or "—"),
-                    }
-                ), 409
+            eng = _hazir_oda_cakisma_engel(musteri_id)
+            if eng is not None:
+                return eng
             execute(
                 """UPDATE musteri_kyc SET
                    sirket_unvani=%s, unvan=%s, musteri_adi=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
@@ -3061,15 +3145,9 @@ def api_kyc_kaydet():
                 )
         else:
             if musteri_id:
-                ck = _hazir_oda_cakisma_kontrol(musteri_id)
-                if ck:
-                    return jsonify(
-                        {
-                            "ok": False,
-                            "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
-                            % (hazir_oda_val, ck["id"], (ck.get("ad_gor") or "—").strip() or "—"),
-                        }
-                    ), 409
+                eng = _hazir_oda_cakisma_engel(musteri_id)
+                if eng is not None:
+                    return eng
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
                        durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, iptal=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
@@ -3078,27 +3156,9 @@ def api_kyc_kaydet():
                 )
             else:
                 # Yeni müşteri oluştur (oda çakışması: kayıt öncesi, başka aktif kartta aynı oda var mı)
-                if hazir_oda_val is not None:
-                    ex0 = fetch_one(
-                        """
-                        SELECT id,
-                            COALESCE(NULLIF(TRIM(musteri_adi), ''), NULLIF(TRIM(name), ''), '') AS ad_gor
-                        FROM customers
-                        WHERE hazir_ofis_oda_no = %s
-                          AND COALESCE(is_active, TRUE) = TRUE
-                          AND LOWER(TRIM(COALESCE(durum, ''))) = 'aktif'
-                        LIMIT 1
-                        """,
-                        (hazir_oda_val,),
-                    )
-                    if ex0:
-                        return jsonify(
-                            {
-                                "ok": False,
-                                "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
-                                % (hazir_oda_val, ex0["id"], (ex0.get("ad_gor") or "—").strip() or "—"),
-                            }
-                        ), 409
+                eng = _hazir_oda_cakisma_engel(None)
+                if eng is not None:
+                    return eng
                 cust = execute_returning(
                     """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi, is_active, hizmet_turu, hazir_ofis_oda_no)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",

@@ -29979,6 +29979,41 @@ async function kaydet(event) {
                             kycBasarisizMesaj = '\n\nUYARI: Sözleşme bilgileri kaydedilmedi (sözleşme başlangıç tarihi çok ileri görünüyor, onaylanmadı).\nTarihi kontrol edip tekrar deneyin.';
                         }
                         // İptal: sözleşme kaydı yapılmaz; kullanıcı formda kalır (tarihi düzeltebilir).
+                    } else if (kycResult && (kycResult.oda_cakisma === true || kycResult.kod === 'oda_cakisma')) {
+                        var _mev = Array.isArray(kycResult.mevcut) ? kycResult.mevcut : [];
+                        var _nOda = _mev.length || 1;
+                        var _liste = _mev.slice(0, 8).map(function (m) {
+                            return (m.ad || '—') + (m.mid != null ? ' (ID ' + m.mid + ')' : '');
+                        }).join(', ');
+                        if (_mev.length > 8) _liste += ', …';
+                        var _odaMsg = 'Bu odada zaten ' + _nOda + ' kayıtlı müşteri var'
+                            + (_liste ? ': ' + _liste : '')
+                            + '. Yine de eklemek istiyor musunuz?';
+                        if (window.confirm(_odaMsg)) {
+                            var kycDataOda = Object.assign({}, kycData, { oda_cakisma_onay: 1 });
+                            const kycRespOda = await girisFetchAgKopmasinaKarsi('/musteriler/api/kyc/kaydet', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'same-origin',
+                                body: JSON.stringify(kycDataOda)
+                            }, 3);
+                            const kycTextOda = await kycRespOda.text();
+                            let kycResultOda = {};
+                            try {
+                                kycResultOda = kycTextOda ? JSON.parse(kycTextOda) : {};
+                            } catch (eKo) {
+                                console.warn('KYC oda onay yanıtı JSON değil:', kycRespOda.status);
+                            }
+                            if (!kycRespOda.ok || !kycResultOda.ok) {
+                                console.warn('KYC kaydı (oda onaylı) sorunlu:', kycResultOda.mesaj || kycRespOda.status);
+                                kycBasarisizMesaj = '\n\nUYARI: Oda kaydı (çoklu onaylı) başarısız: ' +
+                                    (kycResultOda.mesaj || ('HTTP ' + kycRespOda.status)) +
+                                    '\nLütfen tekrar deneyin.';
+                            }
+                        } else {
+                            console.warn('KYC oda kaydı iptal: kullanıcı çoklu oda onayını reddetti.');
+                            kycBasarisizMesaj = '\n\nUYARI: Oda numarası kaydedilmedi (aynı odada başka müşteri var, onaylanmadı).';
+                        }
                     } else {
                         console.warn('KYC kaydı sorunlu:', kycResult.mesaj || kycResp.status);
                         kycBasarisizMesaj = '\n\nUYARI: Sözleşme bilgileri (Düzenli Fatura, Ödeme Düzeni vb.) kaydedilemedi: ' +
