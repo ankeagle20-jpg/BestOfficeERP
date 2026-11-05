@@ -7697,22 +7697,70 @@ function faturaRaporGridModalKartHtml(ay) {
         '<div style="font-size:13px;font-weight:600;margin-top:4px;">' + tut + '</div>' +
         '<div style="font-size:10px;margin-top:3px;color:#b0bec5;">' + alt + '</div></div>';
 }
-function faturaRaporGridModalCiz(cache, firmaAdi) {
+
+function faturaRaporGridModalOzetNot(sozGun, bugunIso, ayni) {
+    var sg = parseInt(sozGun, 10);
+    var bugunGun = 0;
+    var bugunStr = '';
+    try {
+        var iso = String(bugunIso || '').trim();
+        if (iso.length >= 10) {
+            bugunGun = parseInt(iso.slice(8, 10), 10) || 0;
+            bugunStr = String(bugunGun);
+        }
+    } catch (e0) {}
+    if (!(sg >= 1 && sg <= 31)) {
+        return 'Sözleşme günü bulunamadı → iki tutar aynı';
+    }
+    if (!(bugunGun >= 1 && bugunGun <= 31)) {
+        return 'Sözleşme günü: ' + sg + ' · Bugün bilinmiyor';
+    }
+    if (ayni) {
+        return 'Sözleşme günü: ' + sg + ' · Bugün: ' + bugunStr + ' → sözleşme günü geldi → iki tutar aynı';
+    }
+    return 'Sözleşme günü: ' + sg + ' · Bugün: ' + bugunStr + ' → bu ay henüz dahil değil';
+}
+function faturaRaporGridModalOzetHtml(meta) {
+    meta = meta || {};
+    var ham = parseFloat(meta.toplamBorc);
+    var gelen = parseFloat(meta.gunuGelen);
+    if (!isFinite(ham)) ham = 0;
+    if (!isFinite(gelen)) gelen = ham;
+    var ayni = Math.abs(ham - gelen) < 0.005;
+    var not = faturaRaporGridModalOzetNot(meta.sozlesmeGun, meta.bugunIso, ayni);
+    return '<div class="fatura-rapor-grid-modal-ozet">' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan"><label>Toplam Borç</label>' +
+        '<div class="deger">' + faturaRaporGridModalFmt(ham) + ' ₺</div></div>' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan"><label>Günü Gelen Borç</label>' +
+        '<div class="deger">' + faturaRaporGridModalFmt(gelen) + ' ₺</div></div>' +
+        '<div class="fatura-rapor-grid-modal-ozet-not">' + String(not).replace(/</g, '&lt;') + '</div>' +
+        '</div>';
+}
+function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
     var body = document.getElementById('fatura_rapor_grid_modal_body');
     var title = document.getElementById('fatura_rapor_grid_modal_title');
     if (!body) return;
+    meta = meta || window.__faturaRaporGridModalMeta || {};
     var ad = (firmaAdi != null && String(firmaAdi).trim()) ? String(firmaAdi).trim() : 'Aylık grid';
     if (title) title.textContent = ad;
+    var ozet = (typeof faturaRaporGridModalOzetHtml === 'function') ? faturaRaporGridModalOzetHtml(meta) : '';
     if (cache && (cache.iptal === true || (cache.bos_neden && String(cache.bos_neden).toLowerCase() === 'iptal'))) {
         var msg = (cache.iptal_mesaj && String(cache.iptal_mesaj).trim())
             ? String(cache.iptal_mesaj).trim()
             : 'Sözleşme iptal edildi: aylık borç oluşmaz.';
-        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">' + msg.replace(/</g, '&lt;') + '</div>';
+        var iptalMeta = {
+            toplamBorc: 0,
+            gunuGelen: 0,
+            sozlesmeGun: meta.sozlesmeGun,
+            bugunIso: meta.bugunIso
+        };
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">' + msg.replace(/</g, '&lt;') + '</div>' +
+            ((typeof faturaRaporGridModalOzetHtml === 'function') ? faturaRaporGridModalOzetHtml(iptalMeta) : '');
         return;
     }
     var aylar = (cache && Array.isArray(cache.aylar)) ? cache.aylar : [];
     if (!aylar.length) {
-        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Aylık grid boş.</div>';
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Aylık grid boş.</div>' + ozet;
         return;
     }
     var html = '<div class="sozlesmeler-aylik-grid">';
@@ -7731,6 +7779,7 @@ function faturaRaporGridModalCiz(cache, firmaAdi) {
     html += '<div class="fatura-rapor-grid-modal-toplam">Aylar: ' + aylar.length +
         ' · Plan: ' + faturaRaporGridModalFmt(topBorc) +
         ' ₺ · Kalan: ' + faturaRaporGridModalFmt(topKalan) + ' ₺</div>';
+    html += ozet;
     body.innerHTML = html;
 }
 function faturaRaporGridModalAc(ev, mid) {
@@ -7745,6 +7794,7 @@ function faturaRaporGridModalAc(ev, mid) {
     var title = document.getElementById('fatura_rapor_grid_modal_title');
     if (!modal || !body) return;
     var firmaAdi = '';
+    var meta = { toplamBorc: 0, gunuGelen: 0, sozlesmeGun: '', bugunIso: '' };
     try {
         var btn = ev && ev.currentTarget ? ev.currentTarget : null;
         var tr = btn && btn.closest ? btn.closest('tr') : null;
@@ -7753,7 +7803,21 @@ function faturaRaporGridModalAc(ev, mid) {
             var fl = tr.querySelector('.fatura-rapor-firma-link');
             if (fl) firmaAdi = (fl.textContent || '').trim();
         }
+        if (tr) {
+            var hamN = parseFloat(tr.getAttribute('data-fr-grid-borc-n'));
+            var gelN = parseFloat(tr.getAttribute('data-fr-gun-gelen-n'));
+            if (!isFinite(hamN)) hamN = parseFloat(btn && btn.textContent);
+            if (!isFinite(hamN)) hamN = 0;
+            if (!isFinite(gelN)) gelN = hamN;
+            meta.toplamBorc = hamN;
+            meta.gunuGelen = gelN;
+            meta.sozlesmeGun = tr.getAttribute('data-fr-soz-gun') || '';
+        }
+        meta.bugunIso = (window.__faturaRaporIstanbulBugun != null)
+            ? String(window.__faturaRaporIstanbulBugun)
+            : '';
     } catch (eAd) {}
+    window.__faturaRaporGridModalMeta = meta;
     faturaRaporGridModalKapat();
     window.__faturaRaporGridModalMid = id;
     if (title) title.textContent = firmaAdi || ('Müşteri #' + id);
@@ -7777,7 +7841,7 @@ function faturaRaporGridModalAc(ev, mid) {
         }
         var cache = j.cache || {};
         if (j.iptal === true) cache.iptal = true;
-        faturaRaporGridModalCiz(cache, firmaAdi || (title && title.textContent) || '');
+        faturaRaporGridModalCiz(cache, firmaAdi || (title && title.textContent) || '', meta);
     }).catch(function () {
         if (window.__faturaRaporGridModalMid !== id) return;
         body.innerHTML = '<div class="fatura-rapor-grid-modal-err">Grid yüklenemedi.</div>';
@@ -8309,6 +8373,7 @@ function faturaRaporYukle() {
                 tablo.classList.add('fatura-rapor-tablo--firma');
                 var ar = data.ay_referans || {};
                 window.__faturaRaporAyReferans = (ar.y != null && ar.m != null) ? { y: ar.y, m: ar.m, etiket: ar.etiket } : null;
+                try { window.__faturaRaporIstanbulBugun = (data && data.istanbul_bugun) ? String(data.istanbul_bugun) : ''; } catch (_eIb) { window.__faturaRaporIstanbulBugun = ''; }
                 var ayEt = (ar.etiket != null && String(ar.etiket).trim()) ? String(ar.etiket).trim() : '';
                 if (typeof faturaRaporFirmaBuildThead === 'function') {
                     faturaRaporFirmaBuildThead(tablo, ayEt);
@@ -8485,6 +8550,11 @@ function faturaRaporYukle() {
                     if (!isFinite(gridHamNum)) gridHamNum = 0;
                     var gridHamFmt = gridHamNum.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     var gridHamN = String(gridHamNum);
+                    var gridGelenRaw = (s.toplam_borc_gun_gelen != null && s.toplam_borc_gun_gelen !== '') ? s.toplam_borc_gun_gelen : gridHamRaw;
+                    var gridGelenNum = parseFloat(gridGelenRaw);
+                    if (!isFinite(gridGelenNum)) gridGelenNum = gridHamNum;
+                    var gridGelenN = String(gridGelenNum);
+                    var sozGunN = (s.sozlesme_gun != null && s.sozlesme_gun !== '') ? String(parseInt(s.sozlesme_gun, 10) || '') : '';
                     cells[8] = '<td class="num" data-fr-col-id="8">' + borcFmt + '</td>';
                     cells[16] = '<td class="num" data-fr-col-id="16">' + (midOk
                         ? '<button type="button" class="fatura-rapor-firma-grid-btn" data-musteri-id="' + midNum +

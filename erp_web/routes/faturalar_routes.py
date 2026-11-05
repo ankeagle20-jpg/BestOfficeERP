@@ -3672,17 +3672,43 @@ def _firma_ozet_gun_bazli_borc_uygula_satir(
     return it
 
 
+def _firma_ozet_toplam_borc_gun_gelen_hesapla(
+    it: dict, bugun: date | None = None
+):
+    """Ham toplam üzerinde gün kuralı (checkbox'tan bağımsız); satırı kalıcı değiştirmez.
+
+    Mevcut _firma_ozet_gun_bazli_borc_uygula_satir yeniden kullanılır; ek canlı borç yok.
+    """
+    if not isinstance(it, dict):
+        return None
+    ham = it.get("toplam_borc_ham")
+    if ham is None:
+        ham = it.get("toplam_borc")
+    tmp = {
+        "toplam_borc": ham,
+        "borc_hesaplanamadi": it.get("borc_hesaplanamadi"),
+        "sozlesme_gun": it.get("sozlesme_gun"),
+        "borc_ref_ay": it.get("borc_ref_ay"),
+        "geciken_ay": it.get("geciken_ay"),
+    }
+    _firma_ozet_gun_bazli_borc_uygula_satir(tmp, aktif=True, bugun=bugun)
+    return tmp.get("toplam_borc")
+
+
 def _firma_ozet_gun_bazli_borc_uygula_satirlar(
     satirlar: list, *, aktif: bool, bugun: date | None = None
 ) -> list:
-    """Her satıra toplam_borc_ham damgalar (gün düşümünden önceki ham toplam).
+    """Her satıra toplam_borc_ham + toplam_borc_gun_gelen damgalar.
 
-    aktif=False iken yalnız damga; aktif=True iken damga + bu ay düşümü.
-    Grid sütunu gun_bazli'den etkilenmez; Borç sütunu toplam_borc kullanır.
+    ham: gün düşümünden önceki toplam. gun_gelen: gün kuralı (bayraktan bağımsız).
+    aktif=True iken ayrıca toplam_borc/geciken_ay düşülür (Borç sütunu).
     """
     for it in satirlar or []:
         if isinstance(it, dict):
             it["toplam_borc_ham"] = it.get("toplam_borc")
+            it["toplam_borc_gun_gelen"] = _firma_ozet_toplam_borc_gun_gelen_hesapla(
+                it, bugun
+            )
     if not aktif:
         return satirlar
     atlanan_acc = [0]
@@ -5660,6 +5686,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         "giris_yillari": giris_yillari,
         "hazir_ofis_oda_filtre": hazir_oda_filtre,
         "ay_referans": {"y": ay_y, "m": ay_m, "etiket": ay_etiket},
+        "istanbul_bugun": _firma_ozet_istanbul_bugun().isoformat(),
         "satirlar": satirlar_resp,
         "total_count": total_count_firma,
         "page": page,
