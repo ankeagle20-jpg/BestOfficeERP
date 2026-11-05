@@ -190,12 +190,135 @@ def test_ui_kalip():
     check("ui liste data-fr-gun", "data-fr-gun-n" in html[html.find("function faturaRaporListeAraUygula") : html.find("function faturaRaporListeAraTemizle")])
 
 
+
+
+def test_gun_panel_ac_kapa():
+    """Günler panel: HTML'de tanımlı (Giriş _t.js yüklemez); id eşleşmesi; aç/kapa mantığı."""
+    import subprocess
+    import tempfile
+
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "_t.js").read_text(encoding="utf-8")
+
+    check("panel btn onclick", 'id="fatura_rapor_giris_gun_btn"' in html and "faturaRaporGirisGunPanelToggle(event)" in html)
+    check("panel pop id", 'id="fatura_rapor_giris_gun_pop"' in html and 'id="fatura_rapor_giris_gun_row"' in html)
+    check("panel wrap id", 'id="fatura_rapor_giris_gun_wrap"' in html)
+    check("toggle html tanimli", "function faturaRaporGirisGunPanelToggle" in html)
+    check("render html tanimli", "function faturaRaporGirisGunPanelRender" in html)
+    check("tumu html tanimli", "function faturaRaporGirisGunTumu" in html)
+    check("oku/yaz html", "function faturaRaporGirisGunlerOku" in html and "function faturaRaporGirisGunlerYaz" in html)
+    check("toggle tjs yedek", "function faturaRaporGirisGunPanelToggle" in js)
+
+    a = html.find("function faturaRaporGirisAyPanelToggle")
+    b = html.find("\nfunction ", a + 10)
+    check("ay acinca gun kapat", "faturaRaporGirisGunPanelKapat" in html[a:b])
+
+    y = html.find("function faturaRaporGirisYilPanelToggle")
+    yb = html.find("\nfunction ", y + 10)
+    check("yil acinca gun kapat", "faturaRaporGirisGunPanelKapat" in html[y:yb])
+
+    check(
+        "disari tik gun wrap",
+        "fatura_rapor_giris_gun_wrap" in html and "faturaRaporGirisGunPanelKapat" in html,
+    )
+
+    start = html.find("window.__faturaRaporGirisGunler")
+    if start < 0:
+        start = html.find("function faturaRaporGirisGunlerOku")
+    end2 = html.find("function faturaRaporGirisGunTumu", start)
+    end2 = html.find("\nif (typeof window.__faturaRaporGirisYillar", end2)
+    if end2 < 0:
+        end2 = html.find("\nfunction faturaRaporGirisYillarOku", start)
+    block = html[start:end2]
+    node = (
+        """
+global.window = global;
+var popHidden = true;
+var btnExpanded = 'false';
+var rowBuilt = null;
+var rowHtml = '';
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_giris_gun_pop') {
+      return {
+        get hidden() { return popHidden; },
+        set hidden(v) { popHidden = !!v; },
+        style: {},
+        setAttribute: function () {}
+      };
+    }
+    if (id === 'fatura_rapor_giris_gun_btn') {
+      return {
+        classList: { toggle: function () {} },
+        innerHTML: '',
+        title: '',
+        setAttribute: function (k, v) { if (k === 'aria-expanded') btnExpanded = String(v); },
+        getBoundingClientRect: function () { return { left: 10, top: 10, width: 80, height: 28 }; }
+      };
+    }
+    if (id === 'fatura_rapor_giris_gun_row') {
+      return {
+        dataset: rowBuilt || (rowBuilt = {}),
+        get innerHTML() { return rowHtml; },
+        set innerHTML(v) { rowHtml = v; },
+        addEventListener: function () {},
+        contains: function () { return true; },
+        querySelectorAll: function () { return []; }
+      };
+    }
+    if (id === 'fatura_rapor_gorunum') return { value: 'detay' };
+    return null;
+  },
+  documentElement: { clientWidth: 1200 }
+};
+global.requestAnimationFrame = function (fn) { fn(); };
+"""
+        + block
+        + """
+var opened = false;
+try {
+  faturaRaporGirisGunPanelToggle({ stopPropagation: function () {} });
+  opened = (popHidden === false && btnExpanded === 'true');
+} catch (e) {
+  console.log('FAIL node toggle throw :: ' + e);
+  process.exitCode = 1;
+}
+console.log((opened ? 'ok ' : 'FAIL ') + 'node panel acilir');
+if (!opened) process.exitCode = 1;
+if (rowHtml.indexOf('data-giris-gun=\"31\"') < 0) {
+  console.log('FAIL node 1-31 pills');
+  process.exitCode = 1;
+} else {
+  console.log('ok node 1-31 pills');
+}
+faturaRaporGirisGunPanelToggle({ stopPropagation: function () {} });
+console.log((popHidden === true ? 'ok ' : 'FAIL ') + 'node panel kapanir');
+if (popHidden !== true) process.exitCode = 1;
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+    except FileNotFoundError:
+        check("node panel harness", False, "node yok")
+        return
+    out = (r.stdout or "") + (r.stderr or "")
+    print(out.strip())
+    check("node panel harness exit", r.returncode == 0, out[-240:])
+    check("node acilir satiri", "ok node panel acilir" in out)
+    check("node 1-31 satiri", "ok node 1-31 pills" in out)
+    check("node kapanir satiri", "ok node panel kapanir" in out)
+
+
 if __name__ == "__main__":
     test_parse_ve_sql()
     test_client_filtre()
     test_gun_sutunu_ayni_alan()
     test_sayac_ve_excel()
     test_ui_kalip()
+    test_gun_panel_ac_kapa()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)

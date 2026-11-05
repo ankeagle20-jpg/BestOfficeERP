@@ -5463,6 +5463,7 @@ function faturaRaporGirisAyPanelToggle(ev) {
         btn.setAttribute('aria-expanded', 'false');
         return;
     }
+    if (typeof faturaRaporGirisGunPanelKapat === 'function') faturaRaporGirisGunPanelKapat();
     faturaRaporGirisAyPanelRender();
     faturaRaporGirisAyPanelBtnDurumlari();
     faturaRaporGirisAyPanelInlineTemizle(pop);
