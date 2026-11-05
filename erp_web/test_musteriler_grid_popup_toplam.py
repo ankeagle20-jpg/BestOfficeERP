@@ -144,7 +144,17 @@ def test_sablon_ve_excel():
     check("css scroll overflow auto", ".fatura-rapor-grid-modal-scroll" in css_blk and "overflow: auto" in css_blk)
     check("css aylik autofill", "fatura-rapor-grid-modal-aylik" in css_blk and "auto-fill" in css_blk and "minmax(" in css_blk)
     check("css foot sabit", ".fatura-rapor-grid-modal-foot" in css_blk and "flex-shrink: 0" in css_blk)
-    check("css hidden yalniz backdrop", ".fatura-rapor-grid-modal-backdrop[hidden]" in css_blk and css_blk.count("[hidden]") == 1)
+    check(
+        "css hidden yalniz backdrop",
+        ".fatura-rapor-grid-modal-backdrop[hidden]" in css_blk
+        and (
+            css_blk.count("[hidden]") == 1
+            or (
+                css_blk.count("[hidden]") == 2
+                and ".fatura-rapor-grid-wa-panel[hidden]" in css_blk
+            )
+        ),
+    )
     check("etiket fn", "function faturaRaporGridModalOzetEtiket" in html)
     check("ay adi iso slice", "iso.slice(5, 7)" in html and "new Date(" not in html[html.find("function faturaRaporGridModalAyAdi"):html.find("function faturaRaporGridModalSozTarihTr")])
     check("popup ay filtre fn", "function faturaRaporGridModalBugunAyIdx" in html and "function faturaRaporGridModalAyIdx" in html and "Henüz borçlanan ay yok." in html)

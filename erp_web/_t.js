@@ -7658,6 +7658,7 @@ function kiraGuncelleVeBorclandirAll() {
  *  WhatsApp listesiyle aynı yol: switchTab(6) + selectMusteri (Müşteri Ekle tab 0 değil). */
 /** Müşteriler raporu Grid sütunu: salt okunur aylık grid modal (sekme değiştirmez). */
 function faturaRaporGridModalKapat() {
+    if (typeof faturaRaporGridWaPanelKapat === 'function') faturaRaporGridWaPanelKapat();
     var m = document.getElementById('fatura_rapor_grid_modal');
     if (m) m.hidden = true;
     var body = document.getElementById('fatura_rapor_grid_modal_body');
@@ -7763,14 +7764,28 @@ function faturaRaporGridModalOzetHtml(meta) {
     var etGel = faturaRaporGridModalOzetEtiket(meta.bugunIso, haric);
     var tarTr = faturaRaporGridModalSozTarihTr(meta.sozlesmeTarihi);
     var escTxt = function (t) { return String(t == null ? '' : t).replace(/</g, '&lt;'); };
+    var midWa = parseInt(meta.musteriId || window.__faturaRaporGridModalMid || 0, 10) || 0;
+    var waKapali = !!(window.__faturaRaporGridWaKapali);
+    var waBtn = function (tur, tut) {
+        var t = parseFloat(tut);
+        var pasif = waKapali || !(midWa > 0) || !(isFinite(t) && t > 0);
+        return '<button type="button" class="fatura-rapor-grid-wa-btn' + (pasif ? ' is-pasif' : '') + '"'
+            + ' title="WhatsApp ile gönder" aria-label="WhatsApp ile gönder"'
+            + (pasif ? ' disabled' : '')
+            + ' data-wa-tur="' + tur + '"'
+            + ' onclick="faturaRaporGridWaPanelAc(event,\'' + tur + '\')">'
+            + '<i class="fa fa-whatsapp" aria-hidden="true"></i></button>';
+    };
     var ustHam = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etHam) + '</span></div>';
     var ustGel = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etGel) + '</span>'
-        + (tarTr ? ('<span class="tarih">' + escTxt(tarTr) + '</span>') : '') + '</div>';
+        + (tarTr ? ('<span class="tarih-ayrac" aria-hidden="true"> · </span><span class="tarih">' + escTxt(tarTr) + '</span>') : '') + '</div>';
     return '<div class="fatura-rapor-grid-modal-ozet">' +
-        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustHam + '<label>Toplam Borç</label>' +
-        '<div class="deger">' + faturaRaporGridModalFmt(ham) + ' ₺</div></div>' +
-        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustGel + '<label>Günü Gelen Borç</label>' +
-        '<div class="deger">' + faturaRaporGridModalFmt(gelen) + ' ₺</div></div>' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustHam
+        + '<div class="fatura-rapor-grid-modal-ozet-baslik"><label>Toplam Borç</label>' + waBtn('toplam', ham) + '</div>'
+        + '<div class="deger">' + faturaRaporGridModalFmt(ham) + ' ₺</div></div>' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustGel
+        + '<div class="fatura-rapor-grid-modal-ozet-baslik"><label>Günü Gelen Borç</label>' + waBtn('gun_gelen', gelen) + '</div>'
+        + '<div class="deger">' + faturaRaporGridModalFmt(gelen) + ' ₺</div></div>' +
         '<div class="fatura-rapor-grid-modal-ozet-not">' + String(not).replace(/</g, '&lt;') + '</div>' +
         '</div>';
 }
@@ -7904,9 +7919,11 @@ function faturaRaporGridModalAc(ev, mid) {
             ? String(window.__faturaRaporIstanbulBugun)
             : '';
     } catch (eAd) {}
+    meta.musteriId = id;
     window.__faturaRaporGridModalMeta = meta;
     faturaRaporGridModalKapat();
     window.__faturaRaporGridModalMid = id;
+    faturaRaporGridWaPanelKapat();
     if (title) title.textContent = firmaAdi || ('Müşteri #' + id);
     body.innerHTML = '<div class="fatura-rapor-grid-modal-loading">Yükleniyor…</div>';
     modal.hidden = false;
@@ -7932,6 +7949,210 @@ function faturaRaporGridModalAc(ev, mid) {
     }).catch(function () {
         if (window.__faturaRaporGridModalMid !== id) return;
         body.innerHTML = '<div class="fatura-rapor-grid-modal-err">Grid yüklenemedi.</div>';
+    });
+}
+
+
+function faturaRaporGridWaPanelKapat() {
+    var p = document.getElementById('fatura_rapor_grid_wa_panel');
+    if (p) p.hidden = true;
+    window.__frgWaState = null;
+}
+function faturaRaporGridWaPanelAc(ev, tur) {
+    if (ev) {
+        if (ev.stopPropagation) ev.stopPropagation();
+        if (ev.preventDefault) ev.preventDefault();
+    }
+    if (window.__faturaRaporGridWaKapali) return;
+    var mid = parseInt(window.__faturaRaporGridModalMid || 0, 10) || 0;
+    if (!(mid > 0)) return;
+    var tutarTur = (tur === 'gun_gelen') ? 'gun_gelen' : 'toplam';
+    var panel = document.getElementById('fatura_rapor_grid_wa_panel');
+    if (!panel) return;
+    window.__frgWaState = { mid: mid, tutarTur: tutarTur, yukleniyor: true, gonderiyor: false };
+    panel.hidden = false;
+    var sonuc = document.getElementById('frg_wa_sonuc');
+    if (sonuc) { sonuc.hidden = true; sonuc.textContent = ''; sonuc.className = 'fatura-rapor-grid-wa-sonuc'; }
+    var uy = document.getElementById('frg_wa_uyari');
+    if (uy) { uy.hidden = true; uy.textContent = ''; }
+    var pw = document.getElementById('frg_wa_pasif_wrap');
+    if (pw) { pw.hidden = true; }
+    var po = document.getElementById('frg_wa_pasif_onay');
+    if (po) po.checked = false;
+    var oniz = document.getElementById('frg_wa_onizleme');
+    if (oniz) oniz.textContent = 'Yükleniyor…';
+    var sel = document.getElementById('frg_wa_sablon');
+    if (sel) sel.innerHTML = '';
+    faturaRaporGridWaYukle();
+}
+function faturaRaporGridWaYukle() {
+    var st = window.__frgWaState;
+    if (!st || !(st.mid > 0)) return;
+    var sid = '';
+    var sel = document.getElementById('frg_wa_sablon');
+    if (sel && sel.value) sid = String(sel.value);
+    var url = '/giris/api/musteri/' + encodeURIComponent(String(st.mid))
+        + '/grid-wa-onizleme?tutar_turu=' + encodeURIComponent(st.tutarTur)
+        + (sid ? ('&sablon_id=' + encodeURIComponent(sid)) : '');
+    fetch(url, { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+        .then(function (pak) {
+            if (!window.__frgWaState || window.__frgWaState.mid !== st.mid) return;
+            var j = pak.j || {};
+            if (j.kapali || pak.status === 403) {
+                window.__faturaRaporGridWaKapali = true;
+                faturaRaporGridWaPanelKapat();
+                return;
+            }
+            if (!j.ok) {
+                var on0 = document.getElementById('frg_wa_onizleme');
+                if (on0) on0.textContent = (j.mesaj && String(j.mesaj)) || 'Önizleme alınamadı';
+                return;
+            }
+            faturaRaporGridWaDoldur(j);
+        })
+        .catch(function () {
+            var on1 = document.getElementById('frg_wa_onizleme');
+            if (on1) on1.textContent = 'Önizleme alınamadı';
+        });
+}
+function faturaRaporGridWaDoldur(j) {
+    var sel = document.getElementById('frg_wa_sablon');
+    var oniz = document.getElementById('frg_wa_onizleme');
+    var sablonlar = Array.isArray(j.sablonlar) ? j.sablonlar : [];
+    if (sel) {
+        var cur = sel.value || String(j.sablon_id || '');
+        sel.innerHTML = '';
+        sablonlar.forEach(function (s) {
+            if (!s || s.engel) return;
+            var o = document.createElement('option');
+            o.value = String(s.anahtar || '');
+            o.textContent = String(s.etiket || s.anahtar || '');
+            sel.appendChild(o);
+        });
+        if (cur) sel.value = cur;
+        else if (j.sablon_id) sel.value = String(j.sablon_id);
+        sel.onchange = function () { faturaRaporGridWaYukle(); };
+    }
+    if (oniz) oniz.textContent = String(j.onizleme || '');
+    var numaralar = Array.isArray(j.numaralar) ? j.numaralar : [];
+    var r1 = document.querySelector('input[name="frg_wa_alici"][value="1"]');
+    var r2 = document.getElementById('frg_wa_alici_2');
+    var ro = document.getElementById('frg_wa_alici_ozel');
+    var ozel = document.getElementById('frg_wa_ozel');
+    if (r1) {
+        r1.disabled = !(numaralar.length >= 1);
+        r1.checked = true;
+        var lab1 = r1.parentNode;
+        if (lab1 && numaralar[0] && numaralar[0].maske) {
+            lab1.lastChild.textContent = ' 1. numara (' + String(numaralar[0].maske) + ')';
+        }
+    }
+    if (r2) {
+        r2.disabled = !(numaralar.length >= 2);
+        var lab2 = r2.parentNode;
+        if (lab2) {
+            lab2.lastChild.textContent = (numaralar.length >= 2 && numaralar[1] && numaralar[1].maske)
+                ? (' 2. numara (' + String(numaralar[1].maske) + ')')
+                : ' 2. numara';
+        }
+    }
+    if (ro && ozel) {
+        ro.onchange = r1 && r2 ? function () {
+            var v = (document.querySelector('input[name="frg_wa_alici"]:checked') || {}).value;
+            ozel.disabled = v !== 'ozel';
+        } : null;
+        document.querySelectorAll('input[name="frg_wa_alici"]').forEach(function (inp) {
+            inp.onchange = function () {
+                ozel.disabled = inp.value !== 'ozel' || !inp.checked;
+                if (inp.value !== 'ozel') ozel.value = '';
+                faturaRaporGridWaGonderBtnGuncelle();
+            };
+        });
+        ozel.disabled = true;
+    }
+    var uyarilar = Array.isArray(j.uyarilar) ? j.uyarilar : [];
+    var uy = document.getElementById('frg_wa_uyari');
+    var pw = document.getElementById('frg_wa_pasif_wrap');
+    var metinler = [];
+    if (uyarilar.indexOf('musteri_pasif') >= 0) metinler.push('Müşteri pasif');
+    if (uyarilar.indexOf('mesai_disi') >= 0) metinler.push('Mesai dışı (09:00–20:00 dışı)');
+    if (uy) {
+        if (metinler.length) { uy.hidden = false; uy.textContent = metinler.join(' · '); }
+        else { uy.hidden = true; uy.textContent = ''; }
+    }
+    if (pw) {
+        pw.hidden = uyarilar.indexOf('musteri_pasif') < 0;
+        var po = document.getElementById('frg_wa_pasif_onay');
+        if (po) {
+            po.onchange = faturaRaporGridWaGonderBtnGuncelle;
+            if (pw.hidden) po.checked = false;
+        }
+    }
+    window.__frgWaState = window.__frgWaState || {};
+    window.__frgWaState.uyarilar = uyarilar;
+    window.__frgWaState.yukleniyor = false;
+    faturaRaporGridWaGonderBtnGuncelle();
+}
+function faturaRaporGridWaGonderBtnGuncelle() {
+    var btn = document.getElementById('frg_wa_gonder');
+    var st = window.__frgWaState || {};
+    if (!btn) return;
+    var pasifGerek = Array.isArray(st.uyarilar) && st.uyarilar.indexOf('musteri_pasif') >= 0;
+    var po = document.getElementById('frg_wa_pasif_onay');
+    var kilit = !!st.gonderiyor || !!st.yukleniyor || (pasifGerek && !(po && po.checked));
+    btn.disabled = kilit;
+}
+function faturaRaporGridWaGonder() {
+    var st = window.__frgWaState;
+    if (!st || !(st.mid > 0) || st.gonderiyor) return;
+    var sel = document.getElementById('frg_wa_sablon');
+    var alici = (document.querySelector('input[name="frg_wa_alici"]:checked') || {}).value || '1';
+    var ozel = document.getElementById('frg_wa_ozel');
+    var po = document.getElementById('frg_wa_pasif_onay');
+    var btn = document.getElementById('frg_wa_gonder');
+    var sonuc = document.getElementById('frg_wa_sonuc');
+    st.gonderiyor = true;
+    if (btn) btn.disabled = true;
+    if (sonuc) { sonuc.hidden = true; sonuc.textContent = ''; }
+    var body = {
+        tutar_turu: st.tutarTur,
+        sablon_id: sel ? String(sel.value || '') : '',
+        alici_secimi: alici,
+        ozel_numara: (alici === 'ozel' && ozel) ? String(ozel.value || '') : '',
+        pasif_onay: (po && po.checked) ? '1' : '0',
+        deneme: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+    };
+    fetch('/giris/api/musteri/' + encodeURIComponent(String(st.mid)) + '/grid-wa-gonder', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(function (r) {
+        return r.json().then(function (j) { return { status: r.status, j: j }; });
+    }).then(function (pak) {
+        st.gonderiyor = false;
+        faturaRaporGridWaGonderBtnGuncelle();
+        var j = pak.j || {};
+        if (sonuc) {
+            sonuc.hidden = false;
+            if (j.ok) {
+                sonuc.className = 'fatura-rapor-grid-wa-sonuc is-ok';
+                sonuc.textContent = String(j.mesaj || 'Gönderildi');
+            } else {
+                sonuc.className = 'fatura-rapor-grid-wa-sonuc is-err';
+                sonuc.textContent = String(j.mesaj || 'Gönderilemedi');
+            }
+        }
+    }).catch(function () {
+        st.gonderiyor = false;
+        faturaRaporGridWaGonderBtnGuncelle();
+        if (sonuc) {
+            sonuc.hidden = false;
+            sonuc.className = 'fatura-rapor-grid-wa-sonuc is-err';
+            sonuc.textContent = 'Gönderilemedi';
+        }
     });
 }
 

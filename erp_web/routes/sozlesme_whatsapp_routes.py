@@ -81,3 +81,34 @@ def api_tahsilat_gonder():
         sonuc_fn=_sonuc_varsayilan,
     )
     return jsonify(govde), kod
+
+
+@bp.route("/giris/api/musteri/<int:mid>/grid-wa-onizleme", methods=["GET"])
+@giris_gerekli
+def api_grid_wa_onizleme(mid: int):
+    """Popup önizleme. Gönderim YAPMAZ. Numara maskeli; tutar sunucuda."""
+    from grid_wa_popup import onizleme
+
+    govde, kod = onizleme(
+        int(mid),
+        request.args.get("tutar_turu") or "",
+        request.args.get("sablon_id"),
+    )
+    return jsonify(govde), kod
+
+
+@bp.route("/giris/api/musteri/<int:mid>/grid-wa-gonder", methods=["POST"])
+@giris_gerekli
+def api_grid_wa_gonder(mid: int):
+    """Popup gönderim. Metin/tutar sunucuda; yalnız sozlesme_wa_isle."""
+    from grid_wa_popup import gonder
+
+    data = request.get_json(silent=True) or {}
+    govde, kod = gonder(
+        _uid(),
+        int(mid),
+        data,
+        request.headers.get("Origin") or "",
+        request.host or "",
+    )
+    return jsonify(govde), kod
