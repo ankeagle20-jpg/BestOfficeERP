@@ -10970,8 +10970,11 @@ function sozlesmelerAylikSessizPollTick() {
 
 function switchTab(index) {
     currentTabIndex = index;
-    var _dfw = document.getElementById('sozlesmeler-durum-filtre-wrap');
-    if (_dfw) _dfw.style.display = (index === 6) ? 'inline-flex' : 'none';
+    if (typeof sozlesmelerDurumFiltreYerlestir === 'function') sozlesmelerDurumFiltreYerlestir();
+    else {
+        var _dfw = document.getElementById('sozlesmeler-durum-filtre-wrap');
+        if (_dfw) _dfw.style.display = (index === 6) ? 'inline-flex' : 'none';
+    }
     try {
         if (index >= 0 && index <= 14) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
@@ -26348,6 +26351,28 @@ function girisMusteriApiUrl(q) {
     }
     return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
 }
+function sozlesmelerDurumFiltreYerlestir() {
+    var wrap = document.getElementById('sozlesmeler-durum-filtre-wrap');
+    if (!wrap) return;
+    var tab = (typeof getActiveTabIndex === 'function') ? getActiveTabIndex() : (typeof currentTabIndex !== 'undefined' ? currentTabIndex : -1);
+    var onSoz = (tab === 6);
+    wrap.style.display = onSoz ? 'inline-flex' : 'none';
+    if (!onSoz) return;
+    var tb = document.getElementById('giris-secili-musteri-toolbar');
+    var kartli = !!(tb && tb.classList.contains('is-visible'));
+    var actions = tb ? tb.querySelector('.giris-secili-toolbar-actions') : null;
+    var baslik = document.querySelector('.genel-musteri-ara-baslik');
+    if (kartli && actions) {
+        if (wrap.parentElement !== actions) {
+            actions.insertBefore(wrap, actions.firstChild);
+        }
+    } else if (baslik) {
+        if (wrap.parentElement !== baslik) {
+            baslik.appendChild(wrap);
+        }
+    }
+}
+
 function girisDurumFiltreDegisti() {
     if (typeof musteriAra === 'function') musteriAra();
     var nameEl = document.getElementById('name');
@@ -26524,6 +26549,7 @@ function girisMusteriAramaPaneliniGizle(secilenAd) {
     if (tb) tb.classList.add('is-visible');
     if (adEl) adEl.textContent = (secilenAd != null && String(secilenAd).trim()) ? String(secilenAd).trim() : '—';
     girisSeciliMusteriTekilListeNotTemizle();
+    if (typeof sozlesmelerDurumFiltreYerlestir === 'function') sozlesmelerDurumFiltreYerlestir();
 }
 
 function girisMusteriAramayiAc() {
@@ -26531,6 +26557,7 @@ function girisMusteriAramayiAc() {
     var tb = document.getElementById('giris-secili-musteri-toolbar');
     if (panel) panel.style.display = 'flex';
     if (tb) tb.classList.remove('is-visible');
+    if (typeof sozlesmelerDurumFiltreYerlestir === 'function') sozlesmelerDurumFiltreYerlestir();
     var hi = document.getElementById('header-arama-input');
     if (hi) { hi.focus(); hi.select(); }
 }

@@ -25,25 +25,44 @@ def _tjs() -> str:
 
 def test_dropdown_kart_yokken_gorunur_mantik():
     html = _html()
+    tjs = _tjs()
     # Tek kaynak
     check("tek wrap", html.count('id="sozlesmeler-durum-filtre-wrap"') == 1)
     check("tek select", html.count('id="sozlesmeler-durum-filtre"') == 1)
-    # Toolbar içinde değil (kart toolbar'ı gizli)
-    tb_i = html.find('id="giris-secili-musteri-toolbar"')
-    tb_end = html.find('id="giris-musteri-arama-panel"', tb_i)
-    if tb_end < 0:
-        tb_end = tb_i + 2500
-    tb_chunk = html[tb_i:tb_end]
-    check("toolbarda select yok", 'id="sozlesmeler-durum-filtre"' not in tb_chunk)
-    # Müşteri Ara yanında
+    # İlk HTML: Müşteri Ara yanında (kart yokken başlangıç yeri)
     ara_i = html.find('id="genel-musteri-ara"')
     wrap_i = html.find('id="sozlesmeler-durum-filtre-wrap"')
     check("wrap ara yakini", wrap_i >= 0 and ara_i >= 0 and abs(wrap_i - ara_i) < 1200)
     check("baslik satiri", "genel-musteri-ara-baslik" in html)
-    # İlk HTML gizli; switchTab(6) açar (kart gerekmez)
+    # İlk HTML gizli; yerlestir tab 6'da açar (kart gerekmez)
     check("wrap display none varsayilan", "display:none" in html[wrap_i : wrap_i + 200])
-    check("switchTab kart bagimsiz", "_dfw.style.display = (index === 6)" in html)
+    check("yerlestir fn html", "function sozlesmelerDurumFiltreYerlestir" in html)
+    check("yerlestir fn tjs", "function sozlesmelerDurumFiltreYerlestir" in tjs)
     check("varsayilan aktif option", 'option value="aktif" selected' in html)
+
+    # (a) kart yokken: !is-visible → genel-musteri-ara-baslik
+    yer_i = html.find("function sozlesmelerDurumFiltreYerlestir")
+    yer = html[yer_i : yer_i + 1200]
+    check("a kart yokken ara baslik", "genel-musteri-ara-baslik" in yer and "appendChild(wrap)" in yer)
+    check("a tab6 display", "inline-flex" in yer)
+
+    # (b) kart yüklüyken: is-visible → toolbar-actions
+    check("b kartli toolbar actions", "is-visible" in yer and "giris-secili-toolbar-actions" in yer)
+    check("b insertBefore actions", "insertBefore(wrap" in yer)
+    check("gizle yerlestir cagirir", "sozlesmelerDurumFiltreYerlestir()" in html[html.find("function girisMusteriAramaPaneliniGizle") :][:900])
+    check("ac yerlestir cagirir", "sozlesmelerDurumFiltreYerlestir()" in html[html.find("function girisMusteriAramayiAc") :][:700])
+
+    # (c) kart durum değiştirme (B) kart yüklüyken görünür
+    md = html.find('id="musteri_durum"')
+    check("c musteri_durum var", md >= 0)
+    satir = html.find('id="musteri_durum_satir"')
+    check("c durum satir flex", satir >= 0 and "display:flex" in html[satir : satir + 120])
+    # Kart seçimi B'yi gizlemez
+    gizle = html[html.find("function girisMusteriAramaPaneliniGizle") : html.find("function girisMusteriAramaPaneliniGizle") + 900]
+    check("c gizle musteri_durum dokunmaz", "musteri_durum" not in gizle)
+
+    # (d) tek eleman (zaten üstte; tekrar vurgula)
+    check("d tek filtre select", html.count('id="sozlesmeler-durum-filtre"') == 1)
 
 
 def test_musteri_ara_durum_param():
