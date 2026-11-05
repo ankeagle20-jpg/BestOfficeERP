@@ -2142,6 +2142,27 @@
     border-color: #4fc3f7;
     color: #e0f7fa;
 }
+.fatura-rapor-giris-ay-pill--sifir {
+    opacity: 0.42;
+}
+.fatura-rapor-giris-gun-no {
+    font-weight: 700;
+}
+.fatura-rapor-giris-gun-adet {
+    margin-left: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    opacity: 0.9;
+    white-space: nowrap;
+}
+.fatura-rapor-giris-gun-toplam {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(79, 195, 247, 0.25);
+    font-size: 11px;
+    color: #90caf9;
+    font-weight: 600;
+}
 .fatura-rapor-giris-yil-lbl {
     display: inline-flex;
     align-items: center;
@@ -12331,6 +12352,186 @@ function faturaRaporGirisAyTumu() {
 
 window.__faturaRaporGirisGunler = window.__faturaRaporGirisGunler || [];
 
+
+window.__faturaRaporGunSayimSnap = window.__faturaRaporGunSayimSnap || {};
+window.__faturaRaporGunSayimMap = window.__faturaRaporGunSayimMap || {};
+
+/** Satır meta (data-fr-*) — sayım snapshot. */
+function faturaRaporGirisGunSayimSatirMeta(tr) {
+    if (!tr || !tr.getAttribute) return null;
+    var mid = tr.getAttribute('data-musteri-id');
+    if (!mid) return null;
+    var gun = parseInt(tr.getAttribute('data-fr-gun-n') || '0', 10) || 0;
+    return {
+        mid: String(mid),
+        gun: (gun >= 1 && gun <= 31) ? gun : 0,
+        tarih: tr.getAttribute('data-fr-tarih') || '',
+        ad: tr.getAttribute('data-fr-ad') || '',
+        ara: tr.getAttribute('data-fr-ara') || '',
+        grup2: tr.getAttribute('data-fr-grup2') || '',
+        hizmet: tr.getAttribute('data-fr-hizmet') || '',
+        durum: tr.getAttribute('data-fr-durum') || '',
+        durumSort: tr.getAttribute('data-fr-durum-sort') || '',
+        borcN: tr.getAttribute('data-fr-borc-n'),
+        oda: tr.getAttribute('data-fr-hazir-oda') || ''
+    };
+}
+
+/**
+ * ListeAra ile aynı istemci süzgeçleri; Günler (ggz) HARİÇ.
+ * meta: snapshot objesi.
+ */
+function faturaRaporGirisGunSayimMetaUygun(meta) {
+    if (!meta) return false;
+    var inp = document.getElementById('fatura_rapor_liste_ara');
+    var qRaw = inp ? String(inp.value || '').trim() : '';
+    var q = qRaw.toLocaleLowerCase('tr-TR');
+    if (qRaw) {
+        var ad = String(meta.ad || '').toLocaleLowerCase('tr-TR');
+        var frAra = String(meta.ara || '').toLocaleLowerCase('tr-TR');
+        var g2m = String(meta.grup2 || '').toLocaleLowerCase('tr-TR');
+        var hizm = String(meta.hizmet || '').toLocaleLowerCase('tr-TR');
+        var durm = String(meta.durum || '').toLocaleLowerCase('tr-TR');
+        var tarih = String(meta.tarih || '').toLowerCase();
+        if (!(ad.indexOf(q) >= 0 || frAra.indexOf(q) >= 0 || g2m.indexOf(q) >= 0 ||
+              hizm.indexOf(q) >= 0 || durm.indexOf(q) >= 0 || tarih.indexOf(q) >= 0)) {
+            return false;
+        }
+    }
+    var fd = (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '';
+    var fdEff = fd;
+    if (!fdEff) {
+        var pdChk = document.getElementById('fatura_rapor_pasif_dahil');
+        var saChk = document.getElementById('fatura_rapor_sadece_aktif');
+        if (pdChk && pdChk.checked) fdEff = 'pasif';
+        else if (saChk && saChk.checked) fdEff = 'aktif';
+    }
+    if (fdEff) {
+        var ds = String(meta.durumSort || '').toLowerCase();
+        if (fdEff === 'aktif' && ds !== 'aktif') return false;
+        if (fdEff === 'pasif' && ds !== 'pasif') return false;
+    }
+    var fg2Arr = (typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
+    if (fg2Arr && fg2Arr.length) {
+        if (typeof faturaRaporFirmaGrup2SatirUygun === 'function') {
+            if (!faturaRaporFirmaGrup2SatirUygun(meta.grup2 || '', fg2Arr)) return false;
+        }
+    }
+    var fhDizi = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
+    if (fhDizi && fhDizi.length) {
+        if (typeof faturaRaporHizmetFiltreSatirUygun === 'function') {
+            if (!faturaRaporHizmetFiltreSatirUygun(meta.hizmet || '', fhDizi)) return false;
+        }
+    }
+    var gaz = (typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [];
+    if (gaz && gaz.length > 0) {
+        var tiso = String(meta.tarih || '').trim();
+        var gmo = 0;
+        if (/^\d{4}-\d{2}-\d{2}/.test(tiso)) gmo = parseInt(tiso.slice(5, 7), 10);
+        if (!gmo || gmo < 1 || gmo > 12 || gaz.indexOf(gmo) < 0) return false;
+    }
+    var gyil = (typeof faturaRaporGirisYillarOku === 'function') ? faturaRaporGirisYillarOku() : null;
+    if (gyil != null) {
+        var tyil = String(meta.tarih || '').trim();
+        var gy = 0;
+        if (/^\d{4}-\d{2}-\d{2}/.test(tyil)) gy = parseInt(tyil.slice(0, 4), 10);
+        if (!gy || gyil.indexOf(gy) < 0) return false;
+    }
+    var odaF = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
+    if (odaF) {
+        var trOda = String(meta.oda || '').trim();
+        if (odaF === 'hepsi') {
+            if (trOda === '') return false;
+        } else if (odaF === 'yok') {
+            if (trOda !== '') return false;
+        } else if (trOda !== odaF) {
+            return false;
+        }
+    }
+    var elSb = document.getElementById('fatura_rapor_sadece_borclu');
+    if (elSb && elSb.checked) {
+        var borcRaw = meta.borcN;
+        if (borcRaw != null && String(borcRaw).trim() !== '') {
+            var borcN = parseFloat(borcRaw);
+            if (isFinite(borcN) && !(borcN > 0.005)) return false;
+        }
+    }
+    return true;
+}
+
+/** Tablo satırlarından snapshot güncelle. replace=true: sıfırla (Günler filtresi boşken). */
+function faturaRaporGirisGunSayimSnapFromTablo(replace) {
+    var tbody = document.getElementById('fatura_rapor_tbody');
+    var tablo = document.getElementById('fatura_rapor_tablo');
+    if (!tbody || !tablo || tablo.dataset.faturaRaporFirma !== '1') return;
+    if (replace) window.__faturaRaporGunSayimSnap = {};
+    var snap = window.__faturaRaporGunSayimSnap || (window.__faturaRaporGunSayimSnap = {});
+    tbody.querySelectorAll('tr[data-musteri-id]').forEach(function (tr) {
+        var m = faturaRaporGirisGunSayimSatirMeta(tr);
+        if (!m) return;
+        snap[m.mid] = m;
+    });
+}
+
+/**
+ * Gün → adet haritası. Günler filtresi sayımı ETKİLEMEZ.
+ * Boş/geçersiz gün (0) sayıma katılmaz.
+ * @returns {Object} counts+total (Günler filtresi haric)
+ */
+function faturaRaporGirisGunSayimHesapla(snapIn) {
+    var snap = snapIn || window.__faturaRaporGunSayimSnap || {};
+    var counts = {};
+    var d;
+    for (d = 1; d <= 31; d++) counts[d] = 0;
+    var total = 0;
+    Object.keys(snap).forEach(function (mid) {
+        var meta = snap[mid];
+        if (!faturaRaporGirisGunSayimMetaUygun(meta)) return;
+        var g = meta.gun | 0;
+        if (g < 1 || g > 31) return;
+        counts[g] = (counts[g] || 0) + 1;
+        total += 1;
+    });
+    window.__faturaRaporGunSayimMap = counts;
+    window.__faturaRaporGunSayimToplam = total;
+    return { counts: counts, total: total };
+}
+
+function faturaRaporGirisGunSayimYukluSatirGerekliMi() {
+    var elSb = document.getElementById('fatura_rapor_sadece_borclu');
+    if (elSb && elSb.checked) return true;
+    var inp = document.getElementById('fatura_rapor_liste_ara');
+    if (inp && String(inp.value || '').trim()) return true;
+    return false;
+}
+function faturaRaporGirisGunSayimVePanelGuncelle() {
+    var yuklu = faturaRaporGirisGunSayimYukluSatirGerekliMi();
+    if (yuklu) {
+        // Sadece borçlular / yerel arama: sunucu gun_sayilari bu süzgeçleri bilmez;
+        // ek canlı borç hesabı yok — yüklü satırlardan say.
+        faturaRaporGirisGunSayimSnapFromTablo(true);
+        faturaRaporGirisGunSayimHesapla();
+        window.__faturaRaporGunSayilariKaynak = 'yuklu_satirlar';
+    } else if (window.__faturaRaporGunSayilari && typeof window.__faturaRaporGunSayilari === 'object') {
+        var counts = {};
+        var total = 0;
+        for (var d = 1; d <= 31; d++) {
+            var n = parseInt(window.__faturaRaporGunSayilari[d] != null ? window.__faturaRaporGunSayilari[d] : window.__faturaRaporGunSayilari[String(d)], 10) || 0;
+            counts[d] = n;
+            total += n;
+        }
+        window.__faturaRaporGunSayimMap = counts;
+        window.__faturaRaporGunSayimToplam = total;
+        window.__faturaRaporGunSayilariKaynak = 'sunucu';
+    } else {
+        faturaRaporGirisGunSayimSnapFromTablo(true);
+        faturaRaporGirisGunSayimHesapla();
+        window.__faturaRaporGunSayilariKaynak = 'yuklu_satirlar';
+    }
+    if (typeof faturaRaporGirisGunPanelSayilariCiz === 'function') faturaRaporGirisGunPanelSayilariCiz();
+}
+
+
 function faturaRaporGirisGunlerOku() {
     try {
         var a = window.__faturaRaporGirisGunler;
@@ -12357,21 +12558,72 @@ function faturaRaporGirisGunFiltreMetni(arr) {
 }
 function faturaRaporGirisGunPanelRender() {
     var row = document.getElementById('fatura_rapor_giris_gun_row');
-    if (!row || row.dataset.built === '1') return;
-    row.dataset.built = '1';
-    var parts = ['<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="0">Tümü</button>'];
-    for (var d = 1; d <= 31; d++) {
-        parts.push('<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="' + d + '">' + d + '</button>');
+    if (!row) return;
+    if (row.dataset.built !== '1') {
+        row.dataset.built = '1';
+        var parts = ['<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="0">Tümü</button>'];
+        for (var d = 1; d <= 31; d++) {
+            parts.push(
+                '<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="' + d + '"' +
+                ' title="' + d + '. gün">' +
+                '<span class="fatura-rapor-giris-gun-no">' + d + '</span>' +
+                '<span class="fatura-rapor-giris-gun-adet" data-giris-gun-adet="' + d + '"></span>' +
+                '</button>'
+            );
+        }
+        row.innerHTML = parts.join('');
+        var pop = document.getElementById('fatura_rapor_giris_gun_pop');
+        if (pop && !pop.querySelector('.fatura-rapor-giris-gun-toplam')) {
+            var tot = document.createElement('div');
+            tot.className = 'fatura-rapor-giris-gun-toplam';
+            tot.id = 'fatura_rapor_giris_gun_toplam';
+            tot.textContent = 'Toplam: —';
+            pop.appendChild(tot);
+        }
+        row.addEventListener('click', function (e) {
+            var t = e.target.closest('[data-giris-gun]');
+            if (!t || !row.contains(t)) return;
+            e.stopPropagation();
+            var v = parseInt(t.getAttribute('data-giris-gun'), 10);
+            if (v === 0) faturaRaporGirisGunTumu();
+            else faturaRaporGirisGunToggle(v);
+        });
     }
-    row.innerHTML = parts.join('');
-    row.addEventListener('click', function (e) {
-        var t = e.target.closest('[data-giris-gun]');
-        if (!t || !row.contains(t)) return;
-        e.stopPropagation();
-        var v = parseInt(t.getAttribute('data-giris-gun'), 10);
-        if (v === 0) faturaRaporGirisGunTumu();
-        else faturaRaporGirisGunToggle(v);
-    });
+    if (typeof faturaRaporGirisGunSayimVePanelGuncelle === 'function') {
+        faturaRaporGirisGunSayimVePanelGuncelle();
+    } else if (typeof faturaRaporGirisGunPanelSayilariCiz === 'function') {
+        faturaRaporGirisGunPanelSayilariCiz();
+    }
+}
+function faturaRaporGirisGunPanelSayilariCiz() {
+    var map = window.__faturaRaporGunSayimMap || {};
+    var total = (window.__faturaRaporGunSayimToplam != null)
+        ? window.__faturaRaporGunSayimToplam
+        : 0;
+    var row = document.getElementById('fatura_rapor_giris_gun_row');
+    if (row) {
+        row.querySelectorAll('[data-giris-gun]').forEach(function (b) {
+            var v = parseInt(b.getAttribute('data-giris-gun'), 10);
+            if (!v) return;
+            var n = map[v] != null ? (parseInt(map[v], 10) || 0) : 0;
+            var adet = b.querySelector('[data-giris-gun-adet]');
+            if (adet) {
+                adet.textContent = n > 0 ? ('(' + n + ')') : '(0)';
+            } else {
+                b.innerHTML = '<span class="fatura-rapor-giris-gun-no">' + v + '</span>' +
+                    '<span class="fatura-rapor-giris-gun-adet">(' + n + ')</span>';
+            }
+            b.title = v + '. gün: ' + n + ' müşteri';
+            b.classList.toggle('fatura-rapor-giris-ay-pill--sifir', n === 0);
+            b.disabled = false;
+        });
+    }
+    var totEl = document.getElementById('fatura_rapor_giris_gun_toplam');
+    if (totEl) {
+        var kay = window.__faturaRaporGunSayilariKaynak || '';
+        var notu = (kay === 'yuklu_satirlar') ? ' (yüklü satırlar)' : '';
+        totEl.textContent = 'Toplam: ' + total + ' müşteri' + notu;
+    }
 }
 function faturaRaporGirisGunPanelBtnDurumlari() {
     var row = document.getElementById('fatura_rapor_giris_gun_row');
@@ -12430,6 +12682,7 @@ function faturaRaporGirisGunPanelToggle(ev) {
     if (typeof faturaRaporGirisAyPanelKapat === 'function') faturaRaporGirisAyPanelKapat();
     if (typeof faturaRaporGirisYilPanelKapat === 'function') faturaRaporGirisYilPanelKapat();
     faturaRaporGirisGunPanelRender();
+    if (typeof faturaRaporGirisGunSayimVePanelGuncelle === 'function') faturaRaporGirisGunSayimVePanelGuncelle();
     faturaRaporGirisGunPanelBtnDurumlari();
     faturaRaporGirisGunPanelInlineTemizle(pop);
     pop.hidden = false;
@@ -14350,6 +14603,7 @@ function faturaRaporListeAraUygula() {
         if (typeof faturaRaporFirmaUstDurumGuncelle === 'function') faturaRaporFirmaUstDurumGuncelle();
         if (typeof faturaRaporFirmaSayfalamaUI === 'function') faturaRaporFirmaSayfalamaUI();
         if (typeof faturaRaporFiltreAktifRozetGuncelle === 'function') faturaRaporFiltreAktifRozetGuncelle();
+        if (typeof faturaRaporGirisGunSayimVePanelGuncelle === 'function') faturaRaporGirisGunSayimVePanelGuncelle();
     }
     faturaRaporFirmaOzetAltGuncelle();
 }
@@ -15465,6 +15719,11 @@ function faturaRaporYukle() {
             var silBtn = document.getElementById('fatura_rapor_sil_btn');
             if (data.gorunum === 'firma_ozet') {
                 try { window.__faturaRaporSonData = data; } catch (eSd2) {}
+                try {
+                    window.__faturaRaporGunSayilari = (data && data.gun_sayilari) ? data.gun_sayilari : null;
+                    window.__faturaRaporGunBos = (data && data.gun_bos != null) ? data.gun_bos : 0;
+                    window.__faturaRaporGunSayilariKaynak = (data && data.gun_sayilari_kaynak) ? data.gun_sayilari_kaynak : 'sunucu';
+                } catch (eGs) {}
                 if (silBtn) silBtn.style.display = 'none';
                 var fScroll = document.getElementById('fatura_rapor_tablo_scroll');
                 var fFrame = document.getElementById('fatura_rapor_firma_frame');

@@ -244,8 +244,19 @@ global.document = {
         get hidden() { return popHidden; },
         set hidden(v) { popHidden = !!v; },
         style: {},
-        setAttribute: function () {}
+        setAttribute: function () {},
+        querySelector: function () { return null; },
+        appendChild: function () {}
       };
+    }
+    if (id === 'fatura_rapor_giris_gun_toplam') {
+      return { textContent: '' };
+    }
+    if (id === 'fatura_rapor_tbody') {
+      return { querySelectorAll: function () { return []; } };
+    }
+    if (id === 'fatura_rapor_tablo') {
+      return { dataset: { faturaRaporFirma: '1' } };
     }
     if (id === 'fatura_rapor_giris_gun_btn') {
       return {
@@ -269,7 +280,10 @@ global.document = {
     if (id === 'fatura_rapor_gorunum') return { value: 'detay' };
     return null;
   },
-  documentElement: { clientWidth: 1200 }
+  documentElement: { clientWidth: 1200 },
+  createElement: function () {
+    return { className: '', id: '', textContent: '', style: {} };
+  }
 };
 global.requestAnimationFrame = function (fn) { fn(); };
 """
@@ -312,6 +326,152 @@ if (popHidden !== true) process.exitCode = 1;
     check("node kapanir satiri", "ok node panel kapanir" in out)
 
 
+
+def test_gun_sayim():
+    """Gün sayımı: diğer filtreler uygulanır, Günler filtresi sayıyı etkilemez."""
+    import subprocess
+    import tempfile
+
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    check("sayim fn html", "function faturaRaporGirisGunSayimHesapla" in html)
+    check("sayim meta uygun", "function faturaRaporGirisGunSayimMetaUygun" in html)
+    meta_fn = html[
+        html.find("function faturaRaporGirisGunSayimMetaUygun") : html.find(
+            "function faturaRaporGirisGunSayimSnapFromTablo"
+        )
+    ]
+    check("meta gun filtresi yok", "GirisGunlerOku" not in meta_fn and "ggz" not in meta_fn)
+    check("panel adet ciz", "function faturaRaporGirisGunPanelSayilariCiz" in html)
+    check("css sifir", "fatura-rapor-giris-ay-pill--sifir" in html)
+    check(
+        "toplam el",
+        "fatura_rapor_giris_gun_toplam" in html or "fatura-rapor-giris-gun-toplam" in html,
+    )
+    check("f render adet", "data-giris-gun-adet" in html and "fatura-rapor-giris-gun-adet" in html)
+
+    start = html.find("window.__faturaRaporGunSayimSnap")
+    if start < 0:
+        start = html.find("function faturaRaporGirisGunSayimSatirMeta")
+    end = html.find("function faturaRaporGirisGunPanelRender", start)
+    block_js = html[start:end]
+
+    preamble = """
+global.window = global;
+global.document = {
+  getElementById: function () { return null; }
+};
+function faturaRaporFirmaFiltreDurumOku() { return ''; }
+function faturaRaporFirmaFiltreGrup2DiziOku() { return []; }
+function faturaRaporFirmaFiltreHizmetDiziOku() { return []; }
+function faturaRaporGirisAylarOku() { return global.__gaz || []; }
+function faturaRaporGirisYillarOku() { return global.__gyil == null ? null : global.__gyil; }
+function faturaRaporOdaFiltreOku() { return null; }
+function faturaRaporFirmaGrup2SatirUygun() { return true; }
+function faturaRaporHizmetFiltreSatirUygun() { return true; }
+"""
+    body = """
+var snap = {
+  '1': { mid:'1', gun:15, tarih:'2025-03-15', ad:'A', ara:'', grup2:'', hizmet:'', durum:'Aktif', durumSort:'aktif', borcN:'10', oda:'' },
+  '2': { mid:'2', gun:15, tarih:'2025-03-15', ad:'B', ara:'', grup2:'', hizmet:'', durum:'Aktif', durumSort:'aktif', borcN:'0', oda:'' },
+  '3': { mid:'3', gun:1, tarih:'2025-01-01', ad:'C', ara:'', grup2:'', hizmet:'', durum:'Aktif', durumSort:'aktif', borcN:'5', oda:'' },
+  '4': { mid:'4', gun:31, tarih:'2025-01-31', ad:'D', ara:'', grup2:'', hizmet:'', durum:'Pasif', durumSort:'pasif', borcN:'8', oda:'' },
+  '5': { mid:'5', gun:0, tarih:'', ad:'E', ara:'', grup2:'', hizmet:'', durum:'Aktif', durumSort:'aktif', borcN:'3', oda:'' },
+  '6': { mid:'6', gun:15, tarih:'2025-04-15', ad:'F', ara:'', grup2:'', hizmet:'', durum:'Aktif', durumSort:'aktif', borcN:'2', oda:'' }
+};
+window.__faturaRaporGunSayimSnap = snap;
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek||''))));
+  if (!ok) process.exitCode = 1;
+}
+var r = faturaRaporGirisGunSayimHesapla(snap);
+say('a grup 15', r.counts[15] === 3, JSON.stringify(r.counts));
+say('a grup 1', r.counts[1] === 1);
+say('a grup 31', r.counts[31] === 1);
+say('g bos gun katilmaz', r.total === 5 && r.counts[15]+r.counts[1]+r.counts[31] === 5);
+global.__gaz = [3];
+r = faturaRaporGirisGunSayimHesapla(snap);
+say('b aylar 15', r.counts[15] === 2, JSON.stringify(r.counts));
+say('b aylar 1 sifir', r.counts[1] === 0);
+say('b toplam', r.total === 2);
+global.__gaz = [];
+window.__faturaRaporGirisGunler = [15];
+r = faturaRaporGirisGunSayimHesapla(snap);
+say('c gun filtre etkilemez', r.counts[1] === 1 && r.counts[15] === 3 && r.counts[31] === 1, JSON.stringify(r.counts));
+window.__faturaRaporGirisGunler = [];
+r = faturaRaporGirisGunSayimHesapla(snap);
+say('d total', r.total === 5);
+say('e gun2 sifir', r.counts[2] === 0);
+document.getElementById = function (id) {
+  if (id === 'fatura_rapor_sadece_borclu') return { checked: true };
+  if (id === 'fatura_rapor_liste_ara') return { value: '' };
+  return null;
+};
+r = faturaRaporGirisGunSayimHesapla(snap);
+say('b borclu 15', r.counts[15] === 2, JSON.stringify(r.counts));
+"""
+    node = preamble + block_js + body
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        proc = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+    except FileNotFoundError:
+        check("node sayim", False, "node yok")
+        return
+    out = (proc.stdout or "") + (proc.stderr or "")
+    print(out.strip())
+    check("node sayim exit", proc.returncode == 0, out[-300:])
+    for needle in [
+        "ok a grup 15",
+        "ok b aylar 15",
+        "ok c gun filtre etkilemez",
+        "ok d total",
+        "ok e gun2 sifir",
+        "ok g bos gun katilmaz",
+        "ok b borclu 15",
+    ]:
+        check(needle, needle in out)
+
+
+
+
+def test_gun_sayilari_sunucu():
+    """Yol (b): sunucu GROUP BY; giri_gunler sayımı etkilemez; page_size bağımsız."""
+    import inspect
+    from routes.faturalar_routes import (
+        _FIRMA_OZET_GIRIS_TARIHI_SQL,
+        _firma_ozet_gun_sayilari_hesapla,
+        _firma_ozet_dataset_from_request,
+    )
+
+    src = inspect.getsource(_firma_ozet_gun_sayilari_hesapla)
+    check("helper GROUP BY DAY", "GROUP BY 1" in src and "EXTRACT(DAY FROM" in src)
+    check("helper ayni giris ifadesi", '_FIRMA_OZET_GIRIS_TARIHI_SQL' in src and 'EXTRACT(DAY FROM' in src)
+    check("helper borc yok", "grid_ozet" not in src and "prewarm" not in src and "toplam_borc" not in src)
+
+    ds = inspect.getsource(_firma_ozet_dataset_from_request)
+    check("dataset gun_sayilari_ay", "giri_ay_sql_ay" in ds and "giri_gun_sql" in ds)
+    check("dataset sayim ay only", "giri_ay_sql=giri_ay_sql_ay" in ds)
+    check("dataset payload alan", '"gun_sayilari"' in ds and '"gun_bos"' in ds)
+    check("dataset sadece_borclu sayimda yok", "sadece_borclu" not in src)
+
+    # Sentetik: helper returns zeros on empty/error without DB — call with impossible where
+    counts, bos = _firma_ozet_gun_sayilari_hesapla(
+        musteri_where="FALSE",
+        hizli=True,
+    )
+    check("a bos where counts", isinstance(counts, dict) and counts.get(15, 0) == 0 and len(counts) == 31)
+    check("e bos gun alani", isinstance(bos, int) and bos >= 0)
+
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    check("c istemci sunucu map", "__faturaRaporGunSayilari" in html and "gun_sayilari" in html)
+    check("c yuklu yedek borclu", "yuklu_satirlar" in html and "Sadece borçlular" in html[html.find("faturaRaporGirisGunSayimYukluSatirGerekliMi"):html.find("faturaRaporGirisGunSayimYukluSatirGerekliMi")+800])
+    check("f panel adet", "data-giris-gun-adet" in html)
+    # page_size independence: sayim call before page_size paging uses same helper regardless of page
+    check("c page bagimsiz cagri", ds.find("_firma_ozet_gun_sayilari_hesapla") < ds.find("if page_size > 0"))
+
+
+
 if __name__ == "__main__":
     test_parse_ve_sql()
     test_client_filtre()
@@ -319,6 +479,8 @@ if __name__ == "__main__":
     test_sayac_ve_excel()
     test_ui_kalip()
     test_gun_panel_ac_kapa()
+    test_gun_sayim()
+    test_gun_sayilari_sunucu()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)

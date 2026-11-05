@@ -3804,6 +3804,116 @@ def _firma_ozet_build_rows_firma_sql(
             """
 
 
+
+def _firma_ozet_gun_sayilari_hesapla(
+    *,
+    musteri_where: str,
+    mk_df_sql: str = "",
+    mk_df_params: list | None = None,
+    giri_ay_sql: str = "",
+    giri_ay_params: list | None = None,
+    ho_sql: str = "",
+    ho_params: list | None = None,
+    giri_yil_sql: str = "",
+    giri_yil_params: list | None = None,
+    arama_sql: str = "",
+    arama_params: list | None = None,
+    suzgec_sql: str = "",
+    suzgec_params: list | None = None,
+    cift_olanlar: bool = False,
+    hizli: bool = True,
+) -> tuple[dict[int, int], int]:
+    """Gün → adet (1..31) ve günü boş küme boyutu.
+
+    Aynı WHERE parçaları; çağıran `giri_gunler` koşulunu GÖNDERMEMELİ.
+    Ek pahalı borç hesabı yok.
+    """
+    counts: dict[int, int] = {d: 0 for d in range(1, 32)}
+    gun_bos = 0
+    mk_p = list(mk_df_params or [])
+    ay_p = list(giri_ay_params or [])
+    ho_p = list(ho_params or [])
+    yil_p = list(giri_yil_params or [])
+    ar_p = list(arama_params or [])
+    sz_p = list(suzgec_params or [])
+    cift_sql = ""
+    cift_params: list = []
+    if cift_olanlar:
+        cift_sql, cift_params = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
+            musteri_where=musteri_where,
+            mk_df_sql=mk_df_sql,
+            giri_ay_sql=giri_ay_sql,
+            ho_sql=ho_sql,
+            arama_sql=arama_sql,
+            hizli=hizli,
+            suzgec_sql=suzgec_sql,
+            mk_df_params=mk_p,
+            giri_ay_params=ay_p,
+            ho_params=ho_p,
+            arama_params=ar_p,
+            suzgec_params=sz_p,
+        )
+    where_frag = f"{mk_df_sql}{giri_ay_sql}{ho_sql}{giri_yil_sql}{arama_sql}{cift_sql}{suzgec_sql}"
+    _, params = _firma_ozet_param_sirala(
+        (mk_df_sql, mk_p),
+        (giri_ay_sql, ay_p),
+        (ho_sql, ho_p),
+        (giri_yil_sql, yil_p),
+        (arama_sql, ar_p),
+        (cift_sql, cift_params),
+        (suzgec_sql, sz_p),
+    )
+    mk_join = _firma_ozet_mk_join_sql(hizli)
+    gun_expr = f"(EXTRACT(DAY FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int"
+    sql_grp = f"""
+        SELECT {gun_expr} AS gun, COUNT(*)::int AS n
+        FROM customers c
+        {mk_join}
+        WHERE {musteri_where}
+          {where_frag}
+          AND ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) IS NOT NULL
+          AND {gun_expr} BETWEEN 1 AND 31
+        GROUP BY 1
+    """
+    sql_bos = f"""
+        SELECT COUNT(*)::int AS n
+        FROM customers c
+        {mk_join}
+        WHERE {musteri_where}
+          {where_frag}
+          AND (
+              ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) IS NULL
+              OR {gun_expr} IS NULL
+              OR {gun_expr} < 1
+              OR {gun_expr} > 31
+          )
+    """
+    try:
+        for row in fetch_all(sql_grp, tuple(params)) or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                g = int(row.get("gun"))
+                n = int(row.get("n") or 0)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= g <= 31 and n > 0:
+                counts[g] = n
+        bos_row = fetch_one(sql_bos, tuple(params))
+        if isinstance(bos_row, dict):
+            try:
+                gun_bos = max(0, int(bos_row.get("n") or 0))
+            except (TypeError, ValueError):
+                gun_bos = 0
+    except Exception as e_gs:
+        try:
+            current_app.logger.warning("firma_ozet gun_sayilari err=%r", e_gs)
+        except Exception:
+            pass
+        return {d: 0 for d in range(1, 32)}, 0
+    return counts, gun_bos
+
+
 def _firma_ozet_liste_sorgusu_kur(
     *,
     musteri_where: str,
@@ -4950,22 +5060,27 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         )
         mk_df_params.append(duzenli_fatura)
     giris_aylar_filtre = _fatura_rapor_giris_aylari_parse(request.args.get("giri_aylar"))
-    giri_ay_sql = ""
-    giri_ay_params: list = []
+    giri_ay_sql_ay = ""
+    giri_ay_params_ay: list = []
     if giris_aylar_filtre:
         # IN (%s,…) — psycopg2’de ANY(%s::int[]) bazı sürümlerde/uzak DB’de güvenilir bağlanmıyor.
         _gph = ", ".join(["%s"] * len(giris_aylar_filtre))
-        giri_ay_sql = (
+        giri_ay_sql_ay = (
             f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
         )
-        giri_ay_params.extend(giris_aylar_filtre)
+        giri_ay_params_ay.extend(giris_aylar_filtre)
     giris_gunler_filtre = _fatura_rapor_giris_gunleri_parse(request.args.get("giri_gunler"))
+    giri_gun_sql = ""
+    giri_gun_params: list = []
     if giris_gunler_filtre:
         _dph = ", ".join(["%s"] * len(giris_gunler_filtre))
-        giri_ay_sql += (
+        giri_gun_sql = (
             f" AND (EXTRACT(DAY FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_dph})"
         )
-        giri_ay_params.extend(giris_gunler_filtre)
+        giri_gun_params.extend(giris_gunler_filtre)
+    # Ana liste: ay + gün; gun_sayilari hesabı yalnız ay (giri_gunler HARİÇ).
+    giri_ay_sql = giri_ay_sql_ay + giri_gun_sql
+    giri_ay_params = list(giri_ay_params_ay) + list(giri_gun_params)
     ho_sql, ho_params = _firma_ozet_oda_sql(client_oda_raw, excel_mode=excel_mode)
     hazir_oda_filtre = ho_params[0] if ho_params else None
     giris_yillar_filtre = _fatura_rapor_giris_yillari_parse(request.args.get("giri_yillar"))
@@ -4993,6 +5108,32 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         hizli=liste_hizli,
         firma_guncel_sql=_firma_guncel_grid_sql,
     )
+    _t_gun_say = time.perf_counter()
+    gun_sayilari_map, gun_bos_n = _firma_ozet_gun_sayilari_hesapla(
+        musteri_where=musteri_where,
+        mk_df_sql=mk_df_sql,
+        mk_df_params=mk_df_params,
+        giri_ay_sql=giri_ay_sql_ay,
+        giri_ay_params=giri_ay_params_ay,
+        ho_sql=ho_sql,
+        ho_params=ho_params,
+        giri_yil_sql=giri_yil_sql,
+        giri_yil_params=giri_yil_params,
+        arama_sql=arama_sql,
+        arama_params=arama_params,
+        suzgec_sql=suzgec_sql,
+        suzgec_params=suzgec_params,
+        cift_olanlar=cift_olanlar,
+        hizli=liste_hizli,
+    )
+    try:
+        current_app.logger.info(
+            "firma_ozet_gun_sayilari_ms=%.2f bos=%s",
+            (time.perf_counter() - _t_gun_say) * 1000.0,
+            gun_bos_n,
+        )
+    except Exception:
+        pass
     cift_sql = kur["cift_sql"]
     rows_firma_sql = kur["rows_sql"]
     rows_firma_params = tuple(kur["rows_params"])
@@ -5308,6 +5449,9 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         "sadece_faturali": False,
         "giri_aylar_filtre": giris_aylar_filtre or [],
         "giri_gunler_filtre": giris_gunler_filtre or [],
+        "gun_sayilari": {str(k): int(gun_sayilari_map.get(k, 0)) for k in range(1, 32)},
+        "gun_bos": int(gun_bos_n or 0),
+        "gun_sayilari_kaynak": "sunucu",
         "giri_yillar_filtre": giris_yillar_filtre,
         "giris_yillari": giris_yillari,
         "hazir_ofis_oda_filtre": hazir_oda_filtre,
