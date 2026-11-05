@@ -4314,6 +4314,8 @@ function sozlesmelerAylikSessizPollTick() {
 
 function switchTab(index) {
     currentTabIndex = index;
+    var _dfw = document.getElementById('sozlesmeler-durum-filtre-wrap');
+    if (_dfw) _dfw.style.display = (index === 6) ? 'inline-flex' : 'none';
     try {
         if (index >= 0 && index <= 13) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
@@ -18367,6 +18369,12 @@ function girisDurumFiltreDegisti() {
     var maOpen = !!(maDd && maDd.style && maDd.style.display === 'block');
     if (typeof musteriAdiAutocomplete === 'function' && maEl && (((maEl.value || '').trim()) || maOpen)) {
         musteriAdiAutocomplete();
+    }
+    var genEl = document.getElementById('genel-musteri-ara');
+    var genDd = document.getElementById('genel-musteri-ara-dropdown');
+    var genOpen = !!(genDd && genDd.style && genDd.style.display === 'block');
+    if (typeof genelMusteriAraInput === 'function' && genEl && (((genEl.value || '').trim()) || genOpen)) {
+        genelMusteriAraInput();
     }
 }
 

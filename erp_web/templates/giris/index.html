@@ -2960,14 +2960,6 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         <span id="giris-secili-musteri-liste-not" class="giris-secili-liste-not" hidden></span>
     </div>
     <div class="giris-secili-toolbar-actions">
-        <label id="sozlesmeler-durum-filtre-wrap" class="giris-sozlesmeler-durum-filtre" style="display:none;align-items:center;gap:6px;color:#b0bec5;font-size:12px;white-space:nowrap;">
-            Durum
-            <select id="sozlesmeler-durum-filtre" aria-label="Sözleşmeler durum filtresi" onchange="if(typeof girisDurumFiltreDegisti==='function')girisDurumFiltreDegisti();else if(typeof musteriAra==='function')musteriAra();">
-                <option value="aktif" selected>Aktif</option>
-                <option value="pasif">Pasif</option>
-                <option value="hepsi">Hepsi</option>
-            </select>
-        </label>
         <button type="button" class="giris-nav-prev" onclick="girisMusteriKomsuyaGit('onceki')">Önceki</button>
         <button type="button" class="giris-nav-next" onclick="girisMusteriKomsuyaGit('sonraki')">Sonraki</button>
         <button type="button" class="giris-cache-isit-btn" id="sozlesme-cache-isit-btn" onclick="sozlesmeAylikCacheIsit()"><i class="fa fa-bolt"></i> Cache'i ısıt (tümü)</button>
@@ -3053,7 +3045,17 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     </div>
                     <div class="form-grid">
 
-                        <label for="genel-musteri-ara">Müşteri Ara</label>
+                        <div class="genel-musteri-ara-baslik" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <label for="genel-musteri-ara" style="margin:0;">Müşteri Ara</label>
+        <label id="sozlesmeler-durum-filtre-wrap" class="giris-sozlesmeler-durum-filtre" style="display:none;align-items:center;gap:6px;color:#b0bec5;font-size:12px;white-space:nowrap;">
+            Durum
+            <select id="sozlesmeler-durum-filtre" aria-label="Sözleşmeler durum filtresi" onchange="if(typeof girisDurumFiltreDegisti==='function')girisDurumFiltreDegisti();else if(typeof musteriAra==='function')musteriAra();">
+                <option value="aktif" selected>Aktif</option>
+                <option value="pasif">Pasif</option>
+                <option value="hepsi">Hepsi</option>
+            </select>
+        </label>
+                        </div>
                         <div class="genel-musteri-ara-wrap" style="position: relative;">
                             <input type="text" id="genel-musteri-ara" placeholder="İsim, ünvan, vergi no, adres, telefon, e-posta ile arayın..." autocomplete="off"
                                 oninput="genelMusteriAraInput()" onkeydown="genelMusteriAraKeydown(event)"
@@ -26360,6 +26362,12 @@ function girisDurumFiltreDegisti() {
     if (typeof musteriAdiAutocomplete === 'function' && maEl && (((maEl.value || '').trim()) || maOpen)) {
         musteriAdiAutocomplete();
     }
+    var genEl = document.getElementById('genel-musteri-ara');
+    var genDd = document.getElementById('genel-musteri-ara-dropdown');
+    var genOpen = !!(genDd && genDd.style && genDd.style.display === 'block');
+    if (typeof genelMusteriAraInput === 'function' && genEl && (((genEl.value || '').trim()) || genOpen)) {
+        genelMusteriAraInput();
+    }
 }
 function girisPasifleriDahilBind() {
     var el = document.getElementById('giris-pasifleri-dahil');
@@ -29464,7 +29472,9 @@ function genelMusteriAraInput() {
         genelMusteriAraAbort = new AbortController();
         var qNow = (input.value || '').trim();
         if (qNow.length < 1) return;
-        var url = '/giris/api/musteriler?q=' + encodeURIComponent(qNow);
+        var url = (typeof girisMusteriApiUrl === 'function')
+            ? girisMusteriApiUrl(qNow)
+            : ('/giris/api/musteriler?q=' + encodeURIComponent(qNow));
         var req;
         if (typeof girisFetchJsonCached === 'function') {
             req = girisFetchJsonCached(url, {
@@ -29504,6 +29514,10 @@ function genelMusteriAraDropdownDoldur(sonuclar) {
     } else {
         sonuclar.forEach(function (m) {
             var div = document.createElement('div');
+            if (typeof girisApiMusteriDurumSinifi === 'function') {
+                var _dsc = girisApiMusteriDurumSinifi(m);
+                if (_dsc) div.className = String(_dsc);
+            }
             var mAdi = (m.musteri_adi != null ? String(m.musteri_adi).trim() : '');
             var unvan = (m.name != null ? String(m.name).trim() : '');
             var durum = (typeof girisApiMusteriDurumOzetMetni === 'function')
