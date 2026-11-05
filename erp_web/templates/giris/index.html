@@ -15047,7 +15047,8 @@ function kiraGuncelleVeBorclandirAll() {
         .finally(function () { girisTopluBulkBtnBusy(btn, false); });
 }
 
-/** Tekil müşteriler raporu: firma adına tıklanınca Müşteri Ekle kartı (tab 0) açılır. */
+/** Tekil müşteriler raporu: firma adına tıklanınca Sözleşmeler kartı (tab 6) açılır.
+ *  WhatsApp listesiyle aynı yol: switchTab(6) + selectMusteri (Müşteri Ekle tab 0 değil). */
 function faturaRaporFirmaKartaGit(ev, mid) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     if (ev && ev.preventDefault) ev.preventDefault();
@@ -15071,8 +15072,13 @@ function faturaRaporFirmaKartaGit(ev, mid) {
                 history.pushState(payload, '', window.location.pathname + window.location.search);
             }
         } catch (e1) {}
+        // Pasif/iptal müşteri aramada gizlenmesin (Sözleşmeler durum filtresi).
+        try {
+            var df = document.getElementById('sozlesmeler-durum-filtre');
+            if (df && String(df.value || '') !== 'hepsi') df.value = 'hepsi';
+        } catch (eDf) {}
         window.__girisFromFaturaRaporKartClick = true;
-        switchTab(0);
+        switchTab(6);
         selectMusteri(id);
         try {
             setTimeout(function () { window.__girisFromFaturaRaporKartClick = false; }, 0);
@@ -15903,7 +15909,7 @@ function faturaRaporYukle() {
                     cells[1] = '<td data-fr-col-id="1">' + tarih + '</td>';
                     cells[2] = '<td data-fr-col-id="2">' + (midOk
                         ? '<button type="button" class="fatura-rapor-firma-link" data-musteri-id="' + midNum +
-                            '" title="Müşteri kartını aç" onclick="faturaRaporFirmaKartaGit(event, ' + midNum + ')">' + ad + '</button>'
+                            '" title="Sözleşmeler kartını aç" onclick="faturaRaporFirmaKartaGit(event, ' + midNum + ')">' + ad + '</button>'
                         : ad) + '</td>';
                     var vergiNo = (s.vergi_no != null && String(s.vergi_no).trim() !== '') ? String(s.vergi_no).trim() : '—';
                     var kimlikNo = (s.kimlik_no != null && String(s.kimlik_no).trim() !== '') ? String(s.kimlik_no).trim() : '—';
