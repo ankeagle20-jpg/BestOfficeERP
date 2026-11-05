@@ -1824,6 +1824,7 @@
 }
 .fatura-rapor-wrap--compact .fatura-rapor-filtre #fatura_rapor_btn,
 .fatura-rapor-wrap--compact .fatura-rapor-filtre #fatura_rapor_giris_ay_btn,
+.fatura-rapor-wrap--compact .fatura-rapor-filtre #fatura_rapor_giris_gun_btn,
 .fatura-rapor-wrap--compact .fatura-rapor-filtre #fatura_rapor_giris_yil_btn,
 .fatura-rapor-wrap--compact .fatura-rapor-filtre #fatura_rapor_sil_btn,
 .fatura-rapor-wrap--compact .fatura-rapor-filtre #kira_backfill_btn,
@@ -4010,6 +4011,12 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         <button type="button" class="auto-btn" id="fatura_rapor_giris_ay_btn" onclick="faturaRaporGirisAyPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" title="Giriş tarihine göre takvim ayı seç (çoklu)"><i class="fa fa-calendar"></i> Aylar</button>
                         <div id="fatura_rapor_giris_ay_pop" class="fatura-rapor-giris-ay-pop" hidden role="dialog" aria-label="Giriş ayı seçimi">
                             <div id="fatura_rapor_giris_ay_row" class="fatura-rapor-giris-ay-row"></div>
+                        </div>
+                    </span>
+                    <span class="fatura-rapor-giris-ay-wrap" id="fatura_rapor_giris_gun_wrap">
+                        <button type="button" class="auto-btn" id="fatura_rapor_giris_gun_btn" onclick="faturaRaporGirisGunPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" title="Sözleşme / giriş gününe göre takvim günü seç (çoklu)"><i class="fa fa-calendar"></i> Günler</button>
+                        <div id="fatura_rapor_giris_gun_pop" class="fatura-rapor-giris-ay-pop" hidden role="dialog" aria-label="Giriş günü seçimi">
+                            <div id="fatura_rapor_giris_gun_row" class="fatura-rapor-giris-ay-row"></div>
                         </div>
                     </span>
                     <span class="fatura-rapor-giris-ay-wrap" id="fatura_rapor_giris_yil_wrap">
@@ -12066,6 +12073,7 @@ function faturaRaporFiltreStateKaydet() {
             firma_filtre_hizmet: (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [],
             firma_filtre_durum: (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '',
             giris_aylar: (typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [],
+            giris_gunler: (typeof faturaRaporGirisGunlerOku === 'function') ? faturaRaporGirisGunlerOku() : [],
             giris_yillar: (typeof faturaRaporGirisYillarKayitOku === 'function') ? faturaRaporGirisYillarKayitOku() : null,
             oda_no_filtre: (function () {
                 var v = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
@@ -12151,10 +12159,14 @@ function faturaRaporFiltreStateUygula() {
     if (typeof faturaRaporGirisAylarYaz === 'function' && Array.isArray(st.giris_aylar)) {
         faturaRaporGirisAylarYaz(st.giris_aylar);
     }
+    if (typeof faturaRaporGirisGunlerYaz === 'function' && Array.isArray(st.giris_gunler)) {
+        faturaRaporGirisGunlerYaz(st.giris_gunler);
+    }
     if (typeof faturaRaporGirisYillarYaz === 'function' && Object.prototype.hasOwnProperty.call(st, 'giris_yillar')) {
         faturaRaporGirisYillarYaz(st.giris_yillar);
     }
     if (typeof faturaRaporGirisAyBtnGuncelle === 'function') faturaRaporGirisAyBtnGuncelle();
+    if (typeof faturaRaporGirisGunBtnGuncelle === 'function') faturaRaporGirisGunBtnGuncelle();
     if (gor && gor.value === 'firma_ozet' && st.oda_no_filtre != null && String(st.oda_no_filtre).trim() !== '') {
         var ovs = String(st.oda_no_filtre).trim();
         if (ovs === 'yok') window.__faturaRaporOdaFiltre = 'yok';
@@ -14093,6 +14105,7 @@ function faturaRaporListeAraUygula() {
     var fg2Arr = (firmaMod && typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
     var fhDizi = (firmaMod && typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
     var gaz = (firmaMod && typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [];
+    var ggz = (firmaMod && typeof faturaRaporGirisGunlerOku === 'function') ? faturaRaporGirisGunlerOku() : [];
     tbody.querySelectorAll('tr').forEach(function (tr) {
         var ok = true;
         if (qRaw) {
@@ -14136,6 +14149,10 @@ function faturaRaporListeAraUygula() {
                 gmo = parseInt(tiso.slice(5, 7), 10);
             }
             if (!gmo || gmo < 1 || gmo > 12 || gaz.indexOf(gmo) < 0) ok = false;
+        }
+        if (ok && firmaMod && ggz.length > 0) {
+            var gdn = parseInt(tr.getAttribute('data-fr-gun-n') || '0', 10) || 0;
+            if (!gdn || gdn < 1 || gdn > 31 || ggz.indexOf(gdn) < 0) ok = false;
         }
         var gyil = (firmaMod && typeof faturaRaporGirisYillarOku === 'function') ? faturaRaporGirisYillarOku() : null;
         if (ok && firmaMod && gyil != null) {
@@ -15086,6 +15103,7 @@ function faturaRaporExcelAktar() {
     if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
     u += '&gorunum=firma_ozet';
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
+    if (typeof faturaRaporGirisGunQuerySuffix === 'function') u += faturaRaporGirisGunQuerySuffix();
     if (typeof faturaRaporGirisYilQuerySuffix === 'function') u += faturaRaporGirisYilQuerySuffix();
     // İstemci süzgeçleri (ekranla birebir)
     var elAra = document.getElementById('fatura_rapor_liste_ara');
@@ -15165,6 +15183,10 @@ function faturaRaporFiltreTemizle() {
     if (typeof faturaRaporGirisAyBtnGuncelle === 'function') faturaRaporGirisAyBtnGuncelle();
     if (typeof faturaRaporGirisAyPanelBtnDurumlari === 'function') faturaRaporGirisAyPanelBtnDurumlari();
     if (typeof faturaRaporGirisAyPanelKapat === 'function') faturaRaporGirisAyPanelKapat();
+    if (typeof faturaRaporGirisGunlerYaz === 'function') faturaRaporGirisGunlerYaz([]);
+    if (typeof faturaRaporGirisGunBtnGuncelle === 'function') faturaRaporGirisGunBtnGuncelle();
+    if (typeof faturaRaporGirisGunPanelBtnDurumlari === 'function') faturaRaporGirisGunPanelBtnDurumlari();
+    if (typeof faturaRaporGirisGunPanelKapat === 'function') faturaRaporGirisGunPanelKapat();
     if (typeof faturaRaporGirisYillarYaz === 'function') faturaRaporGirisYillarYaz(null);
     if (typeof faturaRaporGirisYilPanelRender === 'function') faturaRaporGirisYilPanelRender();
     if (typeof faturaRaporGirisYilBtnGuncelle === 'function') faturaRaporGirisYilBtnGuncelle();
@@ -15246,6 +15268,7 @@ function faturaRaporYukle() {
     if (elGor && elGor.value) u += '&gorunum=' + encodeURIComponent(elGor.value);
     if (araQ && !(elGor && elGor.value === 'firma_ozet')) u += '&q=' + encodeURIComponent(araQ);
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
+    if (typeof faturaRaporGirisGunQuerySuffix === 'function') u += faturaRaporGirisGunQuerySuffix();
     if (typeof faturaRaporGirisYilQuerySuffix === 'function') u += faturaRaporGirisYilQuerySuffix();
     if (elGor && elGor.value === 'firma_ozet') {
         var frG2Sec = (typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];

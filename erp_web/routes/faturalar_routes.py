@@ -3049,6 +3049,32 @@ def _fatura_rapor_giris_aylari_parse(raw) -> list | None:
     return out or None
 
 
+
+
+def _fatura_rapor_giris_gunleri_parse(raw) -> list | None:
+    """giri_gunler=1,15,31 → benzersiz 1..31. Boş / geçersiz → None (filtre yok)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    seen: set[int] = set()
+    out: list[int] = []
+    for part in s.replace(";", ",").split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            d = int(p)
+        except ValueError:
+            continue
+        if d < 1 or d > 31 or d in seen:
+            continue
+        seen.add(d)
+        out.append(d)
+    out.sort()
+    return out or None
+
 def _fatura_rapor_giris_yillari_parse(raw) -> list | None:
     """giri_yillar=2024,2025 → artan yıllar.
 
@@ -3583,6 +3609,7 @@ def _firma_ozet_resp_cache_key() -> str:
         "duzenli_fatura",
         "q",
         "giri_aylar",
+        "giri_gunler",
         "giri_yillar",
         "hazir_ofis_oda",
         "hazir_oda",
@@ -4525,6 +4552,8 @@ def _firma_ozet_client_filtre_uygula(
     oda: str | None,
     yillar: list | None = None,
     sadece_borclu: bool = False,
+    gunler: list | None = None,
+    aylar: list | None = None,
 ) -> list:
     """faturaRaporListeAraUygula (firma_ozet) ile birebir istemci süzgeçleri."""
     q_raw = (q or "").strip()
@@ -4599,6 +4628,35 @@ def _firma_ozet_client_filtre_uygula(
             gy = _firma_ozet_giris_yili_deger(it.get("giris_tarihi"))
             if gy is None or gy not in yillar:
                 ok = False
+        if ok and aylar is not None:
+            if not aylar:
+                ok = False
+            else:
+                try:
+                    sa = int(it.get("sozlesme_ay") or 0)
+                except (TypeError, ValueError):
+                    sa = 0
+                if sa < 1 or sa > 12 or sa not in aylar:
+                    # yedek: giris_tarihi ISO ay
+                    gt = str(it.get("giris_tarihi") or "").strip()
+                    gmo = 0
+                    if len(gt) >= 7 and gt[4] == "-":
+                        try:
+                            gmo = int(gt[5:7])
+                        except ValueError:
+                            gmo = 0
+                    if gmo < 1 or gmo > 12 or gmo not in aylar:
+                        ok = False
+        if ok and gunler is not None:
+            if not gunler:
+                ok = False
+            else:
+                try:
+                    sg = int(it.get("sozlesme_gun") or 0)
+                except (TypeError, ValueError):
+                    sg = 0
+                if sg < 1 or sg > 31 or sg not in gunler:
+                    ok = False
         if ok and sadece_borclu:
             if it.get("toplam_borc") is None or it.get("borc_hesaplanamadi"):
                 pass  # bilinmeyen borç: listede bırak
@@ -4901,6 +4959,13 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
         )
         giri_ay_params.extend(giris_aylar_filtre)
+    giris_gunler_filtre = _fatura_rapor_giris_gunleri_parse(request.args.get("giri_gunler"))
+    if giris_gunler_filtre:
+        _dph = ", ".join(["%s"] * len(giris_gunler_filtre))
+        giri_ay_sql += (
+            f" AND (EXTRACT(DAY FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_dph})"
+        )
+        giri_ay_params.extend(giris_gunler_filtre)
     ho_sql, ho_params = _firma_ozet_oda_sql(client_oda_raw, excel_mode=excel_mode)
     hazir_oda_filtre = ho_params[0] if ho_params else None
     giris_yillar_filtre = _fatura_rapor_giris_yillari_parse(request.args.get("giri_yillar"))
@@ -5242,6 +5307,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         "cift_olanlar": cift_olanlar,
         "sadece_faturali": False,
         "giri_aylar_filtre": giris_aylar_filtre or [],
+        "giri_gunler_filtre": giris_gunler_filtre or [],
         "giri_yillar_filtre": giris_yillar_filtre,
         "giris_yillari": giris_yillari,
         "hazir_ofis_oda_filtre": hazir_oda_filtre,
@@ -5285,6 +5351,8 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             oda=client_oda_raw or None,
             yillar=giris_yillar_filtre,
             sadece_borclu=client_sadece_borclu,
+            gunler=giris_gunler_filtre,
+            aylar=giris_aylar_filtre,
         )
         toplam_aylik, toplam_borc, total_count_firma = _firma_ozet_recalc_ozet(satirlar_resp)
         _firma_payload["satirlar"] = satirlar_resp

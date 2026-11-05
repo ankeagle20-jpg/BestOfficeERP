@@ -5267,6 +5267,7 @@ function faturaRaporFiltreStateKaydet() {
             firma_filtre_hizmet: (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [],
             firma_filtre_durum: (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '',
             giris_aylar: (typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [],
+            giris_gunler: (typeof faturaRaporGirisGunlerOku === 'function') ? faturaRaporGirisGunlerOku() : [],
             oda_no_filtre: (function () {
                 var v = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
                 return v != null ? v : '';
@@ -5337,6 +5338,10 @@ function faturaRaporFiltreStateUygula() {
         faturaRaporGirisAylarYaz(st.giris_aylar);
     }
     if (typeof faturaRaporGirisAyBtnGuncelle === 'function') faturaRaporGirisAyBtnGuncelle();
+    if (typeof faturaRaporGirisGunlerYaz === 'function' && Array.isArray(st.giris_gunler)) {
+        faturaRaporGirisGunlerYaz(st.giris_gunler);
+    }
+    if (typeof faturaRaporGirisGunBtnGuncelle === 'function') faturaRaporGirisGunBtnGuncelle();
     if (gor && gor.value === 'firma_ozet' && st.oda_no_filtre != null && String(st.oda_no_filtre).trim() !== '') {
         var ovs = String(st.oda_no_filtre).trim();
         if (ovs === 'yok') window.__faturaRaporOdaFiltre = 'yok';
@@ -5496,7 +5501,150 @@ function faturaRaporGirisAyTumu() {
     var gor = document.getElementById('fatura_rapor_gorunum');
     if (gor && gor.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') faturaRaporYukle();
 }
+
+window.__faturaRaporGirisGunler = window.__faturaRaporGirisGunler || [];
+
+function faturaRaporGirisGunlerOku() {
+    try {
+        var a = window.__faturaRaporGirisGunler;
+        if (!Array.isArray(a) || !a.length) return [];
+        return a.map(function (x) { return parseInt(x, 10); }).filter(function (d) { return d >= 1 && d <= 31; })
+            .sort(function (x, y) { return x - y; })
+            .filter(function (d, i, arr) { return i === 0 || d !== arr[i - 1]; });
+    } catch (e) { return []; }
+}
+function faturaRaporGirisGunlerYaz(arr) {
+    if (!Array.isArray(arr)) { window.__faturaRaporGirisGunler = []; return; }
+    window.__faturaRaporGirisGunler = arr.map(function (x) { return parseInt(x, 10); }).filter(function (d) { return d >= 1 && d <= 31; })
+        .sort(function (x, y) { return x - y; })
+        .filter(function (d, i, arr2) { return i === 0 || d !== arr2[i - 1]; });
+}
+function faturaRaporGirisGunQuerySuffix() {
+    var a = faturaRaporGirisGunlerOku();
+    if (!a.length) return '';
+    return '&giri_gunler=' + encodeURIComponent(a.join(','));
+}
+function faturaRaporGirisGunFiltreMetni(arr) {
+    if (!arr || !arr.length) return '';
+    return ' | Giriş günü: ' + arr.slice().join(', ');
+}
+function faturaRaporGirisGunPanelRender() {
+    var row = document.getElementById('fatura_rapor_giris_gun_row');
+    if (!row || row.dataset.built === '1') return;
+    row.dataset.built = '1';
+    var parts = ['<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="0">Tümü</button>'];
+    for (var d = 1; d <= 31; d++) {
+        parts.push('<button type="button" class="fatura-rapor-giris-ay-pill" data-giris-gun="' + d + '">' + d + '</button>');
+    }
+    row.innerHTML = parts.join('');
+    row.addEventListener('click', function (e) {
+        var t = e.target.closest('[data-giris-gun]');
+        if (!t || !row.contains(t)) return;
+        e.stopPropagation();
+        var v = parseInt(t.getAttribute('data-giris-gun'), 10);
+        if (v === 0) faturaRaporGirisGunTumu();
+        else faturaRaporGirisGunToggle(v);
+    });
+}
+function faturaRaporGirisGunPanelBtnDurumlari() {
+    var row = document.getElementById('fatura_rapor_giris_gun_row');
+    if (!row) return;
+    var sel = faturaRaporGirisGunlerOku();
+    row.querySelectorAll('[data-giris-gun]').forEach(function (b) {
+        var v = parseInt(b.getAttribute('data-giris-gun'), 10);
+        var on = (v === 0) ? (sel.length === 0) : (sel.indexOf(v) >= 0);
+        b.classList.toggle('fatura-rapor-giris-ay-pill--on', on);
+    });
+}
+function faturaRaporGirisGunBtnGuncelle() {
+    var btn = document.getElementById('fatura_rapor_giris_gun_btn');
+    if (!btn) return;
+    var n = faturaRaporGirisGunlerOku().length;
+    btn.classList.toggle('fatura-rapor-giris-ay-btn--aktif', n > 0);
+    if (n > 0) {
+        btn.innerHTML = '<i class="fa fa-calendar"></i> Günler (' + n + ')';
+        btn.title = 'Giriş günü filtresi: ' + n + ' gün — tıklayarak düzenle';
+    } else {
+        btn.innerHTML = '<i class="fa fa-calendar"></i> Günler';
+        btn.title = 'Sözleşme / giriş gününe göre takvim günü seç (çoklu)';
+    }
+}
+function faturaRaporGirisGunPopMaxWidthClamp() {
+    var pop = document.getElementById('fatura_rapor_giris_gun_pop');
+    var btn = document.getElementById('fatura_rapor_giris_gun_btn');
+    if (!pop || !btn || pop.hidden) return;
+    var m = 8;
+    var vw = document.documentElement.clientWidth || window.innerWidth || 800;
+    var br = btn.getBoundingClientRect();
+    var avail = vw - m - br.left;
+    pop.style.maxWidth = Math.min(520, Math.max(200, avail)) + 'px';
+}
+function faturaRaporGirisGunPanelInlineTemizle(pop) {
+    if (!pop) return;
+    pop.style.maxWidth = '';
+    pop.style.minWidth = '';
+    pop.style.left = '';
+    pop.style.top = '';
+    pop.style.right = '';
+    pop.style.transform = '';
+}
+function faturaRaporGirisGunPanelToggle(ev) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    var pop = document.getElementById('fatura_rapor_giris_gun_pop');
+    var btn = document.getElementById('fatura_rapor_giris_gun_btn');
+    if (!pop || !btn) return;
+    var open = pop.hidden === false;
+    if (open) {
+        pop.hidden = true;
+        faturaRaporGirisGunPanelInlineTemizle(pop);
+        btn.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    if (typeof faturaRaporGirisAyPanelKapat === 'function') faturaRaporGirisAyPanelKapat();
+    if (typeof faturaRaporGirisYilPanelKapat === 'function') faturaRaporGirisYilPanelKapat();
+    faturaRaporGirisGunPanelRender();
+    faturaRaporGirisGunPanelBtnDurumlari();
+    faturaRaporGirisGunPanelInlineTemizle(pop);
+    pop.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    requestAnimationFrame(function () {
+        faturaRaporGirisGunPopMaxWidthClamp();
+    });
+}
+function faturaRaporGirisGunPanelKapat() {
+    var pop = document.getElementById('fatura_rapor_giris_gun_pop');
+    var btn = document.getElementById('fatura_rapor_giris_gun_btn');
+    if (pop) {
+        pop.hidden = true;
+        faturaRaporGirisGunPanelInlineTemizle(pop);
+    }
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+function faturaRaporGirisGunToggle(d) {
+    var a = faturaRaporGirisGunlerOku().slice();
+    var i = a.indexOf(d);
+    if (i >= 0) a.splice(i, 1);
+    else a.push(d);
+    faturaRaporGirisGunlerYaz(a);
+    faturaRaporGirisGunPanelBtnDurumlari();
+    faturaRaporGirisGunBtnGuncelle();
+    if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+    var gor = document.getElementById('fatura_rapor_gorunum');
+    if (gor && gor.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') faturaRaporYukle();
+}
+function faturaRaporGirisGunTumu() {
+    faturaRaporGirisGunlerYaz([]);
+    faturaRaporGirisGunPanelBtnDurumlari();
+    faturaRaporGirisGunBtnGuncelle();
+    if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+    var gor = document.getElementById('fatura_rapor_gorunum');
+    if (gor && gor.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') faturaRaporYukle();
+}
 document.addEventListener('click', function (e) {
+    var wg = document.getElementById('fatura_rapor_giris_gun_wrap');
+    if (wg && e.target && !wg.contains(e.target)) {
+        if (typeof faturaRaporGirisGunPanelKapat === 'function') faturaRaporGirisGunPanelKapat();
+    }
     var w = document.querySelector('.fatura-rapor-giris-ay-wrap');
     if (w && e.target && !w.contains(e.target)) {
         if (typeof faturaRaporGirisAyPanelKapat === 'function') faturaRaporGirisAyPanelKapat();
@@ -6934,6 +7082,8 @@ function faturaRaporFirmaSuzgecEtiketiKisa() {
     else if (fhd.length > 1) parts.push('hizmet türleri (' + fhd.length + ')');
     var gaz = (typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [];
     if (gaz && gaz.length) parts.push('giriş ayı');
+    var ggzEt = (typeof faturaRaporGirisGunlerOku === 'function') ? faturaRaporGirisGunlerOku() : [];
+    if (ggzEt && ggzEt.length) parts.push('giriş günü');
     var odaF = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
     if (odaF === 'yok') parts.push('oda yok');
     else if (odaF === 'hepsi') parts.push('oda atanmış (hepsi)');
@@ -6996,6 +7146,7 @@ function faturaRaporListeAraUygula() {
     var fg2Arr = (firmaMod && typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
     var fhDizi = (firmaMod && typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
     var gaz = (firmaMod && typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [];
+    var ggz = (firmaMod && typeof faturaRaporGirisGunlerOku === 'function') ? faturaRaporGirisGunlerOku() : [];
     tbody.querySelectorAll('tr').forEach(function (tr) {
         var ok = true;
         if (qRaw) {
@@ -7053,6 +7204,10 @@ function faturaRaporListeAraUygula() {
                 gmo = parseInt(tiso.slice(5, 7), 10);
             }
             if (!gmo || gmo < 1 || gmo > 12 || gaz.indexOf(gmo) < 0) ok = false;
+        }
+        if (ok && firmaMod && ggz.length > 0) {
+            var gdn = parseInt(tr.getAttribute('data-fr-gun-n') || '0', 10) || 0;
+            if (!gdn || gdn < 1 || gdn > 31 || ggz.indexOf(gdn) < 0) ok = false;
         }
         if (ok && firmaMod) {
             var odaF = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
@@ -7964,6 +8119,7 @@ function faturaRaporYukle() {
     if (elGor && elGor.value) u += '&gorunum=' + encodeURIComponent(elGor.value);
     if (araQ && !(elGor && elGor.value === 'firma_ozet')) u += '&q=' + encodeURIComponent(araQ);
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
+    if (typeof faturaRaporGirisGunQuerySuffix === 'function') u += faturaRaporGirisGunQuerySuffix();
     if (elGor && elGor.value === 'firma_ozet') {
         var frG2Sec = (typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
         var frHizSec = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
@@ -8100,6 +8256,9 @@ function faturaRaporYukle() {
                 var ayRef = (data.ay_referans && data.ay_referans.etiket) ? data.ay_referans.etiket : '';
                 var gaLbl = (data.giri_aylar_filtre && data.giri_aylar_filtre.length && typeof faturaRaporGirisAyFiltreMetni === 'function')
                     ? faturaRaporGirisAyFiltreMetni(data.giri_aylar_filtre) : '';
+                if (data.giri_gunler_filtre && data.giri_gunler_filtre.length && typeof faturaRaporGirisGunFiltreMetni === 'function') {
+                    gaLbl += faturaRaporGirisGunFiltreMetni(data.giri_gunler_filtre);
+                }
                 try {
                     window.__faturaRaporDurumFirmaMeta = { ayRef: ayRef, kapF: kapF, gaLbl: gaLbl };
                 } catch (eMeta) {}
