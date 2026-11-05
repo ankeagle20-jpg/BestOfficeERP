@@ -3675,6 +3675,14 @@ def _firma_ozet_gun_bazli_borc_uygula_satir(
 def _firma_ozet_gun_bazli_borc_uygula_satirlar(
     satirlar: list, *, aktif: bool, bugun: date | None = None
 ) -> list:
+    """Her satıra toplam_borc_ham damgalar (gün düşümünden önceki ham toplam).
+
+    aktif=False iken yalnız damga; aktif=True iken damga + bu ay düşümü.
+    Grid sütunu gun_bazli'den etkilenmez; Borç sütunu toplam_borc kullanır.
+    """
+    for it in satirlar or []:
+        if isinstance(it, dict):
+            it["toplam_borc_ham"] = it.get("toplam_borc")
     if not aktif:
         return satirlar
     atlanan_acc = [0]
@@ -5446,12 +5454,11 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             except Exception as e_borc:
                 current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
                 toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
-            if client_gun_bazli:
-                _firma_ozet_gun_bazli_borc_uygula_satirlar(
-                    satirlar_resp, aktif=True, bugun=gun_bazli_bugun
-                )
-                if not _winner_ids_ok:
-                    toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
+            _firma_ozet_gun_bazli_borc_uygula_satirlar(
+                satirlar_resp, aktif=client_gun_bazli, bugun=gun_bazli_bugun
+            )
+            if client_gun_bazli and not _winner_ids_ok:
+                toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
             for _it in satirlar_resp:
                 _it.pop("_dedupe_vergi", None)
             has_more = off + len(satirlar_resp) < total_count_firma
@@ -5595,11 +5602,11 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                 _it["geciken_ay"] = ga
                 _it["borc_hesaplanamadi"] = bool(_oz.get("borc_hesaplanamadi")) or (tb is None)
                 _it["borc_ref_ay"] = _firma_ozet_ozetten_borc_ref_ay(_oz)
+        # satirlar_resp dilimi aynı dict nesnelerini paylaşır — bir kez damga (+gün).
+        _firma_ozet_gun_bazli_borc_uygula_satirlar(
+            satirlar_firma, aktif=client_gun_bazli, bugun=gun_bazli_bugun
+        )
         if client_gun_bazli:
-            # satirlar_resp dilimi aynı dict nesnelerini paylaşır — bir kez uygula.
-            _firma_ozet_gun_bazli_borc_uygula_satirlar(
-                satirlar_firma, aktif=True, bugun=gun_bazli_bugun
-            )
             toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_firma)
         if page_size > 0:
             current_app.logger.info(
@@ -5683,10 +5690,9 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         # Tam liste grid özeti (page_size=0 + hizli modda satır borç/güncel eksik kalmasın)
         _firma_ozet_satirlara_grid_ozet_uygula(satirlar_resp, ref_first)
         _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
-        if client_gun_bazli:
-            _firma_ozet_gun_bazli_borc_uygula_satirlar(
-                satirlar_resp, aktif=True, bugun=gun_bazli_bugun
-            )
+        _firma_ozet_gun_bazli_borc_uygula_satirlar(
+            satirlar_resp, aktif=client_gun_bazli, bugun=gun_bazli_bugun
+        )
         satirlar_resp = _firma_ozet_client_filtre_uygula(
             satirlar_resp,
             q=client_q,
