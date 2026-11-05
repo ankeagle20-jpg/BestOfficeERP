@@ -15249,6 +15249,29 @@ function faturaRaporGridModalOzetHtml(meta) {
         '<div class="fatura-rapor-grid-modal-ozet-not">' + String(not).replace(/</g, '&lt;') + '</div>' +
         '</div>';
 }
+function faturaRaporGridModalAyIdx(a) {
+    if (!a) return NaN;
+    var y = Number(a.yil);
+    var m = Number(a.ay);
+    if (!(y >= 1900 && m >= 1 && m <= 12)) {
+        var raw = String(a.ay_key || '').trim();
+        var parts = raw.split('-');
+        if (parts.length >= 2) {
+            y = Number(parts[0]);
+            m = Number(parts[1]);
+        }
+    }
+    if (!(y >= 1900 && m >= 1 && m <= 12)) return NaN;
+    return y * 12 + m;
+}
+function faturaRaporGridModalBugunAyIdx(bugunIso) {
+    var s = String(bugunIso || '').trim();
+    if (s.length < 7) return NaN;
+    var y = Number(s.slice(0, 4));
+    var m = Number(s.slice(5, 7));
+    if (!(y >= 1900 && m >= 1 && m <= 12)) return NaN;
+    return y * 12 + m;
+}
 function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
     var body = document.getElementById('fatura_rapor_grid_modal_body');
     var title = document.getElementById('fatura_rapor_grid_modal_title');
@@ -15278,10 +15301,26 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
         body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Aylık grid boş.</div>' + ozet;
         return;
     }
+    // Yalnız popup: içinde bulunduğumuz aydan sonraki ayları gizle (istanbul_bugun; sayısal idx; new Date yok).
+    var bugunIdx = (typeof faturaRaporGridModalBugunAyIdx === 'function')
+        ? faturaRaporGridModalBugunAyIdx(meta && meta.bugunIso)
+        : NaN;
+    var aylarVis = aylar;
+    if (isFinite(bugunIdx)) {
+        aylarVis = aylar.filter(function (a) {
+            var idx = faturaRaporGridModalAyIdx(a);
+            if (!isFinite(idx)) return true; // bozuk anahtar → gizleme
+            return idx <= bugunIdx;
+        });
+    }
+    if (!aylarVis.length) {
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Henüz borçlanan ay yok.</div>' + ozet;
+        return;
+    }
     var html = '<div class="sozlesmeler-aylik-grid">';
     var topBorc = 0;
     var topKalan = 0;
-    aylar.forEach(function (a) {
+    aylarVis.forEach(function (a) {
         html += faturaRaporGridModalKartHtml(a);
         var tv = parseFloat(a && (a.tutar_kdv_dahil != null ? a.tutar_kdv_dahil : a.brut_tutar_kdv));
         var kv = parseFloat(a && a.kalan_tutar_kdv);
@@ -15291,7 +15330,7 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
         else if (isFinite(tv)) topKalan += tv;
     });
     html += '</div>';
-    html += '<div class="fatura-rapor-grid-modal-toplam">Aylar: ' + aylar.length +
+    html += '<div class="fatura-rapor-grid-modal-toplam">Aylar: ' + aylarVis.length +
         ' · Plan: ' + faturaRaporGridModalFmt(topBorc) +
         ' ₺ · Kalan: ' + faturaRaporGridModalFmt(topKalan) + ' ₺</div>';
     html += ozet;

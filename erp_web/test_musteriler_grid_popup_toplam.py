@@ -139,6 +139,9 @@ def test_sablon_ve_excel():
     check("aylar tr const", "FATURA_RAPOR_AYLAR_TR" in html and "Kasım" in html)
     check("etiket fn", "function faturaRaporGridModalOzetEtiket" in html)
     check("ay adi iso slice", "iso.slice(5, 7)" in html and "new Date(" not in html[html.find("function faturaRaporGridModalAyAdi"):html.find("function faturaRaporGridModalSozTarihTr")])
+    check("popup ay filtre fn", "function faturaRaporGridModalBugunAyIdx" in html and "function faturaRaporGridModalAyIdx" in html and "Henüz borçlanan ay yok." in html)
+    check("popup filtre sozlesmeler yok", "sozlesmelerAylikCacheRender" not in html[html.find("function faturaRaporGridModalBugunAyIdx"):html.find("function faturaRaporGridModalAc")])
+    check("popup filtre metin <= yok", "k <= bugunAy" not in html[html.find("function faturaRaporGridModalAyIdx"):html.find("function faturaRaporGridModalAc")])
     check("istanbul plant", "data.istanbul_bugun" in html)
     check("src _t yok", "_t.js" not in html[:8000])
     # PII: labels/notes must not contain sample customer names patterns in ozet fn
@@ -1157,6 +1160,413 @@ say('attr soz tarih', attrOf(trParts[0], 'data-fr-soz-tarih') === '2025-10-18');
             pass
 
 
+def test_popup_ay_filtre_gelecek_gizle():
+    """Gerçek faturaRaporGridModalCiz: bu aydan sonraki aylar gizlenir; özet görünenden."""
+    html = _html()
+    # Sözleşmeler yolu dokunulmamış
+    check(
+        "i sozlesmeler fn ayni isim",
+        "function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil)" in html,
+    )
+    try:
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        # AyIdx + BugunAyIdx + Ciz
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        ciz_end = html.find("function faturaRaporGridModalAc", filtre_i)
+        filtre_blk = html[filtre_i:ciz_end]
+    except ValueError as e:
+        check("filtre extract", False, str(e))
+        return
+    check("filtre extract ciz", "aylarVis" in filtre_blk and "Henüz borçlanan ay yok." in filtre_blk)
+    check("filtre new Date yok", "new Date(" not in filtre_blk)
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function temiz(s) {
+  s = String(s == null ? '' : s);
+  return s.indexOf('NaN') < 0 && s.indexOf('undefined') < 0 && s.indexOf('null') < 0;
+}
+function ayObj(y, m, tut, kalan) {
+  return {
+    yil: y, ay: m, ay_key: y + '-' + m,
+    tutar_kdv_dahil: tut, kalan_tutar_kdv: (kalan != null ? kalan : tut),
+    tahsil_edildi: false
+  };
+}
+function meta(bugun) {
+  return { toplamBorc: 100, gunuGelen: 80, sozlesmeGun: 18, bugunIso: bugun || '', sozlesmeTarihi: '2025-10-18', gunBazliAyHaric: true };
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+
+// (a) 2026-11-05: 2025-12 … 2027-10 → son görünen 2026-11
+var aylarA = [];
+for (var y = 2025; y <= 2027; y++) {
+  for (var m = 1; m <= 12; m++) {
+    if (y === 2025 && m < 12) continue;
+    if (y === 2027 && m > 10) continue;
+    aylarA.push(ayObj(y, m, 1000, 500));
+  }
+}
+faturaRaporGridModalCiz({ aylar: aylarA }, 'A', meta('2026-11-05'));
+var hA = body.innerHTML || '';
+say('a son ay 2026-11', hA.indexOf('data-ay-key="2026-11"') >= 0 || hA.indexOf('Kasım 2026') >= 0);
+say('a 2026-12 yok', hA.indexOf('data-ay-key="2026-12"') < 0 && hA.indexOf('Aralık 2026') < 0);
+say('a 2027-01 yok', hA.indexOf('data-ay-key="2027-1"') < 0 && hA.indexOf('data-ay-key="2027-01"') < 0 && hA.indexOf('Ocak 2027') < 0);
+say('a 2025-12 var', hA.indexOf('data-ay-key="2025-12"') >= 0 || hA.indexOf('Aralık 2025') >= 0);
+say('a temiz', temiz(hA));
+
+// (b) bu ay görünür (sg gelmemiş olsa da — sadece görünürlük)
+say('b bu ay var', hA.indexOf('Kasım 2026') >= 0 || hA.indexOf('data-ay-key="2026-11"') >= 0);
+
+// (c) Aralık→Ocak
+faturaRaporGridModalCiz({ aylar: [ayObj(2026, 12, 10, 10), ayObj(2027, 1, 20, 20), ayObj(2027, 2, 30, 30)] }, 'C', meta('2026-12-31'));
+var hC1 = body.innerHTML || '';
+say('c1 2026-12 var', hC1.indexOf('Aralık 2026') >= 0 || hC1.indexOf('data-ay-key="2026-12"') >= 0);
+say('c1 2027-01 yok', hC1.indexOf('Ocak 2027') < 0 && hC1.indexOf('data-ay-key="2027-1"') < 0 && hC1.indexOf('data-ay-key="2027-01"') < 0);
+faturaRaporGridModalCiz({ aylar: [ayObj(2026, 12, 10, 10), ayObj(2027, 1, 20, 20), ayObj(2027, 2, 30, 30)] }, 'C2', meta('2027-01-01'));
+var hC2 = body.innerHTML || '';
+say('c2 2027-01 var', hC2.indexOf('Ocak 2027') >= 0 || hC2.indexOf('data-ay-key="2027-1"') >= 0 || hC2.indexOf('data-ay-key="2027-01"') >= 0);
+say('c2 2027-02 yok', hC2.indexOf('Şubat 2027') < 0 && hC2.indexOf('data-ay-key="2027-2"') < 0 && hC2.indexOf('data-ay-key="2027-02"') < 0);
+
+// (d) özet yalnız görünenlerden: 2 ay görünür (100+200 plan), gelecek 999 gizlenir
+faturaRaporGridModalCiz({
+  aylar: [ayObj(2026, 10, 100, 40), ayObj(2026, 11, 200, 50), ayObj(2026, 12, 999, 999)]
+}, 'D', meta('2026-11-15'));
+var hD = body.innerHTML || '';
+say('d aylar 2', hD.indexOf('Aylar: 2') >= 0, hD.match(/Aylar: \d+/) && hD.match(/Aylar: \d+/)[0]);
+say('d plan 300', hD.indexOf('Plan: 300,00') >= 0 || hD.indexOf('Plan: 300.00') >= 0);
+say('d kalan 90', hD.indexOf('Kalan: 90,00') >= 0 || hD.indexOf('Kalan: 90.00') >= 0);
+say('d 999 yok', hD.indexOf('999') < 0 || (hD.indexOf('Aralık 2026') < 0));
+
+// (e) kapanış sonrası aylar zaten yoksa korunur; gelecekte kapanış + gelecek aylar yine gizli
+faturaRaporGridModalCiz({
+  aylar: [ayObj(2026, 9, 10, 10), ayObj(2026, 10, 10, 10)]  // kapanış geçmiş simülasyonu: sonraki yok
+}, 'E', meta('2026-11-05'));
+var hE = body.innerHTML || '';
+say('e kapanis gecmis', (hE.indexOf('Eylül 2026') >= 0 || hE.indexOf('data-ay-key="2026-9"') >= 0 || hE.indexOf('data-ay-key="2026-09"') >= 0)
+  && hE.indexOf('Kasım 2026') < 0);
+faturaRaporGridModalCiz({
+  aylar: [ayObj(2026, 11, 10, 10), ayObj(2026, 12, 10, 10), ayObj(2027, 1, 10, 10)]
+}, 'E2', meta('2026-11-05'));
+var hE2 = body.innerHTML || '';
+say('e kapanis gelecek yine filtre', hE2.indexOf('Kasım 2026') >= 0 && hE2.indexOf('Aralık 2026') < 0 && hE2.indexOf('Ocak 2027') < 0);
+
+// (f) iptal
+faturaRaporGridModalCiz({ iptal: true, aylar: [ayObj(2026, 12, 1, 1)], iptal_mesaj: 'Sözleşme iptal edildi: aylık borç oluşmaz.' }, 'F', meta('2026-11-05'));
+var hF = body.innerHTML || '';
+say('f iptal msg', hF.indexOf('iptal') >= 0 || hF.indexOf('İptal') >= 0 || hF.indexOf('Sözleşme iptal') >= 0);
+say('f iptal kart yok', hF.indexOf('sozlesmeler-ay-kart') < 0);
+
+// (g) tüm aylar gelecekte
+faturaRaporGridModalCiz({ aylar: [ayObj(2027, 1, 10, 10), ayObj(2027, 2, 10, 10)] }, 'G', meta('2026-11-05'));
+var hG = body.innerHTML || '';
+say('g henuz mesaj', hG.indexOf('Henüz borçlanan ay yok.') >= 0);
+say('g kart yok', hG.indexOf('sozlesmeler-ay-kart') < 0);
+say('g ozet var', hG.indexOf('Toplam Borç') >= 0);
+
+// (h) istanbul_bugun yok → süzgeç yok
+faturaRaporGridModalCiz({ aylar: [ayObj(2026, 11, 10, 10), ayObj(2027, 5, 99, 99)] }, 'H', meta(''));
+var hH = body.innerHTML || '';
+say('h gelecek gorunur', hH.indexOf('Mayıs 2027') >= 0 || hH.indexOf('data-ay-key="2027-5"') >= 0 || hH.indexOf('data-ay-key="2027-05"') >= 0);
+say('h temiz', temiz(hH));
+
+// (j) alt alanlar değişmedi
+say('j etiket', hA.indexOf('Kasım dahil') >= 0 || hA.indexOf('etiket') >= 0);
+say('j toplam label', hA.indexOf('Toplam Borç') >= 0 && hA.indexOf('Günü Gelen Borç') >= 0);
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            check("node ay filtre", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node ay filtre exit", r.returncode == 0, out[-400:])
+        for needle in [
+            "ok a son ay 2026-11",
+            "ok a 2026-12 yok",
+            "ok a 2027-01 yok",
+            "ok b bu ay var",
+            "ok c1 2026-12 var",
+            "ok c1 2027-01 yok",
+            "ok c2 2027-01 var",
+            "ok c2 2027-02 yok",
+            "ok d aylar 2",
+            "ok d plan 300",
+            "ok d kalan 90",
+            "ok e kapanis gecmis",
+            "ok e kapanis gelecek yine filtre",
+            "ok f iptal msg",
+            "ok f iptal kart yok",
+            "ok g henuz mesaj",
+            "ok h gelecek gorunur",
+            "ok h temiz",
+            "ok j toplam label",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    # (i) sozlesmelerAylikCacheRender gövdesinde gelecek ay popup filtresi yok
+    srender = html[
+        html.find("function sozlesmelerAylikCacheRender") : html.find(
+            "function sozlesmelerAylikCacheRender"
+        )
+        + 8000
+    ]
+    check(
+        "i sozlesmeler filtre yok",
+        "Henüz borçlanan ay yok." not in srender
+        and "faturaRaporGridModalBugunAyIdx" not in srender
+        and "faturaRaporGridModalAyIdx" not in srender,
+    )
+
+
+
+def test_popup_ay_filtre_sayisal_idx():
+    """Sayısal ay idx: yalnız ay_key / yalnız yil+ay / dolgusuz / karışık / bozuk."""
+    html = _html()
+    try:
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        ciz_end = html.find("function faturaRaporGridModalAc", filtre_i)
+        filtre_blk = html[filtre_i:ciz_end]
+    except ValueError as e:
+        check("sayisal extract", False, str(e))
+        return
+    check("sayisal extract ciz", "aylarVis" in filtre_blk and "faturaRaporGridModalAyIdx" in filtre_blk)
+    check("sayisal metin k<= yok", "k <= bugunAy" not in filtre_blk and "k < bugunAy" not in filtre_blk)
+    check("sayisal idx <= var", "idx <= bugunIdx" in filtre_blk)
+    check("sayisal new Date yok", "new Date(" not in filtre_blk)
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function temiz(s) {
+  s = String(s == null ? '' : s);
+  return s.indexOf('NaN') < 0 && s.indexOf('undefined') < 0;
+}
+function meta(bugun) {
+  return { toplamBorc: 100, gunuGelen: 80, sozlesmeGun: 18, bugunIso: bugun || '', sozlesmeTarihi: '2025-10-18', gunBazliAyHaric: true };
+}
+function hasAy(h, y, m) {
+  var pad = (m < 10 ? '0' : '') + String(m);
+  var k1 = 'data-ay-key="' + y + '-' + m + '"';
+  var k2 = 'data-ay-key="' + y + '-' + pad + '"';
+  return h.indexOf(k1) >= 0 || h.indexOf(k2) >= 0;
+}
+function noAy(h, y, m) {
+  return !hasAy(h, y, m);
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+
+// (a) YALNIZ ay_key (yil/ay YOK), bugün 2026-11-05
+faturaRaporGridModalCiz({
+  aylar: [
+    { ay_key: '2026-11', tutar_kdv_dahil: 100, kalan_tutar_kdv: 100, tahsil_edildi: false },
+    { ay_key: '2026-12', tutar_kdv_dahil: 200, kalan_tutar_kdv: 200, tahsil_edildi: false }
+  ]
+}, 'A', meta('2026-11-05'));
+var hA = body.innerHTML || '';
+say('a 2026-11 var', hasAy(hA, 2026, 11), hA.slice(0, 200));
+say('a 2026-12 yok', noAy(hA, 2026, 12));
+say('a temiz', temiz(hA));
+
+// (b) YALNIZ yil+ay (ay_key YOK)
+faturaRaporGridModalCiz({
+  aylar: [
+    { yil: 2026, ay: 11, tutar_kdv_dahil: 100, kalan_tutar_kdv: 100, tahsil_edildi: false },
+    { yil: 2026, ay: 12, tutar_kdv_dahil: 200, kalan_tutar_kdv: 200, tahsil_edildi: false }
+  ]
+}, 'B', meta('2026-11-05'));
+var hB = body.innerHTML || '';
+say('b 2026-11 var', hasAy(hB, 2026, 11) || hB.indexOf('Kasım 2026') >= 0);
+say('b 2026-12 yok', noAy(hB, 2026, 12) && hB.indexOf('Aralık 2026') < 0);
+say('b temiz', temiz(hB));
+
+// (c) DOLGUSUZ ay_key — metin karşılaştırmasında yanlış çıkacak durumlar
+faturaRaporGridModalCiz({
+  aylar: [
+    { ay_key: '2026-9', tutar_kdv_dahil: 90, kalan_tutar_kdv: 90, tahsil_edildi: false },
+    { ay_key: '2026-10', tutar_kdv_dahil: 100, kalan_tutar_kdv: 100, tahsil_edildi: false },
+    { ay_key: '2026-11', tutar_kdv_dahil: 110, kalan_tutar_kdv: 110, tahsil_edildi: false },
+    { ay_key: '2026-12', tutar_kdv_dahil: 120, kalan_tutar_kdv: 120, tahsil_edildi: false },
+    { ay_key: '2027-5', tutar_kdv_dahil: 50, kalan_tutar_kdv: 50, tahsil_edildi: false }
+  ]
+}, 'C', meta('2026-11-05'));
+var hC = body.innerHTML || '';
+say('c 9 var', hasAy(hC, 2026, 9) || hC.indexOf('Eylül 2026') >= 0);
+say('c 10 var', hasAy(hC, 2026, 10) || hC.indexOf('Ekim 2026') >= 0);
+say('c 11 var', hasAy(hC, 2026, 11) || hC.indexOf('Kasım 2026') >= 0);
+say('c 12 yok', noAy(hC, 2026, 12) && hC.indexOf('Aralık 2026') < 0);
+say('c 2027-5 yok', noAy(hC, 2027, 5) && hC.indexOf('Mayıs 2027') < 0);
+say('c aylar 3', hC.indexOf('Aylar: 3') >= 0, hC.match(/Aylar: \d+/) && hC.match(/Aylar: \d+/)[0]);
+say('c temiz', temiz(hC));
+
+// (d) dolgulu/dolgusuz karışık aynı sonuç
+faturaRaporGridModalCiz({
+  aylar: [
+    { ay_key: '2026-09', tutar_kdv_dahil: 90, kalan_tutar_kdv: 90, tahsil_edildi: false },
+    { ay_key: '2026-10', tutar_kdv_dahil: 100, kalan_tutar_kdv: 100, tahsil_edildi: false },
+    { ay_key: '2026-11', tutar_kdv_dahil: 110, kalan_tutar_kdv: 110, tahsil_edildi: false },
+    { ay_key: '2026-12', tutar_kdv_dahil: 120, kalan_tutar_kdv: 120, tahsil_edildi: false },
+    { ay_key: '2027-05', tutar_kdv_dahil: 50, kalan_tutar_kdv: 50, tahsil_edildi: false }
+  ]
+}, 'D', meta('2026-11-05'));
+var hD = body.innerHTML || '';
+say('d 9 var', hasAy(hD, 2026, 9) || hD.indexOf('Eylül 2026') >= 0);
+say('d 10 var', hasAy(hD, 2026, 10) || hD.indexOf('Ekim 2026') >= 0);
+say('d 11 var', hasAy(hD, 2026, 11) || hD.indexOf('Kasım 2026') >= 0);
+say('d 12 yok', noAy(hD, 2026, 12) && hD.indexOf('Aralık 2026') < 0);
+say('d 2027-5 yok', noAy(hD, 2027, 5) && hD.indexOf('Mayıs 2027') < 0);
+say('d aylar 3', hD.indexOf('Aylar: 3') >= 0);
+say('d temiz', temiz(hD));
+
+// (e) ay_key/yil/ay yok veya bozuk → gizlenmez, NaN/undefined yok
+faturaRaporGridModalCiz({
+  aylar: [
+    { ay_key: 'abc', tutar_kdv_dahil: 77, kalan_tutar_kdv: 77, tahsil_edildi: false },
+    { ay_key: '2026-12', tutar_kdv_dahil: 120, kalan_tutar_kdv: 120, tahsil_edildi: false }
+  ]
+}, 'E', meta('2026-11-05'));
+var hE = body.innerHTML || '';
+say('e bozuk gorunur', hE.indexOf('77') >= 0 || hE.indexOf('sozlesmeler-ay-kart') >= 0);
+say('e 2026-12 yok', noAy(hE, 2026, 12) && hE.indexOf('Aralık 2026') < 0);
+say('e temiz', temiz(hE));
+say('e aylar 1', hE.indexOf('Aylar: 1') >= 0, hE.match(/Aylar: \d+/) && hE.match(/Aylar: \d+/)[0]);
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            check("node sayisal idx", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node sayisal idx exit", r.returncode == 0, out[-400:])
+        for needle in [
+            "ok a 2026-11 var",
+            "ok a 2026-12 yok",
+            "ok a temiz",
+            "ok b 2026-11 var",
+            "ok b 2026-12 yok",
+            "ok b temiz",
+            "ok c 9 var",
+            "ok c 10 var",
+            "ok c 11 var",
+            "ok c 12 yok",
+            "ok c 2027-5 yok",
+            "ok c aylar 3",
+            "ok c temiz",
+            "ok d 9 var",
+            "ok d 10 var",
+            "ok d 11 var",
+            "ok d 12 yok",
+            "ok d 2027-5 yok",
+            "ok d aylar 3",
+            "ok d temiz",
+            "ok e bozuk gorunur",
+            "ok e 2026-12 yok",
+            "ok e temiz",
+            "ok e aylar 1",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_sunucu_gun_gelen()
     test_sablon_ve_excel()
@@ -1164,6 +1574,8 @@ if __name__ == "__main__":
     test_tutar_kurus_ve_buyuk()
     test_gercek_satir_uretimi_popup_tutar()
     test_ozet_ay_etiket_gercek_satir()
+    test_popup_ay_filtre_gelecek_gizle()
+    test_popup_ay_filtre_sayisal_idx()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)
