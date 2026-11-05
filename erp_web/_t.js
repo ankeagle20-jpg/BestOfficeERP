@@ -7806,7 +7806,6 @@ function faturaRaporGridModalAc(ev, mid) {
         if (tr) {
             var hamN = parseFloat(tr.getAttribute('data-fr-grid-borc-n'));
             var gelN = parseFloat(tr.getAttribute('data-fr-gun-gelen-n'));
-            if (!isFinite(hamN)) hamN = parseFloat(btn && btn.textContent);
             if (!isFinite(hamN)) hamN = 0;
             if (!isFinite(gelN)) gelN = hamN;
             meta.toplamBorc = hamN;
@@ -8548,12 +8547,14 @@ function faturaRaporYukle() {
                     var gridHamRaw = (s.toplam_borc_ham != null && s.toplam_borc_ham !== '') ? s.toplam_borc_ham : s.toplam_borc;
                     var gridHamNum = parseFloat(gridHamRaw);
                     if (!isFinite(gridHamNum)) gridHamNum = 0;
+                    gridHamNum = Math.round(gridHamNum * 100) / 100;
                     var gridHamFmt = gridHamNum.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    var gridHamN = String(gridHamNum);
+                    var gridHamN = gridHamNum.toFixed(2);
                     var gridGelenRaw = (s.toplam_borc_gun_gelen != null && s.toplam_borc_gun_gelen !== '') ? s.toplam_borc_gun_gelen : gridHamRaw;
                     var gridGelenNum = parseFloat(gridGelenRaw);
                     if (!isFinite(gridGelenNum)) gridGelenNum = gridHamNum;
-                    var gridGelenN = String(gridGelenNum);
+                    gridGelenNum = Math.round(gridGelenNum * 100) / 100;
+                    var gridGelenN = gridGelenNum.toFixed(2);
                     var sozGunN = (s.sozlesme_gun != null && s.sozlesme_gun !== '') ? String(parseInt(s.sozlesme_gun, 10) || '') : '';
                     cells[8] = '<td class="num" data-fr-col-id="8">' + borcFmt + '</td>';
                     cells[16] = '<td class="num" data-fr-col-id="16">' + (midOk
@@ -8591,7 +8592,7 @@ function faturaRaporYukle() {
                     return '<tr' + (midOk ? ' data-musteri-id="' + midNum + '"' : '') +
                         ' data-fr-tarih="' + esc(tarih) + '" data-fr-ad="' + esc(plainAd) + '" data-fr-vergi="' + esc(vergiNo) + '" data-fr-kimlik="' + esc(kimlikNo) + '" data-fr-tutar="' + esc(tutFmt) + '" data-fr-tutar-n="' + esc(tutN) + '"' +
                         ' data-fr-ilk-n="' + esc(ilkN) + '" data-fr-guncel-n="' + esc(guncN) + '"' +
-                        ' data-fr-borc-n="' + esc(borcN) + '" data-fr-grid-borc-n="' + esc(gridHamN) + '" data-fr-gun-n="' + esc(gunSortN) + '" data-fr-ay-n="' + esc(aySortN) + '" data-fr-geciken-n="' + esc(gaStr) + '"' +
+                        ' data-fr-borc-n="' + esc(borcN) + '" data-fr-grid-borc-n="' + esc(gridHamN) + '" data-fr-gun-gelen-n="' + esc(gridGelenN) + '" data-fr-soz-gun="' + esc(sozGunN) + '" data-fr-gun-n="' + esc(gunSortN) + '" data-fr-ay-n="' + esc(aySortN) + '" data-fr-geciken-n="' + esc(gaStr) + '"' +
                         ' data-fr-grup2="' + esc(grup2Raw) + '" data-fr-grup2-slugs="' + esc(grup2SlugsRaw) + '" data-fr-hizmet="' + esc(hizmetRaw) + '" data-fr-durum="' + esc(durEt) + '"' +
                         ' data-fr-kapanis="' + esc(kapIso) + '"' +
                         ' data-fr-hazir-oda="' + esc(hoAttr) + '"' +

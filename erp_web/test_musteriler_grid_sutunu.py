@@ -258,12 +258,97 @@ def test_sort_ve_col_order():
     check("migrate grid col", "migrateFirmaColOrderInsertGridCol" in html)
 
 
+def test_tutar_attr_ve_sort():
+    """Grid attr ham sayı (nokta); sıralama sayısal; tr-TR text parse yok."""
+    from routes import faturalar_routes as fr
+
+    fr._FIRMA_OZET_GUN_BAZLI_BUGUN_OVERRIDE = date(2025, 11, 18)
+    for amt in (83.0, 83412.57, 1234567.89, 0.05, 999999999.99):
+        rows = [
+            {
+                "musteri_id": 1,
+                "toplam_borc": amt,
+                "borc_hesaplanamadi": False,
+                "sozlesme_gun": 5,
+                "borc_ref_ay": 0.0,
+                "geciken_ay": 1,
+            }
+        ]
+        fr._firma_ozet_gun_bazli_borc_uygula_satirlar(rows, aktif=False)
+        check(
+            f"sutun ham {amt}",
+            rows[0]["toplam_borc_ham"] == round(amt, 2),
+            rows[0].get("toplam_borc_ham"),
+        )
+    fr._FIRMA_OZET_GUN_BAZLI_BUGUN_OVERRIDE = None
+
+    html = _html()
+    tjs = _tjs()
+    check("html attr yaz", "esc(gridHamN)" in html and "data-fr-grid-borc-n=" in html)
+    check("html toFixed", "gridHamNum.toFixed(2)" in html)
+    check("html btn parse yok", "parseFloat(btn && btn.textContent)" not in html)
+    check("tjs attr yaz", "esc(gridHamN)" in tjs and "data-fr-grid-borc-n=" in tjs)
+    check("tjs gun-gelen yaz", "esc(gridGelenN)" in tjs and "data-fr-gun-gelen-n=" in tjs)
+    check("tjs toFixed", "gridHamNum.toFixed(2)" in tjs)
+    check("tjs btn parse yok", "parseFloat(btn && btn.textContent)" not in tjs)
+
+    node = r"""
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function attrN(raw) {
+  var n = parseFloat(raw);
+  if (!isFinite(n)) n = 0;
+  n = Math.round(n * 100) / 100;
+  return n.toFixed(2);
+}
+var cases = [83, 83412.57, 1234567.89, 0.05, 999999999.99];
+var attrs = cases.map(attrN);
+say('attr 83412', attrs[1] === '83412.57');
+say('attr buyuk', attrs[2] === '1234567.89');
+say('attr virgul yok', attrs.every(function (a) { return a.indexOf(',') < 0; }));
+var sorted = attrs.slice().sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
+say('sort', sorted.join('|') === '0.05|83.00|83412.57|1234567.89|999999999.99', sorted.join('|'));
+// kırpma kanıtı: tr-TR text parseFloat yanlış
+say('kirpma 83k', parseFloat('83.412,57') === 83.412);
+say('kirpma milyon', Math.abs(parseFloat('1.234.567,89') - 1.234) < 0.001);
+"""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+        except FileNotFoundError:
+            check("node sutun tutar", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node sutun tutar exit", r.returncode == 0, out[-200:])
+        for needle in [
+            "ok attr 83412",
+            "ok attr buyuk",
+            "ok attr virgul yok",
+            "ok sort",
+            "ok kirpma 83k",
+            "ok kirpma milyon",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_ham_toplam_sunucu()
     test_excel_degismedi()
     test_sablon()
     test_sort_ve_col_order()
     test_node_modal_ve_tik()
+    test_tutar_attr_ve_sort()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)

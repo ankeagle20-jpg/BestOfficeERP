@@ -3705,10 +3705,18 @@ def _firma_ozet_gun_bazli_borc_uygula_satirlar(
     """
     for it in satirlar or []:
         if isinstance(it, dict):
-            it["toplam_borc_ham"] = it.get("toplam_borc")
-            it["toplam_borc_gun_gelen"] = _firma_ozet_toplam_borc_gun_gelen_hesapla(
-                it, bugun
-            )
+            ham = it.get("toplam_borc")
+            try:
+                ham = None if ham is None else round(float(ham), 2)
+            except (TypeError, ValueError):
+                ham = None
+            it["toplam_borc_ham"] = ham
+            gg = _firma_ozet_toplam_borc_gun_gelen_hesapla(it, bugun)
+            try:
+                gg = None if gg is None else round(float(gg), 2)
+            except (TypeError, ValueError):
+                gg = None
+            it["toplam_borc_gun_gelen"] = gg
     if not aktif:
         return satirlar
     atlanan_acc = [0]
