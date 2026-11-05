@@ -7675,12 +7675,23 @@ function faturaRaporGridModalFmt(n) {
     if (!isFinite(x)) x = 0;
     return x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+var FATURA_RAPOR_AYLAR_TR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+var FATURA_RAPOR_AYLAR_KISA = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 function faturaRaporGridModalKartHtml(ay) {
     if (!ay) return '';
-    var y = parseInt(ay.yil, 10) || 0;
-    var m = parseInt(ay.ay, 10) || 0;
-    var ayAdlari = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-    var ad = (m >= 1 && m <= 12) ? ayAdlari[m - 1] : '';
+    var y = Number(ay.yil);
+    var m = Number(ay.ay);
+    if (!(y >= 1900 && m >= 1 && m <= 12)) {
+        var rawK = String(ay.ay_key || '').trim();
+        var partsK = rawK.split('-');
+        if (partsK.length >= 2) {
+            y = Number(partsK[0]);
+            m = Number(partsK[1]);
+        }
+    }
+    if (!(y >= 1900 && m >= 1 && m <= 12)) { y = 0; m = 0; }
+    var adUzun = (m >= 1 && m <= 12) ? (FATURA_RAPOR_AYLAR_TR[m - 1] || '') : '';
+    var adKisa = (m >= 1 && m <= 12) ? (FATURA_RAPOR_AYLAR_KISA[m - 1] || '') : '';
     var key = String(ay.ay_key || ((y && m) ? (y + '-' + m) : ''));
     var tut = faturaRaporGridModalFmt(ay.tutar_kdv_dahil != null ? ay.tutar_kdv_dahil : ay.brut_tutar_kdv);
     var kalan = parseFloat(ay.kalan_tutar_kdv);
@@ -7692,13 +7703,13 @@ function faturaRaporGridModalKartHtml(ay) {
     if (ay.tahsil_edildi) alt = 'Ödendi';
     else if (isFinite(kalan)) alt = 'Kalan: ' + faturaRaporGridModalFmt(kalan);
     else alt = 'Borçlu';
-    return '<div class="' + cls + '" data-ay-key="' + key.replace(/"/g, '') + '" data-secilebilir="0" title="' + ad + ' ' + y + '">' +
-        '<div style="font-size:11px;color:#90a4ae;">' + ad + ' ' + (y || '') + '</div>' +
-        '<div style="font-size:13px;font-weight:600;margin-top:4px;">' + tut + '</div>' +
-        '<div style="font-size:10px;margin-top:3px;color:#b0bec5;">' + alt + '</div></div>';
+    var titleTxt = (adUzun + (y ? (' ' + y) : '')).replace(/"/g, '');
+    return '<div class="' + cls + '" data-ay-key="' + key.replace(/"/g, '') + '" data-secilebilir="0" title="' + titleTxt + '">' +
+        '<div class="frg-ay-ad">' + adKisa + (y ? (' ' + y) : '') + '</div>' +
+        '<div class="frg-ay-tut">' + tut + '</div>' +
+        '<div class="frg-ay-alt">' + alt + '</div></div>';
 }
 
-var FATURA_RAPOR_AYLAR_TR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 function faturaRaporGridModalAyAdi(bugunIso) {
     var iso = String(bugunIso || '').trim();
     if (iso.length < 7) return '';
@@ -7806,13 +7817,16 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
             sozlesmeTarihi: meta.sozlesmeTarihi,
             gunBazliAyHaric: meta.gunBazliAyHaric
         };
-        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">' + msg.replace(/</g, '&lt;') + '</div>' +
-            ((typeof faturaRaporGridModalOzetHtml === 'function') ? faturaRaporGridModalOzetHtml(iptalMeta) : '');
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-scroll"><div class="fatura-rapor-grid-modal-msg">' + msg.replace(/</g, '&lt;') + '</div></div>' +
+            '<div class="fatura-rapor-grid-modal-foot">' +
+            ((typeof faturaRaporGridModalOzetHtml === 'function') ? faturaRaporGridModalOzetHtml(iptalMeta) : '') +
+            '</div>';
         return;
     }
     var aylar = (cache && Array.isArray(cache.aylar)) ? cache.aylar : [];
     if (!aylar.length) {
-        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Aylık grid boş.</div>' + ozet;
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-scroll"><div class="fatura-rapor-grid-modal-msg">Aylık grid boş.</div></div>' +
+            '<div class="fatura-rapor-grid-modal-foot">' + ozet + '</div>';
         return;
     }
     // Yalnız popup: içinde bulunduğumuz aydan sonraki ayları gizle (istanbul_bugun; sayısal idx; new Date yok).
@@ -7828,10 +7842,11 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
         });
     }
     if (!aylarVis.length) {
-        body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">Henüz borçlanan ay yok.</div>' + ozet;
+        body.innerHTML = '<div class="fatura-rapor-grid-modal-scroll"><div class="fatura-rapor-grid-modal-msg">Henüz borçlanan ay yok.</div></div>' +
+            '<div class="fatura-rapor-grid-modal-foot">' + ozet + '</div>';
         return;
     }
-    var html = '<div class="sozlesmeler-aylik-grid">';
+    var html = '<div class="fatura-rapor-grid-modal-scroll"><div class="fatura-rapor-grid-modal-aylik">';
     var topBorc = 0;
     var topKalan = 0;
     aylarVis.forEach(function (a) {
@@ -7843,11 +7858,13 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
         else if (isFinite(kv)) topKalan += kv;
         else if (isFinite(tv)) topKalan += tv;
     });
-    html += '</div>';
+    html += '</div></div>';
+    html += '<div class="fatura-rapor-grid-modal-foot">';
     html += '<div class="fatura-rapor-grid-modal-toplam">Aylar: ' + aylarVis.length +
         ' · Plan: ' + faturaRaporGridModalFmt(topBorc) +
         ' ₺ · Kalan: ' + faturaRaporGridModalFmt(topKalan) + ' ₺</div>';
     html += ozet;
+    html += '</div>';
     body.innerHTML = html;
 }
 function faturaRaporGridModalAc(ev, mid) {

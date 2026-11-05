@@ -137,6 +137,14 @@ def test_sablon_ve_excel():
     check("attr toFixed", "gridHamN = gridHamNum.toFixed(2)" in html)
     check("attr btn textContent parse yok", "parseFloat(btn && btn.textContent)" not in html)
     check("aylar tr const", "FATURA_RAPOR_AYLAR_TR" in html and "Kasım" in html)
+    check("aylar kisa const", "FATURA_RAPOR_AYLAR_KISA" in html and "'Şub'" in html and "'Ağu'" in html)
+    css_i = html.find(".fatura-rapor-grid-modal-backdrop")
+    css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
+    check("css max-height 90vh", "max-height: min(90vh" in css_blk)
+    check("css scroll overflow auto", ".fatura-rapor-grid-modal-scroll" in css_blk and "overflow: auto" in css_blk)
+    check("css aylik autofill", "fatura-rapor-grid-modal-aylik" in css_blk and "auto-fill" in css_blk and "minmax(" in css_blk)
+    check("css foot sabit", ".fatura-rapor-grid-modal-foot" in css_blk and "flex-shrink: 0" in css_blk)
+    check("css hidden yalniz backdrop", ".fatura-rapor-grid-modal-backdrop[hidden]" in css_blk and css_blk.count("[hidden]") == 1)
     check("etiket fn", "function faturaRaporGridModalOzetEtiket" in html)
     check("ay adi iso slice", "iso.slice(5, 7)" in html and "new Date(" not in html[html.find("function faturaRaporGridModalAyAdi"):html.find("function faturaRaporGridModalSozTarihTr")])
     check("popup ay filtre fn", "function faturaRaporGridModalBugunAyIdx" in html and "function faturaRaporGridModalAyIdx" in html and "Henüz borçlanan ay yok." in html)
@@ -1567,6 +1575,216 @@ say('e aylar 1', hE.indexOf('Aylar: 1') >= 0, hE.match(/Aylar: \d+/) && hE.match
             pass
 
 
+
+def test_popup_kompakt_ay_grid():
+    """Gerçek KartHtml+Ciz: kısa ay adları, title tam ad, 36 ay, scroll/foot yapısı."""
+    html = _html()
+    check(
+        "k sozlesmeler fn ayni",
+        "function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil)" in html,
+    )
+    try:
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        # TR+KISA + ozet fn'ler; KartHtml ozet_blk içinde tekrar gelebilir — sorun değil
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        ciz_end = html.find("function faturaRaporGridModalAc", filtre_i)
+        filtre_blk = html[filtre_i:ciz_end]
+    except ValueError as e:
+        check("k extract", False, str(e))
+        return
+    check("k extract scroll", "fatura-rapor-grid-modal-scroll" in filtre_blk)
+    check("k extract aylik", "fatura-rapor-grid-modal-aylik" in filtre_blk)
+    check("k extract foot", "fatura-rapor-grid-modal-foot" in filtre_blk)
+    check("k new Date yok", "new Date(" not in kart and "new Date(" not in filtre_blk)
+    check("k kisa dizi", "FATURA_RAPOR_AYLAR_KISA" in ozet_blk or "FATURA_RAPOR_AYLAR_KISA" in kart or "'Oca'" in kart)
+
+    # CSS kaynak kontrolleri (f)
+    css_i = html.find(".fatura-rapor-grid-modal-backdrop")
+    css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
+    check("k css max-height", "max-height: min(90vh" in css_blk)
+    check("k css overflow auto scroll", ".fatura-rapor-grid-modal-scroll" in css_blk and "overflow: auto" in css_blk)
+    check("k css auto-fill", "repeat(auto-fill" in css_blk and "minmax(" in css_blk)
+    check("k css hidden backdrop", ".fatura-rapor-grid-modal-backdrop[hidden]" in css_blk)
+
+    # (h) sunucu/routes değişmedi — bu test dosyası sadece şablon okur; imza kontrolü
+    routes = (ROOT / "routes" / "faturalar_routes.py").read_text(encoding="utf-8")
+    check("k routes grid popup ciz yok", "faturaRaporGridModalCiz" not in routes)
+    check("k sozlesmeler filtre yok", "fatura-rapor-grid-modal-aylik" not in html[
+        html.find("function sozlesmelerAylikCacheRender") : html.find("function sozlesmelerAylikCacheRender") + 6000
+    ])
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function temiz(s) {
+  s = String(s == null ? '' : s);
+  return s.indexOf('NaN') < 0 && s.indexOf('undefined') < 0;
+}
+function meta(bugun) {
+  return { toplamBorc: 3600, gunuGelen: 3500, sozlesmeGun: 18, bugunIso: bugun || '', sozlesmeTarihi: '2023-12-18', gunBazliAyHaric: true };
+}
+function ayObj(y, m, tut, kalan) {
+  return {
+    yil: y, ay: m, ay_key: y + '-' + m,
+    tutar_kdv_dahil: tut, kalan_tutar_kdv: (kalan != null ? kalan : tut),
+    tahsil_edildi: false
+  };
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+var KISA = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+var UZUN = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+
+// (a)(b) 12 ay kısa ad + title tam ad — Ara 2023 … Kas 2024 tarzı örnekler
+var aylar12 = [];
+for (var m = 1; m <= 12; m++) {
+  aylar12.push(ayObj(2024, m, 100 * m, 50 * m));
+}
+faturaRaporGridModalCiz({ aylar: aylar12 }, 'K', meta('2024-12-15'));
+var h12 = body.innerHTML || '';
+say('a Oca 2024', h12.indexOf('Oca 2024') >= 0);
+say('a Şub 2024', h12.indexOf('Şub 2024') >= 0);
+say('a Ağu 2024', h12.indexOf('Ağu 2024') >= 0);
+say('a Ara 2024', h12.indexOf('Ara 2024') >= 0);
+var aOk = true;
+for (var i = 0; i < 12; i++) {
+  var kisaLab = KISA[i] + ' 2024';
+  var uzunLab = UZUN[i] + ' 2024';
+  if (h12.indexOf(kisaLab) < 0) { aOk = false; say('a eksik kisa', false, kisaLab); }
+  if (h12.indexOf('title="' + uzunLab + '"') < 0) { aOk = false; say('b eksik title', false, uzunLab); }
+}
+say('a 12 kisa', aOk);
+say('b 12 title', aOk);
+say('a temiz', temiz(h12));
+
+// (c) 36 ay: 2023-12 … 2026-11 (bugün 2026-11) hepsi görünür; 2026-12 yok
+var aylar36 = [];
+var y0 = 2023, m0 = 12;
+for (var n = 0; n < 36; n++) {
+  var yy = y0 + Math.floor((m0 - 1 + n) / 12);
+  var mm = ((m0 - 1 + n) % 12) + 1;
+  aylar36.push(ayObj(yy, mm, 1000 + n, 500));
+}
+// ekstra gelecek ay (gizlenmeli)
+aylar36.push(ayObj(2026, 12, 9999, 9999));
+aylar36.push(ayObj(2027, 1, 8888, 8888));
+faturaRaporGridModalCiz({ aylar: aylar36 }, 'K36', meta('2026-11-05'));
+var h36 = body.innerHTML || '';
+say('c aylar 36', h36.indexOf('Aylar: 36') >= 0, h36.match(/Aylar: \d+/) && h36.match(/Aylar: \d+/)[0]);
+say('c Ara 2023', h36.indexOf('Ara 2023') >= 0 && h36.indexOf('title="Aralık 2023"') >= 0);
+say('c Kas 2026', h36.indexOf('Kas 2026') >= 0 && h36.indexOf('title="Kasım 2026"') >= 0);
+say('c 2026-12 yok', h36.indexOf('Ara 2026') < 0 && h36.indexOf('9999') < 0);
+say('c kart 36', (h36.match(/data-ay-key="/g) || []).length === 36);
+say('c tutar durum', h36.indexOf('frg-ay-tut') >= 0 && h36.indexOf('Kalan:') >= 0);
+say('c temiz', temiz(h36));
+
+// (d) özet görünenlerden
+say('d plan', h36.indexOf('Plan:') >= 0 && h36.indexOf('9999') < 0);
+say('d ozet Toplam', h36.indexOf('Toplam Borç') >= 0 && h36.indexOf('Günü Gelen Borç') >= 0);
+
+// (e) DOM: scroll içinde aylik; foot dışında ozet/toplam
+var scrollOpen = h36.indexOf('fatura-rapor-grid-modal-scroll');
+var aylikOpen = h36.indexOf('fatura-rapor-grid-modal-aylik');
+var footOpen = h36.indexOf('fatura-rapor-grid-modal-foot');
+var toplamI = h36.indexOf('fatura-rapor-grid-modal-toplam');
+var ozetI = h36.indexOf('fatura-rapor-grid-modal-ozet');
+say('e sira scroll<aylik<foot', scrollOpen >= 0 && aylikOpen > scrollOpen && footOpen > aylikOpen);
+say('e toplam foot icinde', toplamI > footOpen && toplamI > 0);
+say('e ozet foot icinde', ozetI > footOpen && ozetI > 0);
+say('e ozet scroll disinda', ozetI > footOpen);
+// scroll kapanışı foot'tan önce olmalı
+var scrollCloseApprox = h36.indexOf('</div></div>', aylikOpen);
+say('e yapi siniflar', h36.indexOf('class="fatura-rapor-grid-modal-scroll"') >= 0
+  && h36.indexOf('class="fatura-rapor-grid-modal-aylik"') >= 0
+  && h36.indexOf('class="fatura-rapor-grid-modal-foot"') >= 0);
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(
+                ["node", path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            check("node kompakt", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node kompakt exit", r.returncode == 0, out[-500:])
+        for needle in [
+            "ok a Oca 2024",
+            "ok a Şub 2024",
+            "ok a Ağu 2024",
+            "ok a Ara 2024",
+            "ok a 12 kisa",
+            "ok b 12 title",
+            "ok a temiz",
+            "ok c aylar 36",
+            "ok c Ara 2023",
+            "ok c Kas 2026",
+            "ok c 2026-12 yok",
+            "ok c kart 36",
+            "ok c tutar durum",
+            "ok c temiz",
+            "ok d plan",
+            "ok d ozet Toplam",
+            "ok e sira scroll<aylik<foot",
+            "ok e toplam foot icinde",
+            "ok e ozet foot icinde",
+            "ok e yapi siniflar",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_sunucu_gun_gelen()
     test_sablon_ve_excel()
@@ -1576,6 +1794,7 @@ if __name__ == "__main__":
     test_ozet_ay_etiket_gercek_satir()
     test_popup_ay_filtre_gelecek_gizle()
     test_popup_ay_filtre_sayisal_idx()
+    test_popup_kompakt_ay_grid()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)
