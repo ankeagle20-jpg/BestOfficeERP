@@ -13112,6 +13112,54 @@ def _firma_ozet_payload_is_placeholder_dominated(payload, ref_y: int, ref_m: int
     return n_ph == n_window
 
 
+def _firma_ozet_ref_ay_borc_dahil_from_payload(
+    payload, ref_y: int, ref_m: int, kyc_for_grid=None
+) -> float:
+    """Referans ayın toplam_borc'a eklenen tutarı (0 = ay borç toplamına katılmamış).
+
+    usable/placeholder kapıları yok — yalnız hazır payload satırından okur; ek canlı hesap yok.
+    """
+    if not isinstance(payload, dict) or ref_m < 1 or ref_m > 12:
+        return 0.0
+    son_borc = kira_son_borc_ayi(kyc_for_grid) if kyc_for_grid else None
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    ref_first = date(int(ref_y), int(ref_m), 1)
+    if son_borc is not None and ref_first > son_borc:
+        return 0.0
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            yy = int(a.get("yil"))
+            mm = int(a.get("ay"))
+        except (TypeError, ValueError):
+            continue
+        if yy != ref_y or mm != ref_m:
+            continue
+        try:
+            tut = float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if not math.isfinite(tut):
+            tut = 0.0
+        tahsil = bool(a.get("tahsil_edildi"))
+        try:
+            kalan = float(a.get("kalan_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            kalan = 0.0
+        odenen = float(a.get("odenen_tutar_kdv") or 0) if a.get("odenen_tutar_kdv") is not None else 0.0
+        kismi = bool(a.get("kismi_tahsilat")) or (odenen > tol and kalan > tol)
+        if (not tahsil) or kismi:
+            if kismi:
+                add = min(tut, max(kalan, 0.0)) if math.isfinite(kalan) else tut
+            else:
+                add = tut
+            if add > tol:
+                return round(float(add), 2)
+        return 0.0
+    return 0.0
+
+
 def _firma_ozet_ozet_from_grid_cache_payload(
     payload, ref_y: int, ref_m: int, kyc_for_grid=None
 ) -> dict | None:
@@ -13136,6 +13184,7 @@ def _firma_ozet_ozet_from_grid_cache_payload(
     borc_month_placeholder = False
     total_borc = 0.0
     geciken = 0
+    borc_ref_ay = 0.0
     for a in payload.get("aylar") or []:
         if not isinstance(a, dict):
             continue
@@ -13177,11 +13226,14 @@ def _firma_ozet_ozet_from_grid_cache_payload(
             if add > tol:
                 total_borc += add
                 geciken += 1
+                if cur.year == ref_y and cur.month == ref_m:
+                    borc_ref_ay = float(add)
     return {
         "borc_month": borc_month,
         "borc_month_placeholder": bool(borc_month_placeholder),
         "toplam_borc": round(total_borc, 2),
         "geciken_ay": int(geciken),
+        "borc_ref_ay": round(float(borc_ref_ay or 0.0), 2),
         "sozlesme_gun": 0,
     }
 
@@ -13370,6 +13422,7 @@ def musteri_firma_ozet_grid_ozet_batch(
             "borc_month_placeholder": False,
             "toplam_borc": None,
             "geciken_ay": None,
+            "borc_ref_ay": 0.0,
             "sozlesme_gun": gun,
             "borc_hesaplanamadi": True,
         }
@@ -13460,11 +13513,21 @@ def musteri_firma_ozet_grid_ozet_batch(
                 tahsil_n_override=tahsil_by_mid.get(mid, set()),
                 skip_disk_cache_for_months=False,
             )
+            # Referans ayın toplam_borc katkısı — gun_bazli için (ek canlı hesap yok).
+            borc_ref_ay = _firma_ozet_ref_ay_borc_dahil_from_payload(
+                cached_pl, ref_y, ref_m, kyc_for_grid=kyc_for_grid
+            )
+            if borc_ref_ay <= 0 and borc_month > 0 and not borc_month_placeholder:
+                _tn = tahsil_by_mid.get(mid, set()) if isinstance(tahsil_by_mid, dict) else set()
+                _ak = f"{ref_y}-{ref_m}"
+                if _ak not in _tn:
+                    borc_ref_ay = float(borc_month)
             out[mid] = {
                 "borc_month": round(borc_month, 2),
                 "borc_month_placeholder": bool(borc_month_placeholder),
                 "toplam_borc": round(float(tborc or 0.0), 2),
                 "geciken_ay": int(gec or 0),
+                "borc_ref_ay": round(float(borc_ref_ay or 0.0), 2),
                 "sozlesme_gun": gun,
             }
             n_canli += 1

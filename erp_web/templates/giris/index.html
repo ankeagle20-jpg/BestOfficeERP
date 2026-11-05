@@ -4074,6 +4074,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     <label class="fatura-rapor-opt" title="Açıkken filtreler, tekil liste sütun düzeni/sıralaması ve fatura satırı tablosu ayarları tarayıcıda saklanır; sayfa yenilense korunur. Kapalıyken yalnızca bu sekme oturumu için geçerlidir."><input type="checkbox" id="fatura_rapor_ayarlari_kaydet" autocomplete="off"> Ayarları kaydet</label>
                     <label class="fatura-rapor-opt" title="Müşteri kartında «Bizim Hesap» işaretli carileri listelemek için sunucuya filtre uygular; Listeyi getir ile yenileyin."><input type="checkbox" id="fatura_rapor_bizim_hesap" autocomplete="off"> Bizim Hesap</label>
                     <label class="fatura-rapor-opt" title="Rapordaki Borç (kalan) değeri 0,005 TL üzeri olan carileri gösterir; işaret kalkınca tüm satırlar geri gelir (istemci süzgeci)."><input type="checkbox" id="fatura_rapor_sadece_borclu" autocomplete="off"> Sadece borçlular</label>
+                    <label class="fatura-rapor-opt" title="Bu ayın borcu, sözleşme günü gelmişse sayılır"><input type="checkbox" id="fatura_rapor_gun_bazli" autocomplete="off"> Gün</label>
                     <span id="fatura_rapor_opt_sadece_wrap" style="display:none;"><label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_sadece_kesilen"> Yalnız kesilen faturalar (fatura yok satırı ekleme)</label></span>
                 </div>
                 <div id="fatura_rapor_durum" class="fatura-rapor-durum fatura-rapor-durum--idle" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -12077,6 +12078,7 @@ function faturaRaporFiltreStateKaydet() {
         var co = document.getElementById('fatura_rapor_cift_olanlar');
         var bh = document.getElementById('fatura_rapor_bizim_hesap');
         var sb = document.getElementById('fatura_rapor_sadece_borclu');
+        var gb = document.getElementById('fatura_rapor_gun_bazli');
         var o = {
             gorunum: gor ? gor.value : '',
             duzenli_fatura: df ? df.value : '',
@@ -12086,6 +12088,7 @@ function faturaRaporFiltreStateKaydet() {
             cift_olanlar: !!(co && co.checked),
             bizim_hesap: !!(bh && bh.checked),
             sadece_borclu: !!(sb && sb.checked),
+            gun_bazli: !!(gb && gb.checked),
             sadece_kesilen: !!(sk && sk.checked),
             baslangic: bas ? bas.value : '',
             bitis: bit ? bit.value : '',
@@ -12132,6 +12135,7 @@ function faturaRaporFiltreStateUygula() {
     var co = document.getElementById('fatura_rapor_cift_olanlar');
     var bh = document.getElementById('fatura_rapor_bizim_hesap');
     var sb = document.getElementById('fatura_rapor_sadece_borclu');
+    var gb = document.getElementById('fatura_rapor_gun_bazli');
     var sk = document.getElementById('fatura_rapor_sadece_kesilen');
     if (sk) sk.checked = !!st.sadece_kesilen;
     if (tm) tm.checked = !!st.tum_musteri;
@@ -12140,6 +12144,7 @@ function faturaRaporFiltreStateUygula() {
     if (co) co.checked = !!st.cift_olanlar;
     if (bh) bh.checked = !!st.bizim_hesap;
     if (sb) sb.checked = !!st.sadece_borclu;
+    if (gb) gb.checked = !!st.gun_bazli;
     if (sk && sk.checked) {
         if (tm) tm.checked = false;
         if (pd) pd.checked = false;
@@ -15502,6 +15507,8 @@ function faturaRaporExcelAktar() {
     if (elBh && elBh.checked) u += '&bizim_hesap=1';
     var elSb = document.getElementById('fatura_rapor_sadece_borclu');
     if (elSb && elSb.checked) u += '&sadece_borclu=1';
+    var elGb = document.getElementById('fatura_rapor_gun_bazli');
+    if (elGb && elGb.checked) u += '&gun_bazli=1';
     if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
     u += '&gorunum=firma_ozet';
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
@@ -15663,6 +15670,8 @@ function faturaRaporYukle() {
     if (elCo && elCo.checked) u += '&cift_olanlar=1';
     var elBh = document.getElementById('fatura_rapor_bizim_hesap');
     if (elBh && elBh.checked) u += '&bizim_hesap=1';
+    var elGb = document.getElementById('fatura_rapor_gun_bazli');
+    if (elGb && elGb.checked) u += '&gun_bazli=1';
     if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
     var elAra = document.getElementById('fatura_rapor_liste_ara');
     var araQ = elAra ? String(elAra.value || '').trim() : '';
@@ -17635,6 +17644,16 @@ function faturaRaporSecilenleriSil() {
     sb.addEventListener('change', function () {
         if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
         if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
+    });
+})();
+
+(function initFaturaRaporGunBazliGiris() {
+    var gb = document.getElementById('fatura_rapor_gun_bazli');
+    if (!gb) return;
+    gb.addEventListener('change', function () {
+        if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+        var gor = document.getElementById('fatura_rapor_gorunum');
+        if (gor && gor.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') faturaRaporYukle();
     });
 })();
 

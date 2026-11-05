@@ -14,6 +14,7 @@ from flask import (
 from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime, date, timedelta
+import calendar
 from cache_utils import CACHE_KEY_DUZENLI_FATURA, CACHE_TTL_SEC, simple_cache_get, simple_cache_set
 from db import (
     db,
@@ -3535,6 +3536,164 @@ def _firma_ozet_borc_fields_from_ozet(oz) -> tuple:
     return tborc, geciken_ay
 
 
+# Test enjeksiyonu: Europe/Istanbul «bugün» override (None = gerçek saat).
+_FIRMA_OZET_GUN_BAZLI_BUGUN_OVERRIDE: date | None = None
+
+
+def _firma_ozet_gun_bazli_param_aktif(raw=None) -> bool:
+    """Yalnız query gun_bazli=1 (tam eşleşme)."""
+    if raw is None:
+        try:
+            raw = request.args.get("gun_bazli")
+        except Exception:
+            raw = None
+    return str(raw if raw is not None else "").strip() == "1"
+
+
+def _firma_ozet_istanbul_bugun() -> date:
+    """Europe/Istanbul takvim günü; test override varsa onu döner."""
+    ov = _FIRMA_OZET_GUN_BAZLI_BUGUN_OVERRIDE
+    if isinstance(ov, date):
+        return ov
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("Europe/Istanbul")).date()
+    except Exception:
+        return date.today()
+
+
+def _firma_ozet_gun_bazli_etkin_gun(sozlesme_gun, y: int, m: int) -> int:
+    """Sözleşme günü ayın son gününü aşarsa ayın sonu."""
+    try:
+        sg = int(sozlesme_gun or 0)
+    except (TypeError, ValueError):
+        return 0
+    if sg < 1 or sg > 31:
+        return 0
+    try:
+        last = int(calendar.monthrange(int(y), int(m))[1])
+    except Exception:
+        return 0
+    if last < 1:
+        return 0
+    return min(sg, last)
+
+
+def _firma_ozet_gun_bazli_bu_ay_dahil_mi(sozlesme_gun, bugun: date | None = None) -> bool:
+    """True = bu ayın borcu dahil (kural yok veya gün >= etkin sözleşme günü)."""
+    try:
+        sg = int(sozlesme_gun or 0)
+    except (TypeError, ValueError):
+        sg = 0
+    if sg < 1 or sg > 31:
+        return True  # boş/geçersiz → kural uygulanmaz
+    d = bugun if isinstance(bugun, date) else _firma_ozet_istanbul_bugun()
+    eff = _firma_ozet_gun_bazli_etkin_gun(sg, d.year, d.month)
+    if eff < 1:
+        return True
+    return int(d.day) >= int(eff)
+
+
+def _firma_ozet_ozetten_borc_ref_ay(oz) -> float | None:
+    """Pozitif katkı veya 0.0 (hesaplanmış sıfır). Anahtar yok/None → None (atlanan)."""
+    if not isinstance(oz, dict):
+        return None
+    if "borc_ref_ay" not in oz or oz.get("borc_ref_ay") is None:
+        return None
+    try:
+        v = float(oz.get("borc_ref_ay"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    if v <= 0:
+        return 0.0
+    return round(v, 2)
+
+
+def _firma_ozet_gun_bazli_borc_uygula_satir(
+    it: dict, *, aktif: bool, bugun: date | None = None, atlanan_acc: list | None = None
+) -> dict:
+    """Hazır toplam_borc/geciken_ay üzerinde bu ay katkısını (yalnız borc_ref_ay > 0) düşer.
+
+    Güncel kira / ay hücresi yedeği yok. Ek canlı hesap yok.
+    borc_ref_ay == 0 → değişmez. yok/None → değişmez + atlanan.
+    """
+    if not aktif or not isinstance(it, dict):
+        return it
+    if it.get("gun_bazli_bu_ay_haric"):
+        return it
+    if it.get("toplam_borc") is None or it.get("borc_hesaplanamadi"):
+        return it
+    if _firma_ozet_gun_bazli_bu_ay_dahil_mi(it.get("sozlesme_gun"), bugun):
+        return it
+    try:
+        tb = float(it.get("toplam_borc"))
+    except (TypeError, ValueError):
+        return it
+    if not math.isfinite(tb):
+        return it
+    if "borc_ref_ay" not in it or it.get("borc_ref_ay") is None:
+        if isinstance(atlanan_acc, list) and atlanan_acc:
+            try:
+                atlanan_acc[0] = int(atlanan_acc[0]) + 1
+            except (TypeError, ValueError):
+                atlanan_acc[0] = 1
+        return it
+    try:
+        ref_ay = float(it.get("borc_ref_ay"))
+    except (TypeError, ValueError):
+        if isinstance(atlanan_acc, list) and atlanan_acc:
+            try:
+                atlanan_acc[0] = int(atlanan_acc[0]) + 1
+            except (TypeError, ValueError):
+                atlanan_acc[0] = 1
+        return it
+    if not math.isfinite(ref_ay):
+        if isinstance(atlanan_acc, list) and atlanan_acc:
+            try:
+                atlanan_acc[0] = int(atlanan_acc[0]) + 1
+            except (TypeError, ValueError):
+                atlanan_acc[0] = 1
+        return it
+    if ref_ay <= 0:
+        # Bu ay ödenmiş / katkı yok — toplam ve geciken değişmez.
+        return it
+    yeni = round(max(0.0, tb - ref_ay), 2)
+    it["toplam_borc"] = yeni
+    it["gun_bazli_bu_ay_haric"] = True
+    try:
+        ga = it.get("geciken_ay")
+        if ga is not None:
+            it["geciken_ay"] = max(0, int(ga) - 1)
+    except (TypeError, ValueError):
+        pass
+    return it
+
+
+def _firma_ozet_gun_bazli_borc_uygula_satirlar(
+    satirlar: list, *, aktif: bool, bugun: date | None = None
+) -> list:
+    if not aktif:
+        return satirlar
+    atlanan_acc = [0]
+    for it in satirlar or []:
+        _firma_ozet_gun_bazli_borc_uygula_satir(
+            it, aktif=True, bugun=bugun, atlanan_acc=atlanan_acc
+        )
+    try:
+        n_atl = int(atlanan_acc[0] or 0)
+    except (TypeError, ValueError):
+        n_atl = 0
+    if n_atl > 0:
+        try:
+            current_app.logger.info("firma_ozet_gun_bazli_atlanan=%s", n_atl)
+        except Exception:
+            pass
+    return satirlar
+
+
 def _firma_ozet_sum_borc_skip_none(satirlar: list) -> float:
     toplam = 0.0
     for it in satirlar or []:
@@ -3613,6 +3772,7 @@ def _firma_ozet_resp_cache_key() -> str:
         "giri_yillar",
         "hazir_ofis_oda",
         "hazir_oda",
+        "gun_bazli",
     )
     base = "|".join(f"{k}={request.args.get(k, '')}" for k in keys)
     ekstra = []
@@ -4325,6 +4485,8 @@ def _firma_ozet_toplam_borc_grid_for_winner_ids(
     *,
     chunk_size: int = 100,
     budget_sec: float | None = None,
+    gun_bazli: bool = False,
+    bugun: date | None = None,
 ) -> float:
     """Grid kaynaklı toplam borç (aylık grid ile aynı); id listesi üzerinden batch."""
     if not musteri_ids:
@@ -4345,9 +4507,18 @@ def _firma_ozet_toplam_borc_grid_for_winner_ids(
                 part, ref, prewarm=False, budget_sec=remain
             ) or {}
             for mid in part:
-                tb, _ga = _firma_ozet_borc_fields_from_ozet(oz.get(int(mid)) or {})
-                if tb is not None:
-                    total += float(tb)
+                ozd = oz.get(int(mid)) or {}
+                tb, _ga = _firma_ozet_borc_fields_from_ozet(ozd)
+                if tb is None:
+                    continue
+                if gun_bazli and not _firma_ozet_gun_bazli_bu_ay_dahil_mi(
+                    ozd.get("sozlesme_gun"), bugun
+                ):
+                    # Yalnız borc_ref_ay > 0; borc_month/guncel yedeği yok.
+                    ref_ay = _firma_ozet_ozetten_borc_ref_ay(ozd)
+                    if ref_ay is not None and ref_ay > 0:
+                        tb = round(max(0.0, float(tb) - float(ref_ay)), 2)
+                total += float(tb)
         return round(total, 2)
     except Exception as ex:
         try:
@@ -4468,6 +4639,7 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
         except (TypeError, ValueError):
             grid_ozet = {}
     borc_hesaplanamadi = False
+    borc_ref_ay = None
     if grid_ozet:
         try:
             gcur_raw = grid_ozet.get("borc_month")
@@ -4479,6 +4651,7 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
             pass
         tborc, geciken_ay = _firma_ozet_borc_fields_from_ozet(grid_ozet)
         borc_hesaplanamadi = bool(grid_ozet.get("borc_hesaplanamadi")) or (tborc is None)
+        borc_ref_ay = _firma_ozet_ozetten_borc_ref_ay(grid_ozet)
     else:
         # current_balance yedeği kaldırıldı — hesap yoksa None
         tborc = None
@@ -4509,6 +4682,7 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
         "guncel_kira_bedeli": guncel_json,
         "toplam_borc": tborc,
         "borc_hesaplanamadi": bool(borc_hesaplanamadi),
+        "borc_ref_ay": borc_ref_ay,
         "grup2": (row.get("grup2_etiketler") or ("Bizim Hesap" if bool(row.get("bizim_hesap")) else "")).strip(),
         "grup2_secimleri": g2_list,
         "sozlesme_gun": sozlesme_gun,
@@ -4818,6 +4992,7 @@ def _firma_ozet_satirlara_grid_ozet_uygula(satirlar: list, ref_first: date) -> N
         _it["toplam_borc"] = tb
         _it["geciken_ay"] = ga
         _it["borc_hesaplanamadi"] = bool(_oz.get("borc_hesaplanamadi")) or (tb is None)
+        _it["borc_ref_ay"] = _firma_ozet_ozetten_borc_ref_ay(_oz)
 
 
 def _firma_ozet_recalc_ozet(satirlar: list) -> tuple[float, float, int]:
@@ -4972,6 +5147,8 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or ""
     ).strip()
     client_sadece_borclu = _fatura_rapor_query_truthy(request.args.get("sadece_borclu"))
+    client_gun_bazli = _firma_ozet_gun_bazli_param_aktif(request.args.get("gun_bazli"))
+    gun_bazli_bugun = _firma_ozet_istanbul_bugun() if client_gun_bazli else None
 
     liste_hizli = _firma_ozet_liste_hizli_mod()
     if liste_hizli:
@@ -5237,6 +5414,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                 int(_meta.get("cache_fast") or 0),
                 (time.perf_counter() - _t_pg) * 1000.0,
             )
+            _winner_ids_ok = False
             try:
                 _t_tb = time.perf_counter()
                 ids_sql = _firma_ozet_sql_winner_ids_query(
@@ -5251,8 +5429,14 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                 # Adet sınırı yok: grid batch + süre bütçesi
                 if winner_ids:
                     toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
-                        winner_ids, ref_first, chunk_size=100, budget_sec=_borc_budget
+                        winner_ids,
+                        ref_first,
+                        chunk_size=100,
+                        budget_sec=_borc_budget,
+                        gun_bazli=client_gun_bazli,
+                        bugun=gun_bazli_bugun,
                     )
+                    _winner_ids_ok = True
                 current_app.logger.info(
                     "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%s",
                     len(winner_ids),
@@ -5262,6 +5446,12 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             except Exception as e_borc:
                 current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
                 toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
+            if client_gun_bazli:
+                _firma_ozet_gun_bazli_borc_uygula_satirlar(
+                    satirlar_resp, aktif=True, bugun=gun_bazli_bugun
+                )
+                if not _winner_ids_ok:
+                    toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_resp)
             for _it in satirlar_resp:
                 _it.pop("_dedupe_vergi", None)
             has_more = off + len(satirlar_resp) < total_count_firma
@@ -5404,6 +5594,13 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                 _it["toplam_borc"] = tb
                 _it["geciken_ay"] = ga
                 _it["borc_hesaplanamadi"] = bool(_oz.get("borc_hesaplanamadi")) or (tb is None)
+                _it["borc_ref_ay"] = _firma_ozet_ozetten_borc_ref_ay(_oz)
+        if client_gun_bazli:
+            # satirlar_resp dilimi aynı dict nesnelerini paylaşır — bir kez uygula.
+            _firma_ozet_gun_bazli_borc_uygula_satirlar(
+                satirlar_firma, aktif=True, bugun=gun_bazli_bugun
+            )
+            toplam_borc = _firma_ozet_sum_borc_skip_none(satirlar_firma)
         if page_size > 0:
             current_app.logger.info(
                 "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
@@ -5486,6 +5683,10 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         # Tam liste grid özeti (page_size=0 + hizli modda satır borç/güncel eksik kalmasın)
         _firma_ozet_satirlara_grid_ozet_uygula(satirlar_resp, ref_first)
         _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
+        if client_gun_bazli:
+            _firma_ozet_gun_bazli_borc_uygula_satirlar(
+                satirlar_resp, aktif=True, bugun=gun_bazli_bugun
+            )
         satirlar_resp = _firma_ozet_client_filtre_uygula(
             satirlar_resp,
             q=client_q,
