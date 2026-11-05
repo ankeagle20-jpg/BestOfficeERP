@@ -51,6 +51,7 @@ def test_sunucu_gun_gelen():
     fr._firma_ozet_gun_bazli_borc_uygula_satirlar(rows, aktif=False)
     check("a ham", rows[0]["toplam_borc_ham"] == 300.0)
     check("a gun_gelen", rows[0]["toplam_borc_gun_gelen"] == 200.0, rows[0])
+    check("a ay_haric true", rows[0]["gun_bazli_ay_haric"] is True)
     check("a borc degismedi bayrak kapali", rows[0]["toplam_borc"] == 300.0)
     check("a geciken ayni", rows[0]["geciken_ay"] == 3)
 
@@ -59,6 +60,7 @@ def test_sunucu_gun_gelen():
     fr._firma_ozet_gun_bazli_borc_uygula_satirlar(rows_g, aktif=True)
     check("g ham sabit", rows_g[0]["toplam_borc_ham"] == 300.0)
     check("g gun_gelen ayni", rows_g[0]["toplam_borc_gun_gelen"] == 200.0)
+    check("g ay_haric true", rows_g[0]["gun_bazli_ay_haric"] is True)
     check("g borc dustu", rows_g[0]["toplam_borc"] == 200.0)
 
     # (b) bugün >= sg
@@ -71,12 +73,14 @@ def test_sunucu_gun_gelen():
         and rows_b[0]["toplam_borc_gun_gelen"] == 300.0,
         rows_b[0],
     )
+    check("b ay_haric false", rows_b[0]["gun_bazli_ay_haric"] is False)
 
     # (c) ref_ay=0
     fr._FIRMA_OZET_GUN_BAZLI_BUGUN_OVERRIDE = date(2025, 11, 5)
     rows_c = [_satir(3, 300.0, 18, 0.0, ga=2)]
     fr._firma_ozet_gun_bazli_borc_uygula_satirlar(rows_c, aktif=False)
     check("c ayni", rows_c[0]["toplam_borc_gun_gelen"] == 300.0)
+    check("c ay_haric false", rows_c[0]["gun_bazli_ay_haric"] is False)
     check("c geciken", rows_c[0]["geciken_ay"] == 2)
 
     # (d) ref None
@@ -128,19 +132,26 @@ def test_sablon_ve_excel():
     check("attr yaz grid-borc", "data-fr-grid-borc-n=" in html and "esc(gridHamN)" in html)
     check("attr yaz gun-gelen", "data-fr-gun-gelen-n=" in html and "esc(gridGelenN)" in html)
     check("attr yaz soz-gun", "data-fr-soz-gun=" in html and "esc(sozGunN)" in html)
+    check("attr yaz soz-tarih", "data-fr-soz-tarih=" in html and "esc(sozTarN)" in html)
+    check("attr yaz gun-ay-haric", "data-fr-gun-ay-haric=" in html and "esc(ayHaricN)" in html)
     check("attr toFixed", "gridHamN = gridHamNum.toFixed(2)" in html)
     check("attr btn textContent parse yok", "parseFloat(btn && btn.textContent)" not in html)
+    check("aylar tr const", "FATURA_RAPOR_AYLAR_TR" in html and "Kasım" in html)
+    check("etiket fn", "function faturaRaporGridModalOzetEtiket" in html)
+    check("ay adi iso slice", "iso.slice(5, 7)" in html and "new Date(" not in html[html.find("function faturaRaporGridModalAyAdi"):html.find("function faturaRaporGridModalSozTarihTr")])
     check("istanbul plant", "data.istanbul_bugun" in html)
     check("src _t yok", "_t.js" not in html[:8000])
     # PII: labels/notes must not contain sample customer names patterns in ozet fn
     ozet = html[
-        html.find("function faturaRaporGridModalOzetHtml") : html.find(
+        html.find("var FATURA_RAPOR_AYLAR_TR") : html.find(
             "function faturaRaporGridModalCiz"
         )
     ]
-    check("j pii firma yok", "firma" not in ozet.lower() or "firmaAdi" not in ozet)
+    check("j pii firma yok", "firmaAdi" not in ozet)
     check("j telefon yok", "telefon" not in ozet.lower())
     src = (ROOT / "routes" / "faturalar_routes.py").read_text(encoding="utf-8")
+    check("py sozlesme_tarihi", '"sozlesme_tarihi": giris_iso' in src)
+    check("py gun_bazli_ay_haric", 'it["gun_bazli_ay_haric"]' in src)
     wb = src[src.find("def _firma_ozet_workbook_bytes") : src.find("def _firma_ozet_workbook_bytes") + 2500]
     check("excel Grid yok", '"Grid"' not in wb and "gun_gelen" not in wb)
     check("excel 14 Toplam borç", '"Toplam borç"' in wb)
@@ -704,16 +715,18 @@ def test_gercek_satir_uretimi_popup_tutar():
         check("extract fmtF body", False, str(e))
         return
 
-    # popup fonksiyonları (aynı kaynak)
+    # popup fonksiyonları (Fmt + ay etiketleri + OzetHtml + Ciz)
     try:
         fmt_popup = _js_brace_extract(html, "function faturaRaporGridModalFmt")
-        ozet_not = _js_brace_extract(html, "function faturaRaporGridModalOzetNot")
-        ozet_html = _js_brace_extract(html, "function faturaRaporGridModalOzetHtml")
         ozet_ciz = _js_brace_extract(html, "function faturaRaporGridModalCiz")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        if ay_i < 0:
+            raise ValueError("FATURA_RAPOR_AYLAR_TR yok")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalCiz", ay_i)]
     except ValueError as e:
         check("extract popup fn", False, str(e))
         return
-    check("extract ozet", "function faturaRaporGridModalOzetHtml" in ozet_html)
+    check("extract ozet", "function faturaRaporGridModalOzetHtml" in ozet_blk)
 
     node = (
         r"""
@@ -764,19 +777,20 @@ function metaFromTr(trHtml) {
   var gelN = parseFloat(attrOf(trHtml, 'data-fr-gun-gelen-n'));
   if (!isFinite(hamN)) hamN = 0;
   if (!isFinite(gelN)) gelN = hamN;
+  var har = attrOf(trHtml, 'data-fr-gun-ay-haric');
   return {
     toplamBorc: hamN,
     gunuGelen: gelN,
     sozlesmeGun: attrOf(trHtml, 'data-fr-soz-gun') || '',
+    sozlesmeTarihi: attrOf(trHtml, 'data-fr-soz-tarih') || '',
+    gunBazliAyHaric: (har === '1' || har === 'true'),
     bugunIso: '2025-11-05'
   };
 }
 """
         + fmt_popup
         + "\n"
-        + ozet_not
-        + "\n"
-        + ozet_html
+        + ozet_blk
         + "\n"
         + ozet_ciz
         + "\n"
@@ -932,12 +946,224 @@ say('e yeni yol kirpmaz', Math.abs(metaE.toplamBorc - 0) < 0.001 && Math.abs(met
             pass
 
 
+def test_ozet_ay_etiket_gercek_satir():
+    """buildFirmaRowsHtml → attr → popup ay etiketi / sözleşme tarihi (istanbul_bugun)."""
+    html = _html()
+    try:
+        build_src = _js_brace_extract(
+            html,
+            "var buildFirmaRowsHtml = function",
+            end_before="tbody.innerHTML = buildFirmaRowsHtml",
+        )
+        fmt_i = html.rfind("var fmtF = function", 0, html.find("var buildFirmaRowsHtml = function"))
+        fmt_src = _js_brace_extract(html[fmt_i:], "var fmtF = function")
+        # AyAdi..OzetHtml bloğu (Ciz öncesi)
+        blk_start = html.find("var FATURA_RAPOR_AYLAR_TR")
+        blk_end = html.find("function faturaRaporGridModalCiz", blk_start)
+        ozet_blk = html[blk_start:blk_end]
+    except ValueError as e:
+        check("etiket extract", False, str(e))
+        return
+    check("etiket extract build", "data-fr-soz-tarih" in build_src and "data-fr-gun-ay-haric" in build_src)
+    check("etiket extract ozet", "faturaRaporGridModalOzetEtiket" in ozet_blk)
+
+    node = (
+        r"""
+global.window = global;
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function temiz(s) {
+  s = String(s == null ? '' : s);
+  return s.indexOf('NaN') < 0 && s.indexOf('undefined') < 0 && s.indexOf('null') < 0;
+}
+function attrOf(trHtml, name) {
+  var re = new RegExp(name + '="([^"]*)"');
+  var m = String(trHtml || '').match(re);
+  return m ? m[1] : null;
+}
+function metaFromTr(trHtml, bugunIso) {
+  var hamN = parseFloat(attrOf(trHtml, 'data-fr-grid-borc-n'));
+  var gelN = parseFloat(attrOf(trHtml, 'data-fr-gun-gelen-n'));
+  if (!isFinite(hamN)) hamN = 0;
+  if (!isFinite(gelN)) gelN = hamN;
+  var har = attrOf(trHtml, 'data-fr-gun-ay-haric');
+  return {
+    toplamBorc: hamN,
+    gunuGelen: gelN,
+    sozlesmeGun: attrOf(trHtml, 'data-fr-soz-gun') || '',
+    sozlesmeTarihi: attrOf(trHtml, 'data-fr-soz-tarih') || '',
+    gunBazliAyHaric: (har === '1' || har === 'true'),
+    bugunIso: bugunIso || ''
+  };
+}
+function etiketler(html) {
+  var out = [];
+  var re = /class="etiket">([^<]*)<\/span>/g;
+  var m;
+  while ((m = re.exec(String(html || '')))) out.push(m[1]);
+  return out;
+}
+function tarihler(html) {
+  var out = [];
+  var re = /class="tarih">([^<]*)<\/span>/g;
+  var m;
+  while ((m = re.exec(String(html || '')))) out.push(m[1]);
+  return out;
+}
+"""
+        + "function faturaRaporGridModalFmt(n){var x=parseFloat(n);if(!isFinite(x))x=0;return x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});}\n"
+        + ozet_blk
+        + "\nvar ordRows = [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 9, 10, 11, 12, 13, 14, 15];\n"
+        + fmt_src
+        + ";\n"
+        + build_src
+        + ";\n"
+        + r"""
+var AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+// (a) 12 ay
+for (var m = 1; m <= 12; m++) {
+  var iso = '2026-' + (m < 10 ? '0' : '') + m + '-15';
+  say('a ay ' + m, faturaRaporGridModalAyAdi(iso) === AYLAR[m - 1], faturaRaporGridModalAyAdi(iso));
+}
+// (b) Aralık→Ocak
+say('b aralik', faturaRaporGridModalAyAdi('2026-12-31') === 'Aralık');
+say('b ocak', faturaRaporGridModalAyAdi('2027-01-01') === 'Ocak');
+// (g) tarih gg.aa.yyyy, Date yok
+say('g tarih', faturaRaporGridModalSozTarihTr('2025-10-18') === '18.10.2025');
+say('g bos', faturaRaporGridModalSozTarihTr('') === '' && faturaRaporGridModalSozTarihTr(null) === '');
+
+function rowOf(i, ham, gelen, haric, sozTar) {
+  return {
+    musteri_id: 2000 + i,
+    firma_adi: 'X' + i,
+    giris_tarihi: sozTar || '',
+    sozlesme_tarihi: sozTar || '',
+    aylik_tutar: 100,
+    toplam_borc: ham,
+    toplam_borc_ham: ham,
+    toplam_borc_gun_gelen: gelen,
+    gun_bazli_ay_haric: !!haric,
+    borc_hesaplanamadi: false,
+    sozlesme_gun: 18,
+    sozlesme_ay: 1,
+    sozlesme_ay_adi: 'Ocak',
+    geciken_ay: 1,
+    ilk_kira_bedeli: null,
+    guncel_kira_bedeli: null,
+    hizmet_turu: '—',
+    grup2: '—',
+    grup2_secimleri: [],
+    durum_etiket: 'Aktif',
+    kapanis_tarihi: '',
+    liste_ara_blob: 'X' + i
+  };
+}
+var rows = [
+  rowOf(0, 300, 200, true, '2025-10-18'),
+  rowOf(1, 300, 300, false, '2024-03-05'),
+  rowOf(2, 83412.57, 82000.01, true, ''),
+  rowOf(3, 1234567.89, 1234567.89, false, '2020-01-01')
+];
+var htmlAll = buildFirmaRowsHtml(rows);
+var trParts = htmlAll.split('</tr>').filter(function (p) { return p.indexOf('<tr') >= 0; }).map(function (p) { return p + '</tr>'; });
+say('build count', trParts.length === 4);
+
+// (c) haric=true → Toplam dahil, Günü Gelen hariç + tarih
+var oC = faturaRaporGridModalOzetHtml(metaFromTr(trParts[0], '2026-11-05'));
+var eC = etiketler(oC);
+var tC = tarihler(oC);
+say('c toplam dahil', eC[0] === 'Kasım dahil', eC.join('|'));
+say('c gelen haric', eC[1] === 'Kasım hariç', eC.join('|'));
+say('c tarih sag', tC[0] === '18.10.2025', tC.join('|'));
+say('c tutar', oC.indexOf('300,00') >= 0 && oC.indexOf('200,00') >= 0);
+say('c temiz', temiz(oC));
+
+// (d) false → ikisi dahil
+var oD = faturaRaporGridModalOzetHtml(metaFromTr(trParts[1], '2026-04-20'));
+var eD = etiketler(oD);
+say('d ikisi dahil', eD[0] === 'Nisan dahil' && eD[1] === 'Nisan dahil', eD.join('|'));
+say('d tarih', tarihler(oD)[0] === '05.03.2024');
+
+// (e) sözleşme tarihi yok → tarih span yok, etiket çalışır
+var oE = faturaRaporGridModalOzetHtml(metaFromTr(trParts[2], '2026-08-10'));
+say('e etiket', etiketler(oE)[0] === 'Ağustos dahil' && etiketler(oE)[1] === 'Ağustos hariç');
+say('e tarih yok', tarihler(oE).length === 0, String(tarihler(oE)));
+say('e attr tarih bos', attrOf(trParts[2], 'data-fr-soz-tarih') === '');
+
+// (f) eksik alan / eski önbellek
+var oF = faturaRaporGridModalOzetHtml({ toplamBorc: 50, gunuGelen: 40 });
+var eF = etiketler(oF);
+say('f yedek', eF[0] === 'Bu ay dahil' && eF[1] === 'Bu ay dahil', eF.join('|'));
+say('f temiz', temiz(oF));
+say('f tarih yok', tarihler(oF).length === 0);
+var oF2 = faturaRaporGridModalOzetHtml({ toplamBorc: 10, gunuGelen: 10, gunBazliAyHaric: true });
+say('f haric yedek', etiketler(oF2)[1] === 'Bu ay hariç');
+
+// (h) PII yok
+say('h telefon yok', oC.toLowerCase().indexOf('telefon') < 0);
+say('h musteri etikette yok', eC.join(' ').indexOf('X0') < 0 && oC.indexOf('firma_adi') < 0);
+
+// (i) tutarlar değişmedi (büyük)
+var oI = faturaRaporGridModalOzetHtml(metaFromTr(trParts[3], '2026-02-01'));
+say('i tutar buyuk', oI.indexOf('1.234.567,89') >= 0);
+say('i dahil subat', etiketler(oI)[0] === 'Şubat dahil' && etiketler(oI)[1] === 'Şubat dahil');
+
+// attr haric bayrağı gerçek satırdan
+say('attr haric 0', attrOf(trParts[0], 'data-fr-gun-ay-haric') === '1');
+say('attr haric 1', attrOf(trParts[1], 'data-fr-gun-ay-haric') === '0');
+say('attr soz tarih', attrOf(trParts[0], 'data-fr-soz-tarih') === '2025-10-18');
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            check("node etiket", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node etiket exit", r.returncode == 0, out[-400:])
+        for needle in [
+            "ok a ay 1",
+            "ok a ay 11",
+            "ok a ay 12",
+            "ok b aralik",
+            "ok b ocak",
+            "ok g tarih",
+            "ok c toplam dahil",
+            "ok c gelen haric",
+            "ok c tarih sag",
+            "ok d ikisi dahil",
+            "ok e etiket",
+            "ok e tarih yok",
+            "ok f yedek",
+            "ok f temiz",
+            "ok f haric yedek",
+            "ok h telefon yok",
+            "ok i tutar buyuk",
+            "ok attr haric 0",
+            "ok attr soz tarih",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_sunucu_gun_gelen()
     test_sablon_ve_excel()
     test_node_popup_ozet()
     test_tutar_kurus_ve_buyuk()
     test_gercek_satir_uretimi_popup_tutar()
+    test_ozet_ay_etiket_gercek_satir()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)

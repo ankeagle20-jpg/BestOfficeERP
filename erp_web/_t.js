@@ -7698,6 +7698,24 @@ function faturaRaporGridModalKartHtml(ay) {
         '<div style="font-size:10px;margin-top:3px;color:#b0bec5;">' + alt + '</div></div>';
 }
 
+var FATURA_RAPOR_AYLAR_TR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+function faturaRaporGridModalAyAdi(bugunIso) {
+    var iso = String(bugunIso || '').trim();
+    if (iso.length < 7) return '';
+    var m = parseInt(iso.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return '';
+    return FATURA_RAPOR_AYLAR_TR[m - 1] || '';
+}
+function faturaRaporGridModalSozTarihTr(iso) {
+    var s = String(iso || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+    return s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4);
+}
+function faturaRaporGridModalOzetEtiket(bugunIso, haric) {
+    var ay = faturaRaporGridModalAyAdi(bugunIso);
+    if (ay) return ay + (haric ? ' hariç' : ' dahil');
+    return haric ? 'Bu ay hariç' : 'Bu ay dahil';
+}
 function faturaRaporGridModalOzetNot(sozGun, bugunIso, ayni) {
     var sg = parseInt(sozGun, 10);
     var bugunGun = 0;
@@ -7728,10 +7746,19 @@ function faturaRaporGridModalOzetHtml(meta) {
     if (!isFinite(gelen)) gelen = ham;
     var ayni = Math.abs(ham - gelen) < 0.005;
     var not = faturaRaporGridModalOzetNot(meta.sozlesmeGun, meta.bugunIso, ayni);
+    var haric = (meta.gunBazliAyHaric === true || meta.gunBazliAyHaric === 1
+        || meta.gunBazliAyHaric === '1' || meta.gunBazliAyHaric === 'true');
+    var etHam = faturaRaporGridModalOzetEtiket(meta.bugunIso, false);
+    var etGel = faturaRaporGridModalOzetEtiket(meta.bugunIso, haric);
+    var tarTr = faturaRaporGridModalSozTarihTr(meta.sozlesmeTarihi);
+    var escTxt = function (t) { return String(t == null ? '' : t).replace(/</g, '&lt;'); };
+    var ustHam = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etHam) + '</span></div>';
+    var ustGel = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etGel) + '</span>'
+        + (tarTr ? ('<span class="tarih">' + escTxt(tarTr) + '</span>') : '') + '</div>';
     return '<div class="fatura-rapor-grid-modal-ozet">' +
-        '<div class="fatura-rapor-grid-modal-ozet-alan"><label>Toplam Borç</label>' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustHam + '<label>Toplam Borç</label>' +
         '<div class="deger">' + faturaRaporGridModalFmt(ham) + ' ₺</div></div>' +
-        '<div class="fatura-rapor-grid-modal-ozet-alan"><label>Günü Gelen Borç</label>' +
+        '<div class="fatura-rapor-grid-modal-ozet-alan">' + ustGel + '<label>Günü Gelen Borç</label>' +
         '<div class="deger">' + faturaRaporGridModalFmt(gelen) + ' ₺</div></div>' +
         '<div class="fatura-rapor-grid-modal-ozet-not">' + String(not).replace(/</g, '&lt;') + '</div>' +
         '</div>';
@@ -7752,7 +7779,9 @@ function faturaRaporGridModalCiz(cache, firmaAdi, meta) {
             toplamBorc: 0,
             gunuGelen: 0,
             sozlesmeGun: meta.sozlesmeGun,
-            bugunIso: meta.bugunIso
+            bugunIso: meta.bugunIso,
+            sozlesmeTarihi: meta.sozlesmeTarihi,
+            gunBazliAyHaric: meta.gunBazliAyHaric
         };
         body.innerHTML = '<div class="fatura-rapor-grid-modal-msg">' + msg.replace(/</g, '&lt;') + '</div>' +
             ((typeof faturaRaporGridModalOzetHtml === 'function') ? faturaRaporGridModalOzetHtml(iptalMeta) : '');
@@ -7794,7 +7823,7 @@ function faturaRaporGridModalAc(ev, mid) {
     var title = document.getElementById('fatura_rapor_grid_modal_title');
     if (!modal || !body) return;
     var firmaAdi = '';
-    var meta = { toplamBorc: 0, gunuGelen: 0, sozlesmeGun: '', bugunIso: '' };
+    var meta = { toplamBorc: 0, gunuGelen: 0, sozlesmeGun: '', bugunIso: '', sozlesmeTarihi: '', gunBazliAyHaric: false };
     try {
         var btn = ev && ev.currentTarget ? ev.currentTarget : null;
         var tr = btn && btn.closest ? btn.closest('tr') : null;
@@ -7811,6 +7840,9 @@ function faturaRaporGridModalAc(ev, mid) {
             meta.toplamBorc = hamN;
             meta.gunuGelen = gelN;
             meta.sozlesmeGun = tr.getAttribute('data-fr-soz-gun') || '';
+            meta.sozlesmeTarihi = tr.getAttribute('data-fr-soz-tarih') || '';
+            var harAttr = tr.getAttribute('data-fr-gun-ay-haric');
+            meta.gunBazliAyHaric = (harAttr === '1' || harAttr === 'true');
         }
         meta.bugunIso = (window.__faturaRaporIstanbulBugun != null)
             ? String(window.__faturaRaporIstanbulBugun)
@@ -8556,6 +8588,12 @@ function faturaRaporYukle() {
                     gridGelenNum = Math.round(gridGelenNum * 100) / 100;
                     var gridGelenN = gridGelenNum.toFixed(2);
                     var sozGunN = (s.sozlesme_gun != null && s.sozlesme_gun !== '') ? String(parseInt(s.sozlesme_gun, 10) || '') : '';
+                    var sozTarRaw = (s.sozlesme_tarihi != null && String(s.sozlesme_tarihi).trim() !== '')
+                        ? String(s.sozlesme_tarihi).trim().slice(0, 10)
+                        : ((s.giris_tarihi != null && String(s.giris_tarihi).trim() !== '') ? String(s.giris_tarihi).trim().slice(0, 10) : '');
+                    var sozTarN = (/^\d{4}-\d{2}-\d{2}$/.test(sozTarRaw)) ? sozTarRaw : '';
+                    var ayHaricN = (s.gun_bazli_ay_haric === true || s.gun_bazli_ay_haric === 1
+                        || s.gun_bazli_ay_haric === '1' || s.gun_bazli_ay_haric === 'true') ? '1' : '0';
                     cells[8] = '<td class="num" data-fr-col-id="8">' + borcFmt + '</td>';
                     cells[16] = '<td class="num" data-fr-col-id="16">' + (midOk
                         ? '<button type="button" class="fatura-rapor-firma-grid-btn" data-musteri-id="' + midNum +
@@ -8592,7 +8630,7 @@ function faturaRaporYukle() {
                     return '<tr' + (midOk ? ' data-musteri-id="' + midNum + '"' : '') +
                         ' data-fr-tarih="' + esc(tarih) + '" data-fr-ad="' + esc(plainAd) + '" data-fr-vergi="' + esc(vergiNo) + '" data-fr-kimlik="' + esc(kimlikNo) + '" data-fr-tutar="' + esc(tutFmt) + '" data-fr-tutar-n="' + esc(tutN) + '"' +
                         ' data-fr-ilk-n="' + esc(ilkN) + '" data-fr-guncel-n="' + esc(guncN) + '"' +
-                        ' data-fr-borc-n="' + esc(borcN) + '" data-fr-grid-borc-n="' + esc(gridHamN) + '" data-fr-gun-gelen-n="' + esc(gridGelenN) + '" data-fr-soz-gun="' + esc(sozGunN) + '" data-fr-gun-n="' + esc(gunSortN) + '" data-fr-ay-n="' + esc(aySortN) + '" data-fr-geciken-n="' + esc(gaStr) + '"' +
+                        ' data-fr-borc-n="' + esc(borcN) + '" data-fr-grid-borc-n="' + esc(gridHamN) + '" data-fr-gun-gelen-n="' + esc(gridGelenN) + '" data-fr-soz-gun="' + esc(sozGunN) + '" data-fr-soz-tarih="' + esc(sozTarN) + '" data-fr-gun-ay-haric="' + esc(ayHaricN) + '" data-fr-gun-n="' + esc(gunSortN) + '" data-fr-ay-n="' + esc(aySortN) + '" data-fr-geciken-n="' + esc(gaStr) + '"' +
                         ' data-fr-grup2="' + esc(grup2Raw) + '" data-fr-grup2-slugs="' + esc(grup2SlugsRaw) + '" data-fr-hizmet="' + esc(hizmetRaw) + '" data-fr-durum="' + esc(durEt) + '"' +
                         ' data-fr-kapanis="' + esc(kapIso) + '"' +
                         ' data-fr-hazir-oda="' + esc(hoAttr) + '"' +

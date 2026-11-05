@@ -3678,9 +3678,11 @@ def _firma_ozet_toplam_borc_gun_gelen_hesapla(
     """Ham toplam üzerinde gün kuralı (checkbox'tan bağımsız); satırı kalıcı değiştirmez.
 
     Mevcut _firma_ozet_gun_bazli_borc_uygula_satir yeniden kullanılır; ek canlı borç yok.
+    Dönüş: (gun_gelen_tutar, gun_bazli_ay_haric).
+    haric=True yalnız bu ay gerçekten düşüldüyse (ref_ay>0 ve gün gelmedi).
     """
     if not isinstance(it, dict):
-        return None
+        return None, False
     ham = it.get("toplam_borc_ham")
     if ham is None:
         ham = it.get("toplam_borc")
@@ -3692,7 +3694,7 @@ def _firma_ozet_toplam_borc_gun_gelen_hesapla(
         "geciken_ay": it.get("geciken_ay"),
     }
     _firma_ozet_gun_bazli_borc_uygula_satir(tmp, aktif=True, bugun=bugun)
-    return tmp.get("toplam_borc")
+    return tmp.get("toplam_borc"), bool(tmp.get("gun_bazli_bu_ay_haric"))
 
 
 def _firma_ozet_gun_bazli_borc_uygula_satirlar(
@@ -3711,12 +3713,13 @@ def _firma_ozet_gun_bazli_borc_uygula_satirlar(
             except (TypeError, ValueError):
                 ham = None
             it["toplam_borc_ham"] = ham
-            gg = _firma_ozet_toplam_borc_gun_gelen_hesapla(it, bugun)
+            gg, ay_haric = _firma_ozet_toplam_borc_gun_gelen_hesapla(it, bugun)
             try:
                 gg = None if gg is None else round(float(gg), 2)
             except (TypeError, ValueError):
                 gg = None
             it["toplam_borc_gun_gelen"] = gg
+            it["gun_bazli_ay_haric"] = bool(ay_haric)
     if not aktif:
         return satirlar
     atlanan_acc = [0]
@@ -4719,6 +4722,7 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
         "vergi_no": (str(row.get("rapor_vergi_no") or "").strip() or "—"),
         "kimlik_no": (str(row.get("rapor_kimlik_no") or "").strip() or "—"),
         "giris_tarihi": giris_iso,
+        "sozlesme_tarihi": giris_iso,
         "aylik_tutar": atut,
         "ilk_kira_bedeli": ilk_kira_json,
         "guncel_kira_bedeli": guncel_json,
