@@ -142,7 +142,15 @@ def test_sablon_ve_excel():
     css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
     check("css max-height 90vh", "max-height: min(90vh" in css_blk)
     check("css scroll overflow auto", ".fatura-rapor-grid-modal-scroll" in css_blk and "overflow: auto" in css_blk)
-    check("css aylik autofill", "fatura-rapor-grid-modal-aylik" in css_blk and "auto-fill" in css_blk and "minmax(" in css_blk)
+    check(
+        "css aylik 12 sutun",
+        "fatura-rapor-grid-modal-aylik" in css_blk
+        and "repeat(12, minmax(0, 1fr))" in css_blk
+        and "auto-fill" not in css_blk[css_blk.find(".fatura-rapor-grid-modal-aylik") : css_blk.find(".fatura-rapor-grid-modal-msg")],
+    )
+    check("css modal 1280", "min(1280px, 96vw)" in css_blk)
+    check("css media 6 sutun", "@media (max-width: 1099px)" in css_blk and "repeat(6, minmax(0, 1fr))" in css_blk)
+    check("css media 3 sutun", "@media (max-width: 699px)" in css_blk and "repeat(3, minmax(0, 1fr))" in css_blk)
     check("css foot sabit", ".fatura-rapor-grid-modal-foot" in css_blk and "flex-shrink: 0" in css_blk)
     check(
         "css hidden yalniz backdrop",
@@ -1616,7 +1624,9 @@ def test_popup_kompakt_ay_grid():
     css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
     check("k css max-height", "max-height: min(90vh" in css_blk)
     check("k css overflow auto scroll", ".fatura-rapor-grid-modal-scroll" in css_blk and "overflow: auto" in css_blk)
-    check("k css auto-fill", "repeat(auto-fill" in css_blk and "minmax(" in css_blk)
+    check("k css 12 sutun", "repeat(12, minmax(0, 1fr))" in css_blk)
+    check("k css media 6/3", "repeat(6, minmax(0, 1fr))" in css_blk and "repeat(3, minmax(0, 1fr))" in css_blk)
+    check("k css modal 1280", "min(1280px, 96vw)" in css_blk)
     check("k css hidden backdrop", ".fatura-rapor-grid-modal-backdrop[hidden]" in css_blk)
 
     # (h) sunucu/routes değişmedi — bu test dosyası sadece şablon okur; imza kontrolü
@@ -1795,6 +1805,497 @@ say('e yapi siniflar', h36.indexOf('class="fatura-rapor-grid-modal-scroll"') >= 
             pass
 
 
+def test_popup_kart_yil_tek():
+    """Gerçek KartHtml+Ciz: kartta yıl tek; popup CSS pseudo/attr yıl eklemez; Sözleşmeler/ortak CSS dokunulmaz."""
+    html = _html()
+    try:
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        filtre_blk = html[filtre_i : html.find("function faturaRaporGridModalAc", filtre_i)]
+        soz_fn = _js_brace_extract(html, "function sozlesmelerAylikCacheRender")
+    except ValueError as e:
+        check("yil extract", False, str(e))
+        return
+
+    # (a) KartHtml: yıl yalnız frg-ay-ad; sozlesmeler-ay-yil yok
+    check("yil a frg-ay-ad", "frg-ay-ad" in kart and "adKisa" in kart)
+    check("yil a sozlesmeler-ay-yil yok", "sozlesmeler-ay-yil" not in kart)
+    check("yil a title adUzun", "titleTxt" in kart and "adUzun" in kart)
+
+    # (b) Popup CSS: yıl ekleyen ::before/::after content veya attr() YOK (geri alınan gizleme kuralları yok)
+    css_i = html.find(".fatura-rapor-grid-modal-backdrop")
+    css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
+    aylik_i = css_blk.find(".fatura-rapor-grid-modal-aylik")
+    check("yil b aylik css", aylik_i >= 0)
+    popup_aylik_css = css_blk[aylik_i : css_blk.find(".fatura-rapor-grid-modal-msg", aylik_i)]
+    content_vals = re.findall(
+        r"\.fatura-rapor-grid-modal-aylik[^{]*::(?:before|after)[^{]*\{[^}]*content\s*:\s*([^;]+);",
+        popup_aylik_css,
+        flags=re.I | re.S,
+    )
+    check("yil b popup pseudo content yok", not content_vals, str(content_vals)[:200])
+    check("yil b popup attr() yok", "attr(" not in popup_aylik_css)
+    check(
+        "yil b eski gizleme yok",
+        ".fatura-rapor-grid-modal-aylik .sozlesmeler-ay-yil" not in popup_aylik_css
+        and "content: none !important" not in popup_aylik_css,
+    )
+
+    # (f) Sözleşmeler builder + ortak .sozlesmeler-ay-yil CSS hâlâ var (sekme dokunulmadı)
+    check("yil f sozlesmeler fn", "function sozlesmelerAylikCacheRender" in html)
+    check("yil f sozlesmeler-ay-yil builder", "sozlesmeler-ay-yil" in soz_fn)
+    ortak_yil = ".sozlesmeler-ay-kart .sozlesmeler-ay-yil"
+    check("yil f ortak yil css", ortak_yil in html)
+    # Ortak kural popup gizlemeden bağımsız duruyor (seçici popup öneki taşımıyor)
+    style = re.search(r"<style[^>]*>(.*?)</style>", html, re.S | re.I)
+    style_txt = style.group(1) if style else ""
+    check(
+        "yil f ortak kural ham",
+        re.search(r"(?<!fatura-rapor-grid-modal-aylik )\." + re.escape("sozlesmeler-ay-kart .sozlesmeler-ay-yil"), style_txt)
+        is not None
+        or ortak_yil in style_txt.split(".fatura-rapor-grid-modal-aylik")[0],
+    )
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function ayObj(y, m, tut) {
+  return {
+    yil: y, ay: m, ay_key: y + '-' + m,
+    tutar_kdv_dahil: tut, kalan_tutar_kdv: tut,
+    tahsil_edildi: false
+  };
+}
+function meta(bugun) {
+  return { toplamBorc: 100, gunuGelen: 80, sozlesmeGun: 1, bugunIso: bugun || '', sozlesmeTarihi: '2022-01-01', gunBazliAyHaric: false };
+}
+function yearCount(s, y) {
+  var re = new RegExp(String(y), 'g');
+  var m = String(s || '').match(re);
+  return m ? m.length : 0;
+}
+function cardChunks(html) {
+  var out = [];
+  var re = /class="sozlesmeler-ay-kart[^"]*"[^>]*>[\s\S]*?<\/div><\/div>/g;
+  // fallback: split by data-ay-key cards
+  var parts = String(html || '').split('data-ay-key="');
+  for (var i = 1; i < parts.length; i++) {
+    var piece = parts[i];
+    var end = piece.indexOf('</div></div>');
+    var chunk = piece.slice(0, end >= 0 ? end + 12 : Math.min(piece.length, 400));
+    out.push(chunk);
+  }
+  return out;
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+
+// Tek kart: HTML + textContent yıl bir kez; title tam ad
+var one = ayObj(2022, 1, 1000);
+faturaRaporGridModalCiz({ aylar: [one] }, 'Y', meta('2025-11-05'));
+var h1 = body.innerHTML || '';
+say('a frg Oca 2022', h1.indexOf('>Oca 2022<') >= 0);
+say('a sozlesmeler-ay-yil yok', h1.indexOf('sozlesmeler-ay-yil') < 0);
+say('a title Ocak 2022', h1.indexOf('title="Ocak 2022"') >= 0);
+// Kart metin: yalnız frg satırındaki yıl (tutar/kalan 2022 içermez); title attr opsiyonel
+var adMatch = h1.match(/frg-ay-ad"[^>]*>([^<]*)</);
+var adTxt = adMatch ? adMatch[1] : '';
+say('a ad textContent yil 1', yearCount(adTxt, 2022) === 1, adTxt);
+var mAd = h1.match(/frg-ay-ad"[^>]*>([^<]*)</);
+var mTut = h1.match(/frg-ay-tut"[^>]*>([^<]*)</);
+var mAlt = h1.match(/frg-ay-alt"[^>]*>([^<]*)</);
+var visible = [mAd && mAd[1], mTut && mTut[1], mAlt && mAlt[1]].filter(Boolean).join(' ');
+say('a visible yil 1', yearCount(visible, 2022) === 1, visible);
+
+// (c) 36 ay: her kartta yıl bir kez (frg-ay-ad)
+var aylar36 = [];
+for (var n = 0; n < 36; n++) {
+  var yy = 2022 + Math.floor(n / 12);
+  var mm = (n % 12) + 1;
+  aylar36.push(ayObj(yy, mm, 1000 + n));
+}
+faturaRaporGridModalCiz({ aylar: aylar36 }, 'Y36', meta('2025-11-05'));
+var h36 = body.innerHTML || '';
+var cards = cardChunks(h36);
+say('c kart 36', cards.length === 36, String(cards.length));
+var allOk = cards.length === 36;
+for (var ci = 0; ci < cards.length; ci++) {
+  var ch = cards[ci];
+  var am = ch.match(/frg-ay-ad"[^>]*>([^<]*)</);
+  var at = am ? am[1] : '';
+  var ym = at.match(/(20\d{2})/);
+  var y = ym ? ym[1] : '';
+  if (!y || yearCount(at, y) !== 1) { allOk = false; say('c kart yil', false, at); break; }
+  if (ch.indexOf('sozlesmeler-ay-yil') >= 0) { allOk = false; say('c yil el', false); break; }
+  if (ch.indexOf('title="') < 0) { allOk = false; say('c title yok', false); break; }
+}
+say('c 36 yil tek', allOk);
+say('d title ornek', h36.indexOf('title="Ocak 2022"') >= 0 && h36.indexOf('title="Aralık 2024"') >= 0);
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(
+                ["node", path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            check("node yil tek", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node yil tek exit", r.returncode == 0, out[-500:])
+        for needle in [
+            "ok a frg Oca 2022",
+            "ok a sozlesmeler-ay-yil yok",
+            "ok a title Ocak 2022",
+            "ok a ad textContent yil 1",
+            "ok a visible yil 1",
+            "ok c kart 36",
+            "ok c 36 yil tek",
+            "ok d title ornek",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_popup_grid_12_sutun():
+    """Gerçek KartHtml+Ciz: 12 sütun CSS; kronolojik dizilim (ofset yok); Sözleşmeler ortak CSS dokunulmadı."""
+    html = _html()
+    css_i = html.find(".fatura-rapor-grid-modal-backdrop")
+    css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
+    check("12 css repeat(12)", "repeat(12, minmax(0, 1fr))" in css_blk)
+    check("12 css media 6", "@media (max-width: 1099px)" in css_blk and "repeat(6, minmax(0, 1fr))" in css_blk)
+    check("12 css media 3", "@media (max-width: 699px)" in css_blk and "repeat(3, minmax(0, 1fr))" in css_blk)
+    check("12 css width 1280", "min(1280px, 96vw)" in css_blk)
+    check("12 css auto-fill yok", "repeat(auto-fill" not in css_blk[css_blk.find(".fatura-rapor-grid-modal-aylik"):css_blk.find(".fatura-rapor-grid-modal-msg")])
+    # Sözleşmeler ortak grid aynı
+    check("12 sozlesmeler 12 col", ".sozlesmeler-aylik-grid" in html and "repeat(12, minmax(0, 1fr))" in html[html.find(".sozlesmeler-aylik-grid"):html.find(".sozlesmeler-aylik-grid")+200])
+    soz_fn = _js_brace_extract(html, "function sozlesmelerAylikCacheRender")
+    check("12 sozlesmeler bos hucre yok", "grid-column" not in soz_fn and "bos-hucre" not in soz_fn and "placeholder" not in soz_fn.lower())
+
+    try:
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        filtre_blk = html[filtre_i : html.find("function faturaRaporGridModalAc", filtre_i)]
+    except ValueError as e:
+        check("12 extract", False, str(e))
+        return
+
+    # Ciz'de boş ofset hücresi yok (Sözleşmeler gibi ardışık kart)
+    check("12 ciz bos kart yok", "bos-hucre" not in filtre_blk and "placeholder" not in filtre_blk.lower())
+    check("12 kart title child", 'frg-ay-ad" title="' in kart or "frg-ay-ad\" title=\"" in kart or "frg-ay-tut\" title=\"" in kart or 'frg-ay-tut" title="' in kart)
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function ayObj(y, m, tut) {
+  return { yil: y, ay: m, ay_key: y + '-' + m, tutar_kdv_dahil: tut, kalan_tutar_kdv: tut, tahsil_edildi: false };
+}
+function meta(bugun) {
+  return { toplamBorc: 100, gunuGelen: 80, sozlesmeGun: 1, bugunIso: bugun || '', sozlesmeTarihi: '2022-09-01', gunBazliAyHaric: false };
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+// (c) İlk ay Eylül: Sözleşmeler gibi ofset yok — ilk kart Eyl 2022, ardışık
+var aylar = [];
+for (var n = 0; n < 24; n++) {
+  var idx = 8 + n; // 0=Oca → 8=Eyl 2022
+  var yy = 2022 + Math.floor(idx / 12);
+  var mm = (idx % 12) + 1;
+  aylar.push(ayObj(yy, mm, 1000 + n));
+}
+faturaRaporGridModalCiz({ aylar: aylar }, 'G12', meta('2025-11-05'));
+var h = body.innerHTML || '';
+say('c ilk Eyl 2022', h.indexOf('Eyl 2022') >= 0 && h.indexOf('data-ay-key="2022-9"') >= 0);
+say('c ilk Oca 2022 yok', h.indexOf('data-ay-key="2022-1"') < 0 && h.indexOf('>Oca 2022<') < 0);
+var keys = [];
+var re = /data-ay-key="([^"]+)"/g, m;
+while ((m = re.exec(h))) keys.push(m[1]);
+say('c 24 kart', keys.length === 24, String(keys.length));
+var chrono = true;
+for (var i = 1; i < keys.length; i++) {
+  var a = keys[i-1].split('-').map(Number);
+  var b = keys[i].split('-').map(Number);
+  var ai = a[0]*12 + a[1], bi = b[0]*12 + b[1];
+  if (!(bi > ai)) { chrono = false; break; }
+}
+say('c kronolojik', chrono, keys.slice(0,3).join(','));
+say('c bos placeholder yok', h.indexOf('bos-hucre') < 0 && h.indexOf('placeholder') < 0);
+say('c title tam', h.indexOf('title="Eylül 2022"') >= 0);
+say('c tutar durum', h.indexOf('frg-ay-tut') >= 0 && h.indexOf('Kalan:') >= 0);
+say('c yil tek ilk', (h.match(/frg-ay-ad"[^>]*>Eyl 2022</) || []).length === 1);
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(
+                ["node", path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            check("node 12 sutun", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node 12 sutun exit", r.returncode == 0, out[-400:])
+        for needle in [
+            "ok c ilk Eyl 2022",
+            "ok c ilk Oca 2022 yok",
+            "ok c 24 kart",
+            "ok c kronolojik",
+            "ok c bos placeholder yok",
+            "ok c title tam",
+            "ok c tutar durum",
+            "ok c yil tek ilk",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_popup_tutar_durum_kirpilma_koruma():
+    """Gerçek KartHtml: büyük tutar/durum metni title'da; yapı korunur (ADIM1 ölçüm: sw<=cw)."""
+    html = _html()
+    try:
+        kart = _js_brace_extract(html, "function faturaRaporGridModalKartHtml")
+        fmt = _js_brace_extract(html, "function faturaRaporGridModalFmt")
+        ay_i = html.find("var FATURA_RAPOR_AYLAR_TR")
+        ozet_blk = html[ay_i : html.find("function faturaRaporGridModalAyIdx", ay_i)]
+        filtre_i = html.find("function faturaRaporGridModalAyIdx")
+        filtre_blk = html[filtre_i : html.find("function faturaRaporGridModalAc", filtre_i)]
+    except ValueError as e:
+        check("kirp extract", False, str(e))
+        return
+
+    css_i = html.find(".fatura-rapor-grid-modal-backdrop")
+    css_blk = html[css_i : html.find(".fatura-rapor-tablo-scroll", css_i)]
+    tut_css_i = css_blk.find(".fatura-rapor-grid-modal-aylik .frg-ay-tut")
+    tut_css = css_blk[tut_css_i : css_blk.find("}", tut_css_i) + 1] if tut_css_i >= 0 else ""
+    alt_css_i = css_blk.find(".fatura-rapor-grid-modal-aylik .frg-ay-alt")
+    alt_css = css_blk[alt_css_i : css_blk.find("}", alt_css_i) + 1] if alt_css_i >= 0 else ""
+    # ellipsis YOK ya da (title ile tam metin korunuyor — ADIM1 sw<=cw)
+    check("kirp tut css var", ".frg-ay-tut" in tut_css)
+    check("kirp alt css var", ".frg-ay-alt" in alt_css)
+    check(
+        "kirp title koruma",
+        'frg-ay-tut" title="' in kart.replace("\\\"", '"') or 'title="' in kart and "frg-ay-tut" in kart,
+    )
+    check("kirp kart tut title", "tutTitle" in kart and "frg-ay-tut" in kart)
+    check("kirp kart alt title", "altTitle" in kart and "frg-ay-alt" in kart)
+    # Sözleşmeler ortak CSS'e ellipsis dayatma yok (popup seçici)
+    soz_h3 = html[html.find(".sozlesmeler-ay-kart h3 {") : html.find(".sozlesmeler-aylik-bos {")]
+    check("kirp sozlesmeler ellipsis dayatma yok", "text-overflow: ellipsis" not in soz_h3)
+
+    node = (
+        r"""
+global.window = global;
+global.document = {
+  getElementById: function (id) {
+    if (id === 'fatura_rapor_grid_modal_body') {
+      if (!global.__b) {
+        global.__b = { _i: '' };
+        Object.defineProperty(global.__b, 'innerHTML', {
+          get: function () { return this._i; },
+          set: function (v) { this._i = String(v == null ? '' : v); }
+        });
+      }
+      return global.__b;
+    }
+    if (id === 'fatura_rapor_grid_modal_title') {
+      if (!global.__t) global.__t = { textContent: '' };
+      return global.__t;
+    }
+    return null;
+  },
+  addEventListener: function () {},
+  removeEventListener: function () {}
+};
+function say(ad, ok, ek) {
+  console.log((ok ? 'ok ' : 'FAIL ') + ad + (ok ? '' : (' :: ' + (ek || ''))));
+  if (!ok) process.exitCode = 1;
+}
+function ayObj(y, m, tut, kalan, odendi) {
+  return {
+    yil: y, ay: m, ay_key: y + '-' + m,
+    tutar_kdv_dahil: tut, kalan_tutar_kdv: kalan,
+    tahsil_edildi: !!odendi, kismi_tahsilat: false
+  };
+}
+"""
+        + fmt
+        + "\n"
+        + kart
+        + "\n"
+        + ozet_blk
+        + "\n"
+        + filtre_blk
+        + "\n"
+        + r"""
+var body = document.getElementById('fatura_rapor_grid_modal_body');
+var aylar = [
+  ayObj(2024, 1, 600, 600, false),
+  ayObj(2024, 2, 10698, 10698, false),
+  ayObj(2024, 3, 269138.88, 269138.88, false),
+  ayObj(2024, 4, 999999.99, 999999.99, false),
+  ayObj(2024, 5, 9999999.99, 9999999.99, false),
+  ayObj(2024, 6, 10698, 0, true)
+];
+faturaRaporGridModalCiz({ aylar: aylar }, 'K', {
+  toplamBorc: 1, gunuGelen: 1, sozlesmeGun: 1, bugunIso: '2025-11-05',
+  sozlesmeTarihi: '2024-01-01', gunBazliAyHaric: false
+});
+var h = body.innerHTML || '';
+function hasVis(cls, txt) {
+  var re = new RegExp(cls + '"[^>]*>' + txt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '<');
+  return re.test(h);
+}
+function hasTitle(cls, txt) {
+  var re = new RegExp(cls + '"[^>]*title="' + txt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"');
+  return re.test(h);
+}
+say('a tut 600', hasVis('frg-ay-tut', '600,00') && hasTitle('frg-ay-tut', '600,00'));
+say('a tut 10698', hasVis('frg-ay-tut', '10.698,00') && hasTitle('frg-ay-tut', '10.698,00'));
+say('a tut 269138', hasVis('frg-ay-tut', '269.138,88') && hasTitle('frg-ay-tut', '269.138,88'));
+say('a tut 999999', hasVis('frg-ay-tut', '999.999,99') && hasTitle('frg-ay-tut', '999.999,99'));
+say('a tut 9999999', hasVis('frg-ay-tut', '9.999.999,99') && hasTitle('frg-ay-tut', '9.999.999,99'));
+say('a alt odendi', hasVis('frg-ay-alt', 'Ödendi') && hasTitle('frg-ay-alt', 'Ödendi'));
+say('a alt kalan10698', hasVis('frg-ay-alt', 'Kalan: 10.698,00') && hasTitle('frg-ay-alt', 'Kalan: 10.698,00'));
+say('a alt kalan9999999', hasVis('frg-ay-alt', 'Kalan: 9.999.999,99') && hasTitle('frg-ay-alt', 'Kalan: 9.999.999,99'));
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+        f.write(node)
+        path = f.name
+    try:
+        try:
+            r = subprocess.run(
+                ["node", path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            check("node kirp", False, "node yok")
+            return
+        out = (r.stdout or "") + (r.stderr or "")
+        print(out.strip())
+        check("node kirp exit", r.returncode == 0, out[-400:])
+        for needle in [
+            "ok a tut 600",
+            "ok a tut 10698",
+            "ok a tut 269138",
+            "ok a tut 999999",
+            "ok a tut 9999999",
+            "ok a alt odendi",
+            "ok a alt kalan10698",
+            "ok a alt kalan9999999",
+        ]:
+            check(needle, needle in out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_sunucu_gun_gelen()
     test_sablon_ve_excel()
@@ -1805,6 +2306,9 @@ if __name__ == "__main__":
     test_popup_ay_filtre_gelecek_gizle()
     test_popup_ay_filtre_sayisal_idx()
     test_popup_kompakt_ay_grid()
+    test_popup_kart_yil_tek()
+    test_popup_grid_12_sutun()
+    test_popup_tutar_durum_kirpilma_koruma()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
         sys.exit(1)

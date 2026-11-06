@@ -7705,10 +7705,12 @@ function faturaRaporGridModalKartHtml(ay) {
     else if (isFinite(kalan)) alt = 'Kalan: ' + faturaRaporGridModalFmt(kalan);
     else alt = 'Borçlu';
     var titleTxt = (adUzun + (y ? (' ' + y) : '')).replace(/"/g, '');
+    var tutTitle = String(tut || '').replace(/"/g, '');
+    var altTitle = String(alt || '').replace(/"/g, '');
     return '<div class="' + cls + '" data-ay-key="' + key.replace(/"/g, '') + '" data-secilebilir="0" title="' + titleTxt + '">' +
-        '<div class="frg-ay-ad">' + adKisa + (y ? (' ' + y) : '') + '</div>' +
-        '<div class="frg-ay-tut">' + tut + '</div>' +
-        '<div class="frg-ay-alt">' + alt + '</div></div>';
+        '<div class="frg-ay-ad" title="' + titleTxt + '">' + adKisa + (y ? (' ' + y) : '') + '</div>' +
+        '<div class="frg-ay-tut" title="' + tutTitle + '">' + tut + '</div>' +
+        '<div class="frg-ay-alt" title="' + altTitle + '">' + alt + '</div></div>';
 }
 
 function faturaRaporGridModalAyAdi(bugunIso) {

@@ -2458,7 +2458,7 @@
 .fatura-rapor-grid-modal {
     background: #0f2537; color: #e0f7fa;
     border: 1px solid #2d4060; border-radius: 8px;
-    width: min(960px, 100%); max-height: min(90vh, 900px);
+    width: min(1280px, 96vw); max-height: min(90vh, 900px);
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
 }
@@ -2485,22 +2485,38 @@
 }
 .fatura-rapor-grid-modal-aylik {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 6px;
     width: 100%; max-width: 100%; box-sizing: border-box;
     pointer-events: none;
 }
 .fatura-rapor-grid-modal-aylik .sozlesmeler-ay-kart {
-    min-width: 0; padding: 6px 4px;
+    min-width: 0; padding: 4px 2px;
 }
 .fatura-rapor-grid-modal-aylik .frg-ay-ad {
-    font-size: 12px; line-height: 1.2; color: #90a4ae;
+    font-size: 10px; line-height: 1.15; color: #90a4ae; font-weight: 600;
+    text-align: center; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fatura-rapor-grid-modal-aylik .frg-ay-tut {
-    font-size: 13px; font-weight: 600; line-height: 1.25; margin-top: 3px;
+    font-size: 11px; font-weight: 700; line-height: 1.2; margin-top: 2px;
+    text-align: center; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fatura-rapor-grid-modal-aylik .frg-ay-alt {
-    font-size: 12px; line-height: 1.2; margin-top: 2px; color: #b0bec5;
+    font-size: 10px; line-height: 1.15; margin-top: 1px; color: #b0bec5;
+    text-align: center; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 1099px) {
+    .fatura-rapor-grid-modal-aylik {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+}
+@media (max-width: 699px) {
+    .fatura-rapor-grid-modal-aylik {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 .fatura-rapor-grid-modal-msg { color: #fbbf24; font-size: 13px; padding: 8px 0; }
 .fatura-rapor-grid-modal-err { color: #ef9a9a; font-size: 13px; padding: 8px 0; }
@@ -15274,10 +15290,12 @@ function faturaRaporGridModalKartHtml(ay) {
     else if (isFinite(kalan)) alt = 'Kalan: ' + faturaRaporGridModalFmt(kalan);
     else alt = 'Borçlu';
     var titleTxt = (adUzun + (y ? (' ' + y) : '')).replace(/"/g, '');
+    var tutTitle = String(tut || '').replace(/"/g, '');
+    var altTitle = String(alt || '').replace(/"/g, '');
     return '<div class="' + cls + '" data-ay-key="' + key.replace(/"/g, '') + '" data-secilebilir="0" title="' + titleTxt + '">' +
-        '<div class="frg-ay-ad">' + adKisa + (y ? (' ' + y) : '') + '</div>' +
-        '<div class="frg-ay-tut">' + tut + '</div>' +
-        '<div class="frg-ay-alt">' + alt + '</div></div>';
+        '<div class="frg-ay-ad" title="' + titleTxt + '">' + adKisa + (y ? (' ' + y) : '') + '</div>' +
+        '<div class="frg-ay-tut" title="' + tutTitle + '">' + tut + '</div>' +
+        '<div class="frg-ay-alt" title="' + altTitle + '">' + alt + '</div></div>';
 }
 
 function faturaRaporGridModalAyAdi(bugunIso) {
