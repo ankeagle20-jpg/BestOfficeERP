@@ -5958,6 +5958,10 @@ function sozlesmelerAylikTahsilSetiniGorseleZorla() {
         /* API tam ödendi listesi ile ekstre hizalı; açık aylık fatura bayrağı yeşili engellemesin. */
         card.setAttribute('data-acik-aylik-borc', '0');
     });
+    if ((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()
+        && typeof sozlesmelerAylikCacheBrutFlatDisiUygula === 'function') {
+        try { sozlesmelerAylikCacheBrutFlatDisiUygula(); } catch (_eZTs) {}
+    }
 }
 
 /** Karttaki görünen / attribute tutarı (reel sonrası boş attribute + dolu kutu metni). */
@@ -9123,6 +9127,10 @@ function girisReelTufeZincirCacheStickyUygula(cacheObj) {
                 window.__reelTufeZincirStickyAylarByMid[String(mid)] = cacheObj.aylar;
             }
         } catch (_eAySt) {}
+        /* Z=1 sticky: panel once-gelen form tavanini API brute cek (cache gec gelirse). */
+        try {
+            if (typeof sozlesmelerAylikCacheBrutFlatDisiUygula === 'function') sozlesmelerAylikCacheBrutFlatDisiUygula();
+        } catch (_eZStFlat) {}
         return cacheObj;
     }
     if (bag[String(mid)] !== 1) return cacheObj;
@@ -9459,7 +9467,8 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
     if (typeof sozlesmelerReelDbKayitliMi === 'function' && sozlesmelerReelDbKayitliMi()
         && typeof sozlesmelerReelDbGridVePanelSonBoya === 'function') {
         sozlesmelerReelDbGridVePanelSonBoya();
-    } else if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') {
+    } else if (!((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi())
+        && typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') {
         girisTahsilatYilAyPaneldenTumGridBoyan();
     }
     try {
@@ -9580,6 +9589,7 @@ function girisTahsilatHizliYuklePanelVeGrid(cache, mid, opts, nesil) {
             if (ok && typeof sozlesmelerAylikGridFormaGoreSonDuzelt === 'function') {
                 sozlesmelerAylikGridFormaGoreSonDuzelt();
             } else if (!(typeof sozlesmelerReelDbKayitliMi === 'function' && sozlesmelerReelDbKayitliMi())
+                && !((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi())
                 && typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') {
                 girisTahsilatYilAyPaneldenTumGridBoyan();
             }
@@ -23070,6 +23080,30 @@ function girisTahsilatYilAyPanelGridaKartUygula(card, yil, ay) {
     } else {
         try { card.removeAttribute('data-panel-esas'); } catch (_eRmPe) {}
     }
+    /* Z=1: panel form tavanı API brütüyle çelişmesin (elle/plan/dondurma/__saved hariç). */
+    try {
+        var zPgKart = (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi();
+        var keepEllePg = false;
+        try {
+            if (hitPe && hitPe.row && (hitPe.row.__saved || hitPe.row.__user_dirty)) keepEllePg = true;
+        } catch (_eKePg) {}
+        try {
+            if (!keepEllePg && typeof girisPlanGridHucreBrut === 'function' && girisPlanGridHucreBrut(yNum, mNum) != null) keepEllePg = true;
+        } catch (_ePlPg) {}
+        if (zPgKart && !keepEllePg && card.getAttribute('data-panel-esas') !== '1'
+            && typeof girisAylikGridCacheAyBrut === 'function') {
+            var apiPg = girisAylikGridCacheAyBrut(yNum, mNum);
+            if (apiPg != null && apiPg > 0) {
+                var apiPgR = Math.round(apiPg * 100) / 100;
+                rh.brutAttr = String(apiPgR);
+                rh.sozBrutAttr = String(apiPgR);
+                if (!rh.kismi) {
+                    rh.tutarStr = apiPgR.toFixed(2);
+                    rh.tutarKdvAttr = String(apiPgR);
+                }
+            }
+        }
+    } catch (_eZPgKart) {}
     card.setAttribute('data-brut-kdv', rh.brutAttr);
     card.setAttribute('data-sozlesme-brut-kdv', rh.sozBrutAttr);
     card.setAttribute('data-odenen-kdv', rh.odenenAttr);
@@ -23173,6 +23207,10 @@ function girisTahsilatYilAyPaneldenTumGridBoyan() {
     }
     paint(document.getElementById('sozlesmeler-aylik-grid'));
     paint(document.getElementById('sozlesmeler-reel-aylik-grid'));
+    if ((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()
+        && typeof sozlesmelerAylikCacheBrutFlatDisiUygula === 'function') {
+        try { sozlesmelerAylikCacheBrutFlatDisiUygula(); } catch (_eZPt) {}
+    }
 }
 function girisTahsilatYilAyTekAyGridSenkron(donemYil, ayKey) {
     var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? selectedId : null;
@@ -23574,6 +23612,31 @@ function girisTahsilatYilAyKiraTutar(donemYil, ayKey) {
     }
     var outKt = (h.toplam > 0) ? h.toplam : ((h.kdv_dahil > 0) ? h.kdv_dahil : 0);
     try {
+        var yaPlan = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+        if (yaPlan) {
+            var planBrutKt = girisPlanGridHucreBrut(yaPlan.yil, yaPlan.ay);
+            if (planBrutKt != null) return planBrutKt;
+        }
+    } catch (_ePlanKt) {}
+    /* Z=1: API brüt clamp/form tavanından önce; YildanSenkron __reel_aktif tek başına userSaved sayılmaz. */
+    try {
+        var userSavedKt = !!(kd && (kd.__saved || kd.__user_dirty));
+        var dondKt = false;
+        try {
+            var yaDondKt = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+            if (yaDondKt && typeof girisAyAnahtarDondurulmusMu === 'function') {
+                dondKt = !!girisAyAnahtarDondurulmusMu(yaDondKt.yil + '-' + yaDondKt.ay);
+            }
+        } catch (_eDondKt) { dondKt = false; }
+        if (!userSavedKt && !dondKt && (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()) {
+            var yaZKt = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+            if (yaZKt && typeof girisAylikGridCacheAyBrut === 'function') {
+                var apiKt = girisAylikGridCacheAyBrut(yaZKt.yil, yaZKt.ay);
+                if (apiKt != null && apiKt > 0) return apiKt;
+            }
+        }
+    } catch (_eZKt) {}
+    try {
         var kdvElKt = document.getElementById('kdv_oran');
         var kdvOranKt = (kdvElKt && kdvElKt.value !== '') ? parseFloat(String(kdvElKt.value).replace(',', '.')) : 20;
         if (isNaN(kdvOranKt) || kdvOranKt < 0) kdvOranKt = 20;
@@ -23593,23 +23656,6 @@ function girisTahsilatYilAyKiraTutar(donemYil, ayKey) {
             }
         }
     } catch (_eDblKt) {}
-    try {
-        var yaPlan = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
-        if (yaPlan) {
-            var planBrutKt = girisPlanGridHucreBrut(yaPlan.yil, yaPlan.ay);
-            if (planBrutKt != null) return planBrutKt;
-        }
-    } catch (_ePlanKt) {}
-    try {
-        var userSavedKt = !!(kd && (kd.__saved || kd.__user_dirty || (kd.__reel_aktif && (parseFloat(kd.reel) || 0) > 0)));
-        if (!userSavedKt && (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()) {
-            var yaZKt = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
-            if (yaZKt && typeof girisAylikGridCacheAyBrut === 'function') {
-                var apiKt = girisAylikGridCacheAyBrut(yaZKt.yil, yaZKt.ay);
-                if (apiKt != null && apiKt > 0) return apiKt;
-            }
-        }
-    } catch (_eZKt) {}
     return outKt;
 }
 /** Sözleşme / yıl satırı aylık KDV dahil (1500); grid cache TÜFE brütü (≈1836) değil. */
@@ -35334,6 +35380,10 @@ function sozlesmelerAylikKismiKartlariniCachedenZorla() {
         }
         paint(document.getElementById('sozlesmeler-aylik-grid'));
         paint(document.getElementById('sozlesmeler-reel-aylik-grid'));
+        if ((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()
+            && typeof sozlesmelerAylikCacheBrutFlatDisiUygula === 'function') {
+            try { sozlesmelerAylikCacheBrutFlatDisiUygula(); } catch (_eZKz) {}
+        }
     } catch (_eKismiZorla) {}
 }
 
