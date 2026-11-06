@@ -3178,13 +3178,75 @@ function sozlesmelerAylikYilYenidenCiz() {
 }
 
 
+
+function girisReelTufeZincirStickyBag() {
+    if (typeof window === 'undefined') return {};
+    if (!window.__reelTufeZincirStickyByMid || typeof window.__reelTufeZincirStickyByMid !== 'object') {
+        window.__reelTufeZincirStickyByMid = {};
+    }
+    if (!window.__reelTufeZincirStickyAylarByMid || typeof window.__reelTufeZincirStickyAylarByMid !== 'object') {
+        window.__reelTufeZincirStickyAylarByMid = {};
+    }
+    return window.__reelTufeZincirStickyByMid;
+}
+function girisReelTufeZincirStickyMidCoz(cacheObj) {
+    try {
+        var mid = NaN;
+        if (cacheObj && cacheObj.musteri_id != null && String(cacheObj.musteri_id).trim() !== '') {
+            mid = parseInt(cacheObj.musteri_id, 10);
+        }
+        if (isNaN(mid) && typeof selectedId !== 'undefined' && selectedId != null && String(selectedId).trim() !== '') {
+            mid = parseInt(selectedId, 10);
+        }
+        return isNaN(mid) ? null : mid;
+    } catch (_eMidSt) { return null; }
+}
+/** Sayfa-içi sticky Z: bir mid için Z=1 görüldüyse Z-eksik/Z=0 yanıt Z'yi düşürmez; aylar Z=1 anlık görüntüsünde kalır (LS yok). */
+function girisReelTufeZincirCacheStickyUygula(cacheObj) {
+    if (!cacheObj || typeof cacheObj !== 'object') return cacheObj;
+    var mid = girisReelTufeZincirStickyMidCoz(cacheObj);
+    if (mid == null) return cacheObj;
+    var bag = girisReelTufeZincirStickyBag();
+    var raw = cacheObj.reel_tufe_zincir;
+    var hasZ = !(raw === undefined || raw === null || raw === '');
+    var z1 = hasZ && (parseInt(raw, 10) === 1 || raw === true || raw === '1');
+    if (z1) {
+        bag[String(mid)] = 1;
+        try {
+            if (Array.isArray(cacheObj.aylar) && cacheObj.aylar.length) {
+                window.__reelTufeZincirStickyAylarByMid[String(mid)] = cacheObj.aylar;
+            }
+        } catch (_eAySt) {}
+        return cacheObj;
+    }
+    if (bag[String(mid)] !== 1) return cacheObj;
+    var out = Object.assign({}, cacheObj, { reel_tufe_zincir: 1 });
+    var prevAylar = null;
+    try { prevAylar = window.__reelTufeZincirStickyAylarByMid[String(mid)] || null; } catch (_ePa) { prevAylar = null; }
+    if (!(prevAylar && prevAylar.length)) {
+        try {
+            var prev = window.__sozlesmelerAylikSonCacheObj;
+            if (prev && Array.isArray(prev.aylar) && prev.aylar.length) prevAylar = prev.aylar;
+        } catch (_ePrev) {}
+    }
+    if (prevAylar && prevAylar.length) out.aylar = prevAylar;
+    return out;
+}
+
 function girisReelTufeZincirAktifMi(cacheObj) {
     var sco = cacheObj;
     if (sco == null && typeof window !== 'undefined') sco = window.__sozlesmelerAylikSonCacheObj;
     try {
         var z = sco && sco.reel_tufe_zincir;
-        return parseInt(z, 10) === 1 || z === true || z === '1';
-    } catch (_eZAct) { return false; }
+        if (parseInt(z, 10) === 1 || z === true || z === '1') return true;
+    } catch (_eZAct) {}
+    try {
+        var midSt = girisReelTufeZincirStickyMidCoz(sco || null);
+        if (midSt == null) midSt = girisReelTufeZincirStickyMidCoz({ musteri_id: (typeof selectedId !== 'undefined' ? selectedId : null) });
+        var bagSt = girisReelTufeZincirStickyBag();
+        if (midSt != null && bagSt[String(midSt)] === 1) return true;
+    } catch (_eZSt) {}
+    return false;
 }
 function girisReelTufeZincirApiZ(cacheObj) {
     return girisReelTufeZincirAktifMi(cacheObj) ? 1 : 0;
@@ -3208,6 +3270,11 @@ function girisAylikGridCacheAyBrut(yil, ay, cacheObj) {
 }
 
 function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
+    try {
+        if (cacheObj && typeof girisReelTufeZincirCacheStickyUygula === 'function') {
+            cacheObj = girisReelTufeZincirCacheStickyUygula(cacheObj) || cacheObj;
+        }
+    } catch (_eStickyCr) {}
     var grid = document.getElementById('sozlesmeler-aylik-grid');
     if (!grid) return false;
     if (cacheObj && window.__musteriReelDonemTutarlari && Object.keys(window.__musteriReelDonemTutarlari).length
@@ -17820,6 +17887,12 @@ function _sozlesmelerAylikTekGridKartTutarlariniYenile(grid, basStr, hucreMap, r
 
 /** Her iki aylık grid: kart TÜFE (önbellek / eski reel DB ezmesin). Reel sekmesi de aynı tabanı gösterir. */
 function sozlesmelerAylikNormGridKartTutarlariniYenile() {
+    if ((typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi()) {
+        try {
+            if (typeof sozlesmelerAylikCacheBrutFlatDisiUygula === 'function') sozlesmelerAylikCacheBrutFlatDisiUygula();
+        } catch (_eZNorm) {}
+        return;
+    }
     var basEl = document.getElementById('sozlesme_baslangic');
     var basStr = basEl && basEl.value ? String(basEl.value).trim() : '';
     if (!basStr) {
@@ -18509,8 +18582,28 @@ function girisAylikSatirYilAyPanelHtml(donemYil, ayKeys) {
     for (var i = 0; i < ayKeys.length; i++) {
         var ak = ayKeys[i];
         var d = mapAy[ak];
+        var zPanelHtml = (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi();
+        var keepEllePlanDon = !!(d && (d.__saved || d.__user_dirty || d.__dondurma));
+        if (!keepEllePlanDon) {
+            try {
+                if (typeof girisPlanGridHucreBrut === 'function' && typeof girisTahsilatAyKeyToYilAy === 'function') {
+                    var yaPlHtml = girisTahsilatAyKeyToYilAy(ak);
+                    if (yaPlHtml) {
+                        var pbHtml = girisPlanGridHucreBrut(yaPlHtml.yil, yaPlHtml.ay);
+                        if (pbHtml != null && pbHtml > 0) keepEllePlanDon = true;
+                    }
+                }
+            } catch (_ePlHtml) {}
+        }
         if (!d || !d.__saved) {
-            d = Object.assign({}, vars, (d && d.__locked === false) ? { __locked: false } : {}, { __saved: false, __locked: (d && d.__locked === false) ? false : true });
+            if (zPanelHtml && d && !keepEllePlanDon) {
+                d = Object.assign({}, d, {
+                    __saved: false,
+                    __locked: (d.__locked === false) ? false : true
+                });
+            } else {
+                d = Object.assign({}, vars, (d && d.__locked === false) ? { __locked: false } : {}, { __saved: false, __locked: (d && d.__locked === false) ? false : true });
+            }
         }
         if ((d.reel > 0 || vars.reel > 0) && !d.__saved) d.__reel_aktif = true;
         d = girisAylikSatirYilAyHesapla(donemYil, d);
