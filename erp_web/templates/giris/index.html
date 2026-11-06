@@ -2582,7 +2582,7 @@
     padding: 8px; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word;
 }
 .fatura-rapor-grid-wa-alici { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
-.fatura-rapor-grid-wa-alici label { display: flex; align-items: center; gap: 6px; margin: 0; color: #cfd8dc; font-size: 12px; }
+.fatura-rapor-grid-wa-alici label { display: flex; align-items: center; gap: 6px; margin: 0; color: #cfd8dc; font-size: 12px; flex-wrap: wrap; max-width: 100%; overflow: hidden; }
 .fatura-rapor-grid-wa-uyari { color: #fbbf24; font-size: 12px; margin-top: 8px; }
 .fatura-rapor-grid-wa-sonuc { font-size: 12px; margin-top: 8px; color: #b0bec5; white-space: pre-line; }
 .fatura-rapor-grid-wa-sonuc.is-ok { color: #81c784; }
@@ -15641,24 +15641,39 @@ function faturaRaporGridWaDoldur(j) {
     var c2 = document.getElementById('frg_wa_alici_2');
     var co = document.getElementById('frg_wa_alici_ozel');
     var ozel = document.getElementById('frg_wa_ozel');
+    function _frgWaAliciEtiket(slot, kart) {
+        var base = (slot === '2') ? ' 2. numara' : ' 1. numara';
+        if (!kart) return base;
+        var ng = String(kart.numara_goster || '').trim();
+        var ad = String(kart.ad || '').trim();
+        var txt = base;
+        if (ng) txt += '  ' + ng;
+        if (ad) {
+            var kisa = ad.length > 28 ? (ad.slice(0, 28) + '…') : ad;
+            txt += '  · ' + kisa;
+        }
+        return txt;
+    }
     if (c1) {
         c1.disabled = !(numaralar.length >= 1);
         c1.checked = true;
         var lab1 = c1.parentNode;
-        if (lab1 && numaralar[0] && numaralar[0].maske) {
-            lab1.lastChild.textContent = ' 1. numara (' + String(numaralar[0].maske) + ')';
-        } else if (lab1) {
-            lab1.lastChild.textContent = ' 1. numara';
+        var k1 = numaralar[0] || null;
+        if (lab1 && lab1.lastChild) {
+            lab1.lastChild.textContent = _frgWaAliciEtiket('1', k1);
+            if (k1 && k1.ad) lab1.title = String(k1.ad);
+            else lab1.removeAttribute('title');
         }
     }
     if (c2) {
         c2.disabled = !(numaralar.length >= 2);
         c2.checked = false;
         var lab2 = c2.parentNode;
-        if (lab2) {
-            lab2.lastChild.textContent = (numaralar.length >= 2 && numaralar[1] && numaralar[1].maske)
-                ? (' 2. numara (' + String(numaralar[1].maske) + ')')
-                : ' 2. numara';
+        var k2 = (numaralar.length >= 2) ? (numaralar[1] || null) : null;
+        if (lab2 && lab2.lastChild) {
+            lab2.lastChild.textContent = _frgWaAliciEtiket('2', k2);
+            if (k2 && k2.ad) lab2.title = String(k2.ad);
+            else lab2.removeAttribute('title');
         }
     }
     if (co) { co.disabled = false; co.checked = false; }

@@ -57,12 +57,19 @@ def _sahte_tel_05(n: int) -> str:
     return "0" + _sahte_tel(n)
 
 
-def _fake_musteri(pasif=False, phone2=True):
+def _sahte_ad(n: int) -> str:
+    """Kaynakta gerçek kişi adı yok; kısa sahte etiket."""
+    return "K" + str(int(n))
+
+
+def _fake_musteri(pasif=False, phone2=True, ad1=True, ad2=True):
     return {
         "id": 10,
         "name": "X",
         "phone": _sahte_tel_05(1),
         "phone2": _sahte_tel_05(2) if phone2 else None,
+        "phone_kime": _sahte_ad(1) if ad1 else "",
+        "phone2_kime": (_sahte_ad(2) if ad2 else "") if phone2 else "",
         "durum": "pasif" if pasif else "aktif",
         "giris_tarihi": "2024-01-15",
     }
@@ -143,13 +150,20 @@ def test_sunucu_tutar_sablon_alici():
     check("c onizleme dolu", bool(gov.get("onizleme")))
     check("c 7 sablon", any(s.get("anahtar") == "7" for s in gov.get("sablonlar") or []))
 
-    # (d) maskeli
+    # (d) önizlemede açık biçimli numara + ad (yalnız GET önizleme)
+    from routes.erp_notlar_routes import _wa_bicim
+    from odeme_linki import normalize_wa_telefon
+
     nums = gov.get("numaralar") or []
-    blob = str(nums)
     tel_05_1 = _sahte_tel_05(1)
     tel_10_1 = _sahte_tel(1)
-    check("d maske var", nums and all("maske" in n for n in nums))
-    check("d tam numara yok", tel_05_1 not in blob and tel_10_1 not in blob)
+    bicim1 = _wa_bicim(normalize_wa_telefon(tel_05_1))
+    check("d slot1", len(nums) >= 1 and nums[0].get("slot") == "1")
+    check("d numara_goster", nums[0].get("numara_goster") == bicim1)
+    check("d ad1", nums[0].get("ad") == _sahte_ad(1))
+    check("d slot2", len(nums) >= 2 and nums[1].get("slot") == "2")
+    check("d ad2", nums[1].get("ad") == _sahte_ad(2))
+    check("d maske yok onizleme", all("maske" not in n for n in nums))
 
     # (e) alıcı
     gov_g, kod_g = g.gonder(
@@ -319,6 +333,107 @@ def test_sunucu_tutar_sablon_alici():
     check("a istemci tutar kullanilmadi", tut_toplam > 1)
 
     g._audit = orig_audit
+    g.kilit_temizle()
+
+
+def test_acik_numara_onizleme():
+    """Açık numara yalnız önizleme GET; asistan maske aynı; POST yok sayar."""
+    import grid_wa_popup as g
+    from routes.erp_notlar_routes import _wa_bicim, _wa_numara_kartlari
+    from odeme_linki import normalize_wa_telefon
+
+    g.kilit_temizle()
+    bugun = date(2026, 11, 5)
+    simdi = datetime(2026, 11, 5, 12, 0, tzinfo=IST)
+
+    def payload_fn(mid):
+        return _fake_payload()
+
+    # (b) ad boş → alan boş, UI ayraç yok
+    def fetch_adsiz(sql, params=None):
+        return _fake_musteri(ad1=False, ad2=False)
+
+    gov_b, kod_b = g.onizleme(
+        10, "toplam", "7", bugun=bugun, simdi=simdi,
+        fetch_one_fn=fetch_adsiz, payload_fn=payload_fn, node_fn=lambda: True,
+    )
+    check("db onizleme ok", kod_b == 200 and gov_b.get("ok") is True)
+    nums_b = gov_b.get("numaralar") or []
+    check("db ad bos", all((n.get("ad") or "") == "" for n in nums_b))
+    check("db numara_goster dolu", all(bool(n.get("numara_goster")) for n in nums_b))
+
+    # (c) 2. numara yok → yalnız 1
+    def fetch_tek(sql, params=None):
+        return _fake_musteri(phone2=False)
+
+    gov_c, kod_c = g.onizleme(
+        10, "toplam", "7", bugun=bugun, simdi=simdi,
+        fetch_one_fn=fetch_tek, payload_fn=payload_fn, node_fn=lambda: True,
+    )
+    nums_c = gov_c.get("numaralar") or []
+    check("dc tek slot", kod_c == 200 and len(nums_c) == 1 and nums_c[0].get("slot") == "1")
+
+    # (d) audit / kilit anahtarında açık numara yok; asistan maske değişmedi
+    calls = {"audit": [], "gonder": 0, "last": {}}
+
+    def fetch_one(sql, params=None):
+        return _fake_musteri()
+
+    def gonder_fn(uid, data, origin, host, **kw):
+        calls["gonder"] += 1
+        calls["last"] = dict(data)
+        return {"ok": True, "durum": "gonderiliyor", "mesaj": "Gönderim sürüyor"}, 200
+
+    def _audit_cap(uid, mid, anlik, calistir=None):
+        calls["audit"].append(dict(anlik or {}))
+
+    g._audit = _audit_cap
+    g.kilit_temizle()
+    g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1"], "deneme": "cccccccc-cccc-cccc-cccc-ccccccccccc1"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn,
+        node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+    bicim1 = _wa_bicim(normalize_wa_telefon(_sahte_tel_05(1)))
+    for a in calls["audit"]:
+        blob = str(a)
+        check("dd audit acik yok", bicim1 not in blob and _sahte_tel(1) not in blob and _sahte_ad(1) not in blob)
+        check("dd audit tel anahtar yok", "telefon" not in blob.lower() and "numara_goster" not in blob)
+    # kilit sözlüğü: anahtarlarda açık numara yok
+    for k in list(g._MESAJ_KILIT.keys()):
+        check("dd kilit acik yok", bicim1 not in str(k) and _sahte_tel(1) not in str(k))
+
+    # asistan kartları hâlâ maskeli
+    tels = [normalize_wa_telefon(_sahte_tel_05(1))]
+    kartlar = _wa_numara_kartlari(tels)
+    check("dh asistan maske", kartlar and "maske" in kartlar[0] and "numara_goster" not in kartlar[0])
+
+    # (e) POST numara_goster/ad yok sayılır; numara mid'den
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    sahte_goster = "9" + ("8" * 9)  # çalışma anında; kaynakta 10 hane bitişik literal yok
+    g.gonder(
+        1, 10,
+        {
+            "tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1"],
+            "numara_goster": sahte_goster, "ad": "HACK",
+            "deneme": "cccccccc-cccc-cccc-cccc-ccccccccccc2",
+        },
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn,
+        node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+    beklenen = normalize_wa_telefon(_sahte_tel_05(1))
+    check("de post yok sayildi", calls["gonder"] == 1 and calls["last"].get("telefon") == beklenen)
+    check("de post ad kullanilmadi", calls["last"].get("ad") is None)
+
+    # faturalar_routes değişmedi (açık numara eklenmedi bu işte)
+    fr = (ROOT / "routes" / "faturalar_routes.py").read_text(encoding="utf-8")
+    check("dd faturalar grid-wa yok", "numara_goster" not in fr and "grid_wa_popup" not in fr)
+
+    g._audit = lambda *a, **k: None
     g.kilit_temizle()
 
 
@@ -709,6 +824,50 @@ setTimeout(function(){
 
     check("j kilitle fn", "function faturaRaporGridWaSonuclaraGoreAliciKilitle" in html)
     check("j kilitle cagri", "faturaRaporGridWaSonuclaraGoreAliciKilitle(satirlar)" in html)
+    check("f etiket acik", "_frgWaAliciEtiket" in html and "numara_goster" in html)
+    check("f title ad", "lab1.title" in html or "k1.ad" in html)
+
+    # (f) UI: gerçek etiket yardımcısı (kaynaktan çıkar) — boş ad / ayraç / textContent XSS
+    et_i = html.find("function _frgWaAliciEtiket")
+    if et_i < 0:
+        check("f helper kaynak", False)
+    else:
+        check("f textContent yazim", "lab1.lastChild.textContent = _frgWaAliciEtiket" in html)
+        try:
+            et_fn = _js_brace_extract(html, "function _frgWaAliciEtiket")
+        except ValueError as e:
+            check("f helper extract", False, str(e))
+            et_fn = ""
+        if et_fn:
+            node_et = et_fn + (
+                "\nvar t1 = _frgWaAliciEtiket('1', {numara_goster:'0500 000 00 01', ad:'K1'});\n"
+                "console.log(t1.indexOf('0500 000 00 01')>=0 && t1.indexOf('K1')>=0 && t1.indexOf('\\u00b7')>=0 "
+                "? 'ok f etiket adli' : 'FAIL f etiket adli '+t1);\n"
+                "var t2 = _frgWaAliciEtiket('1', {numara_goster:'0500 000 00 01', ad:''});\n"
+                "console.log(t2.indexOf('\\u00b7')<0 && t2.indexOf('undefined')<0 && t2.indexOf('null')<0 "
+                "? 'ok f etiket adsiz' : 'FAIL f etiket adsiz '+t2);\n"
+                "var t3 = _frgWaAliciEtiket('1', {numara_goster:'0500 000 00 01', ad:'A<b>x'});\n"
+                "console.log(typeof t3 === 'string' ? 'ok f xss textContent' : 'FAIL f xss');\n"
+            )
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as f:
+                f.write(node_et)
+                path2 = f.name
+            try:
+                r2 = subprocess.run(
+                    ["node", path2], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15
+                )
+                out2 = (r2.stdout or "") + (r2.stderr or "")
+                print(out2.strip())
+                check("f node etiket adli", "ok f etiket adli" in out2)
+                check("f node etiket adsiz", "ok f etiket adsiz" in out2)
+                check("f node xss", "ok f xss textContent" in out2)
+            except FileNotFoundError:
+                check("f node", False, "node yok")
+            finally:
+                try:
+                    os.unlink(path2)
+                except OSError:
+                    pass
 
     mod = (ROOT / "grid_wa_popup.py").read_text(encoding="utf-8")
     oniz_blk = mod[mod.find("def onizleme"): mod.find("def _alici_coz")]
@@ -716,6 +875,9 @@ setTimeout(function(){
     # log/print sızıntı yok
     check("h print yok", "print(" not in mod)
     check("h logger yok", "logger." not in mod)
+    # asistan dosyası maske fonksiyonu aynı
+    asis = (ROOT / "routes" / "erp_notlar_routes.py").read_text(encoding="utf-8")
+    check("h asistan maske fn", "def _wa_numara_kartlari" in asis and "maske" in asis[asis.find("def _wa_numara_secenekleri"): asis.find("def _wa_numara_secenekleri") + 400])
 
 
 def test_gun_cozumleme_asistan_ayni():
@@ -730,6 +892,7 @@ def test_gun_cozumleme_asistan_ayni():
 if __name__ == "__main__":
     test_gun_cozumleme_asistan_ayni()
     test_sunucu_tutar_sablon_alici()
+    test_acik_numara_onizleme()
     test_coklu_alici()
     test_route_methods_and_ui()
     if FAILS:

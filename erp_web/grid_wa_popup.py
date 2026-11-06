@@ -123,6 +123,8 @@ def _musteri_yukle(mid: int, fetch_one_fn=None) -> dict | None:
                COALESCE(NULLIF(BTRIM(c.name), ''), '') AS name,
                NULLIF(BTRIM(c.phone), '') AS phone,
                NULLIF(BTRIM(c.phone2), '') AS phone2,
+               NULLIF(BTRIM(COALESCE(mk.yetkili_tel_aciklama, '')), '') AS phone_kime,
+               NULLIF(BTRIM(COALESCE(mk.yetkili_tel2_aciklama, '')), '') AS phone2_kime,
                LOWER(BTRIM(COALESCE(c.durum, ''))) AS durum,
                NULLIF(BTRIM(COALESCE(mk.sozlesme_tarihi::text, '')), '') AS giris_tarihi
         FROM customers c
@@ -171,6 +173,8 @@ def borc_hesapla(mid: int, *, bugun: date | None = None, fetch_one_fn=None, payl
             "name": str(row.get("name") or "").strip() or "Müşteri",
             "phone": row.get("phone"),
             "phone2": row.get("phone2"),
+            "phone_kime": str(row.get("phone_kime") or "").strip(),
+            "phone2_kime": str(row.get("phone2_kime") or "").strip(),
             "payload": payload,
         }
     sg = _sozlesme_gun_oku(row)
@@ -194,6 +198,8 @@ def borc_hesapla(mid: int, *, bugun: date | None = None, fetch_one_fn=None, payl
         "name": str(row.get("name") or "").strip() or "Müşteri",
         "phone": row.get("phone"),
         "phone2": row.get("phone2"),
+        "phone_kime": str(row.get("phone_kime") or "").strip(),
+        "phone2_kime": str(row.get("phone2_kime") or "").strip(),
         "payload": payload,
     }
 
@@ -204,10 +210,27 @@ def _telefonlar(phone, phone2) -> list:
     return _wa_telefon_listesi(phone, phone2)
 
 
-def _numara_kartlari(tels: list) -> list:
-    from routes.erp_notlar_routes import _wa_numara_kartlari
+def _alici_onizleme_kartlari(phone, phone2, ad1: str = "", ad2: str = "") -> list:
+    """Yalnız grid-wa önizleme: açık biçimli numara + sahip adı. Asistan maskesini değiştirmez."""
+    from odeme_linki import normalize_wa_telefon
+    from routes.erp_notlar_routes import _wa_bicim
 
-    return _wa_numara_kartlari(tels)
+    out: list[dict] = []
+    n1 = normalize_wa_telefon(phone)
+    n2 = normalize_wa_telefon(phone2)
+    if n1:
+        out.append({
+            "slot": "1",
+            "numara_goster": _wa_bicim(n1) or "",
+            "ad": str(ad1 or "").strip(),
+        })
+    if n2 and n2 != n1:
+        out.append({
+            "slot": "2",
+            "numara_goster": _wa_bicim(n2) or "",
+            "ad": str(ad2 or "").strip(),
+        })
+    return out
 
 
 def _tutar_sec(borc: dict, tutar_turu: str):
@@ -270,6 +293,12 @@ def onizleme(
         return {"ok": False, "mesaj": "Geçersiz tutar türü"}, 400
 
     tels = _telefonlar(borc.get("phone"), borc.get("phone2"))
+    numaralar = _alici_onizleme_kartlari(
+        borc.get("phone"),
+        borc.get("phone2"),
+        borc.get("phone_kime") or "",
+        borc.get("phone2_kime") or "",
+    )
     uyarilar = _uyarilar(borc, simdi)
     from routes.whatsapp_routes import SABLONLAR
 
@@ -307,7 +336,7 @@ def onizleme(
         "tutar": tutar_sayi,
         "grid_yok": bool(borc.get("grid_yok")),
         "uyarilar": uyarilar,
-        "numaralar": _numara_kartlari(tels),
+        "numaralar": numaralar,
         "numara_adet": len(tels),
         "sablonlar": liste,
         "sablon_id": secili,
