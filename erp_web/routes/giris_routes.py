@@ -2347,6 +2347,14 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
             return False
     except (TypeError, ValueError):
         return False
+    # REEL_TUFE_ZINCIR bayrağı değişince eski cache (Z bit) geçersiz.
+    try:
+        stored_z = 1 if int(cache_obj.get("reel_tufe_zincir") or 0) == 1 else 0
+    except (TypeError, ValueError):
+        stored_z = 0
+    live_z = 1 if _reel_overlay_a_dar_ez_kyc() else 0
+    if stored_z != live_z:
+        return False
     # Tahsilat tarafı değiştiyse (eski kayıtlar/manuel düzeltmeler dahil) cache'i geçersiz say.
     if cache_obj.get("tahsilat_imza") != _aylik_tahsil_cache_imza(musteri_id):
         return False
@@ -2581,6 +2589,18 @@ def kira_nakit_oranli_artis_aktif() -> bool:
     """KIRA_NAKIT_ORANLI_ARTIS varsayılan 0: kapalıyken nakit her yıl karttaki gibi kalır."""
     raw = os.environ.get("KIRA_NAKIT_ORANLI_ARTIS", "0")
     return str(raw or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def reel_tufe_zincir_acik() -> bool:
+    """REEL_TUFE_ZINCIR: yalnız tam '1' ile açık; varsayılan kapalı. Her çağrıda env okunur."""
+    return os.environ.get("REEL_TUFE_ZINCIR") == "1"
+
+
+def _reel_overlay_a_dar_ez_kyc() -> bool:
+    """Canlı: REEL_TUFE_ZINCIR. Test/karşılaştırma: _REEL_OVERLAY_A_DAR_EZ_KYC True/False override."""
+    if _REEL_OVERLAY_A_DAR_EZ_KYC is not None:
+        return bool(_REEL_OVERLAY_A_DAR_EZ_KYC)
+    return reel_tufe_zincir_acik()
 
 
 def kira_round2(val) -> float:
@@ -4053,6 +4073,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
         "artis_ay": artis_month,
         "aylar": aylar,
         "compute_rev": AYLIK_GRID_COMPUTE_REV,
+        "reel_tufe_zincir": 1 if _reel_overlay_a_dar_ez_kyc() else 0,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
     if plan_katmani:
@@ -4370,14 +4391,21 @@ def _overlay_kismi_plan_duzelt(musteri_id, kyc, tufe_map, payload, manual_reel_b
         a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
 
+# Reel overlay A-dar ezme override (test/karşılaştırma).
+# None → canlı REEL_TUFE_ZINCIR env (varsayılan kapalı).
+# True/False → env yok sayılır (birim test / eski-yeni etki).
+_REEL_OVERLAY_A_DAR_EZ_KYC = None
+
+
 def _aylik_grid_apply_reel_donem_overlay_ham(
     musteri_id: int, kyc: dict, tufe_map: dict, payload: dict, manual_reel_by_year=None
 ) -> None:
     """musteri_reel_donem_tutar (DB) → 12 ay sabit KDV dahil (flat).
 
-    A-dar: flat sonrası yalnızca brut≤tol (veya flat'te olmayan) aylara
-    _reel_ay_key_tutar_map_musteri (ekstre TÜFE zinciri) ile tutar doldurulur;
-    pozitif brut'lu aylara dokunulmaz.
+    A-dar: flat dışı aylara _reel_ay_key_tutar_map_musteri (ekstre TÜFE zinciri).
+    REEL_TUFE_ZINCIR=1 (veya test override True) iken zincir KYC pozitif brütünü ezer;
+    kapalıyken eski koruma (kira_ay_brut_pozitif_korunur). Plan/dondurma overlay sonrası.
+    Flat reel aylarına dokunulmaz. Reel yoksa erken çıkar (KYC değişmez).
     """
     if not payload or not isinstance(payload.get("aylar"), list) or not kyc:
         return
@@ -4484,7 +4512,10 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
             a["tahsil_edildi"] = new_t > tol and kalan <= tol
             a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
-    # A-dar: flat dışı veya brut≤tol aylara ekstre zinciri (pozitif brut'a dokunma).
+    # A-dar: flat dışı aylara ekstre TÜFE zinciri (_reel_donem_effective ile aynı kaynak).
+    # Öncelik: (1) flat reel ayları dokunulmaz (2) plan/dondurma overlay sonrası kazanır
+    # (3) zincir KYC pozitifini ezer — reel×(1+oran) sonraki dönemler (bayrak True)
+    # (4) bayrak False: eski pozitif koruma (yalnızca boş/≤tol doldurulur).
     try:
         chain_map = _reel_ay_key_tutar_map_musteri(
             int(musteri_id),
@@ -4500,6 +4531,7 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
         chain_map = {}
     if not isinstance(chain_map, dict) or not chain_map:
         return
+    ez_kyc = _reel_overlay_a_dar_ez_kyc()
     for a in payload["aylar"]:
         if not isinstance(a, dict):
             continue
@@ -4524,10 +4556,12 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
         # Kritik: flat'te dolu (pozitif) ayları değiştirme.
         if nk in reel_map and brut_cur > tol:
             continue
-        if kira_ay_brut_pozitif_korunur(brut_cur, tol):
-            continue
         if nk not in chain_map:
             continue
+        # Bayrak kapalı: pozitif KYC brütünü ezme (boş ayları doldur).
+        if not ez_kyc:
+            if kira_ay_brut_pozitif_korunur(brut_cur, tol):
+                continue
         try:
             new_t = round(float(chain_map[nk]), 2)
         except (TypeError, ValueError):
@@ -4821,9 +4855,10 @@ def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
     ek = _kapanis_ek_fingerprint(
         kyc.get("kapanis_sonrasi_borc_ay"), iptal=kyc.get("iptal")
     )
+    z = "1" if _reel_overlay_a_dar_ez_kyc() else "0"
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
-        f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}"
+        f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}|Z={z}"
     )
 
 
@@ -4854,9 +4889,13 @@ def _aylik_grid_freshness_k_from_payload(payload) -> str:
     ek = _kapanis_ek_fingerprint(
         payload.get("kapanis_sonrasi_borc_ay"), iptal=payload.get("iptal")
     )
+    try:
+        z_bit = 1 if int(payload.get("reel_tufe_zincir") or 0) == 1 else 0
+    except (TypeError, ValueError):
+        z_bit = 0
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
-        f"{artis_ay}|{sure}|{rev}|{kap}|{ek}"
+        f"{artis_ay}|{sure}|{rev}|{kap}|{ek}|Z={z_bit}"
     )
 
 
