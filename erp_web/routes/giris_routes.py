@@ -2347,12 +2347,12 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
             return False
     except (TypeError, ValueError):
         return False
-    # REEL_TUFE_ZINCIR bayrağı değişince eski cache (Z bit) geçersiz.
+    # REEL_TUFE_ZINCIR / MIDLER: müşteri bazlı etkin bayrak → Z bit; uyumsuz cache yenilenir.
     try:
         stored_z = 1 if int(cache_obj.get("reel_tufe_zincir") or 0) == 1 else 0
     except (TypeError, ValueError):
         stored_z = 0
-    live_z = 1 if _reel_overlay_a_dar_ez_kyc() else 0
+    live_z = 1 if _reel_overlay_a_dar_ez_kyc(musteri_id) else 0
     if stored_z != live_z:
         return False
     # Tahsilat tarafı değiştiyse (eski kayıtlar/manuel düzeltmeler dahil) cache'i geçersiz say.
@@ -2591,16 +2591,46 @@ def kira_nakit_oranli_artis_aktif() -> bool:
     return str(raw or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def reel_tufe_zincir_acik() -> bool:
-    """REEL_TUFE_ZINCIR: yalnız tam '1' ile açık; varsayılan kapalı. Her çağrıda env okunur."""
-    return os.environ.get("REEL_TUFE_ZINCIR") == "1"
+def reel_tufe_zincir_midler() -> set:
+    """REEL_TUFE_ZINCIR_MIDLER: virgülle ayrılmış mid listesi. Her çağrıda env; önbellek yok.
+
+    Kati ayrıştırma: ',' böl; öğe yalnız rakam (isdigit); boşluk/harf/işaret → yok say;
+    en fazla 500 geçerli öğe; boş/None → boş küme. Hata fırlatmaz.
+    """
+    raw = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    if raw is None or raw == "":
+        return set()
+    out = set()
+    for part in str(raw).split(","):
+        if not part.isdigit():
+            continue
+        out.add(int(part))
+        if len(out) >= 500:
+            break
+    return out
 
 
-def _reel_overlay_a_dar_ez_kyc() -> bool:
-    """Canlı: REEL_TUFE_ZINCIR. Test/karşılaştırma: _REEL_OVERLAY_A_DAR_EZ_KYC True/False override."""
+def reel_tufe_zincir_acik(mid=None) -> bool:
+    """REEL_TUFE_ZINCIR tam '1' → tüm müşteriler; yoksa mid MIDLER listesindeyse açık.
+
+    mid=None → yalnız global bayrak. Her çağrıda env okunur (önbellek yok).
+    """
+    if os.environ.get("REEL_TUFE_ZINCIR") == "1":
+        return True
+    if mid is None:
+        return False
+    try:
+        mid_i = int(mid)
+    except (TypeError, ValueError):
+        return False
+    return mid_i in reel_tufe_zincir_midler()
+
+
+def _reel_overlay_a_dar_ez_kyc(mid=None) -> bool:
+    """Canlı: reel_tufe_zincir_acik(mid). Test: _REEL_OVERLAY_A_DAR_EZ_KYC True/False override."""
     if _REEL_OVERLAY_A_DAR_EZ_KYC is not None:
         return bool(_REEL_OVERLAY_A_DAR_EZ_KYC)
-    return reel_tufe_zincir_acik()
+    return reel_tufe_zincir_acik(mid)
 
 
 def kira_round2(val) -> float:
@@ -4073,7 +4103,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
         "artis_ay": artis_month,
         "aylar": aylar,
         "compute_rev": AYLIK_GRID_COMPUTE_REV,
-        "reel_tufe_zincir": 1 if _reel_overlay_a_dar_ez_kyc() else 0,
+        "reel_tufe_zincir": 1 if _reel_overlay_a_dar_ez_kyc(musteri_id) else 0,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
     if plan_katmani:
@@ -4392,7 +4422,7 @@ def _overlay_kismi_plan_duzelt(musteri_id, kyc, tufe_map, payload, manual_reel_b
 
 
 # Reel overlay A-dar ezme override (test/karşılaştırma).
-# None → canlı REEL_TUFE_ZINCIR env (varsayılan kapalı).
+# None → canlı reel_tufe_zincir_acik(mid) (global '1' veya MIDLER; varsayılan kapalı).
 # True/False → env yok sayılır (birim test / eski-yeni etki).
 _REEL_OVERLAY_A_DAR_EZ_KYC = None
 
@@ -4403,9 +4433,9 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
     """musteri_reel_donem_tutar (DB) → 12 ay sabit KDV dahil (flat).
 
     A-dar: flat dışı aylara _reel_ay_key_tutar_map_musteri (ekstre TÜFE zinciri).
-    REEL_TUFE_ZINCIR=1 (veya test override True) iken zincir KYC pozitif brütünü ezer;
-    kapalıyken eski koruma (kira_ay_brut_pozitif_korunur). Plan/dondurma overlay sonrası.
-    Flat reel aylarına dokunulmaz. Reel yoksa erken çıkar (KYC değişmez).
+    Etkin bayrak (global '1' veya mid MIDLER'de / test override True) iken zincir
+    KYC pozitif brütünü ezer; kapalıyken eski koruma (kira_ay_brut_pozitif_korunur).
+    Plan/dondurma overlay sonrası. Flat reel aylarına dokunulmaz. Reel yoksa erken çıkar.
     """
     if not payload or not isinstance(payload.get("aylar"), list) or not kyc:
         return
@@ -4531,7 +4561,7 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
         chain_map = {}
     if not isinstance(chain_map, dict) or not chain_map:
         return
-    ez_kyc = _reel_overlay_a_dar_ez_kyc()
+    ez_kyc = _reel_overlay_a_dar_ez_kyc(musteri_id)
     for a in payload["aylar"]:
         if not isinstance(a, dict):
             continue
@@ -4828,11 +4858,12 @@ def _aylik_grid_freshness_ts_str(val) -> str:
     return str(val or "1970-01-01T00:00:00")
 
 
-def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
+def _aylik_grid_freshness_k_from_kyc_row(kyc, mid=None) -> str:
     """KYC kritik alan özeti (canlı satır → K bileşeni).
 
     Not: bitis/durum bilinçli hariç — rolling ufuk payload.bitis'i KYC efektif
     bitişten uzun tutabilir; Aşama 0'da sürekli k_same=False üretmesin.
+    Z biti müşteri bazlı etkin REEL_TUFE_ZINCIR bayrağından (mid verilirse).
     """
     if not isinstance(kyc, dict):
         return "none"
@@ -4855,7 +4886,7 @@ def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
     ek = _kapanis_ek_fingerprint(
         kyc.get("kapanis_sonrasi_borc_ay"), iptal=kyc.get("iptal")
     )
-    z = "1" if _reel_overlay_a_dar_ez_kyc() else "0"
+    z = "1" if _reel_overlay_a_dar_ez_kyc(mid) else "0"
     return (
         f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
         f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}|Z={z}"
@@ -5013,7 +5044,7 @@ def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
             """,
             (mid,),
         )
-        k_part = _aylik_grid_freshness_k_from_kyc_row(kyc) if kyc else "none"
+        k_part = _aylik_grid_freshness_k_from_kyc_row(kyc, mid=mid) if kyc else "none"
     except Exception:
         k_part = "ERR"
 

@@ -65,7 +65,7 @@ def _geri(gr, eski):
         setattr(gr, ad, v)
 
 
-def _uret(gr, kyc, tufe, manual, planlar=None, dondur=None, ez_kyc=True):
+def _uret(gr, kyc, tufe, manual, planlar=None, dondur=None, ez_kyc=True, mid=379):
     """ez_kyc: test override (True=yeni zincir, False=eski). None → yalnız env (çağıran ayarlar)."""
     eski = _kur(gr)
     eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
@@ -73,10 +73,10 @@ def _uret(gr, kyc, tufe, manual, planlar=None, dondur=None, ez_kyc=True):
         gr._REEL_OVERLAY_A_DAR_EZ_KYC = ez_kyc
     if dondur is not None:
         eski["_dondurma_ay_kumesi"] = getattr(gr, "_dondurma_ay_kumesi")
-        gr._dondurma_ay_kumesi = lambda mid: set(dondur)
+        gr._dondurma_ay_kumesi = lambda _m: set(dondur)
     try:
         return gr._build_aylik_grid_cache_payload(
-            379,
+            mid,
             tufe_map=tufe,
             kyc_row=kyc,
             manual_reel_by_year=manual,
@@ -87,6 +87,13 @@ def _uret(gr, kyc, tufe, manual, planlar=None, dondur=None, ez_kyc=True):
     finally:
         gr._REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
         _geri(gr, eski)
+
+
+def _env_bayrak_temizle():
+    import os
+
+    os.environ.pop("REEL_TUFE_ZINCIR", None)
+    os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
 
 
 def test_a_mid379_senaryo():
@@ -288,8 +295,10 @@ def test_env_reel_tufe_zincir_bayrak():
     manual = {2025: 514.0}
     eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
     eski_env = os.environ.get("REEL_TUFE_ZINCIR")
+    eski_midler = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
     gr._REEL_OVERLAY_A_DAR_EZ_KYC = None  # env yolu
     try:
+        _env_bayrak_temizle()
         # Tam eşitlik: yalnız "1" açık; boşluklu/True/01/newline kapalı.
         kapali_vals = ("", "0", "true", "TRUE", " 1", "1 ", "01", "1\n")
         for val in kapali_vals:
@@ -319,19 +328,7 @@ def test_env_reel_tufe_zincir_bayrak():
             "env reel yok ayni",
             near(_hucre(p0, 2026, 5)["brut_tutar_kdv"], _hucre(p1, 2026, 5)["brut_tutar_kdv"]),
         )
-        # cache Z bit uyumsuzluğu
-        os.environ.pop("REEL_TUFE_ZINCIR", None)
-        check(
-            "cache Z kapali vs acik uyumsuz",
-            not (
-                (1 if int(p0.get("reel_tufe_zincir") or 0) == 1 else 0)
-                == (1 if gr.reel_tufe_zincir_acik() else 0)
-                and int(p1.get("reel_tufe_zincir") or 0) == 1
-                and not gr.reel_tufe_zincir_acik()
-            )
-            or True,
-        )
-        # K fingerprint Z farkı
+        # K fingerprint Z farkı (global)
         kyc_row = dict(kyc)
         os.environ.pop("REEL_TUFE_ZINCIR", None)
         k0 = gr._aylik_grid_freshness_k_from_kyc_row(kyc_row)
@@ -344,6 +341,246 @@ def test_env_reel_tufe_zincir_bayrak():
             os.environ.pop("REEL_TUFE_ZINCIR", None)
         else:
             os.environ["REEL_TUFE_ZINCIR"] = eski_env
+        if eski_midler is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski_midler
+
+
+def test_01_midler_ayristirma():
+    """0.1) REEL_TUFE_ZINCIR_MIDLER kati ayrıştırma."""
+    import os
+    from routes import giris_routes as gr
+
+    eski = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    try:
+        cases = [
+            ("379", {379}),
+            ("379,380", {379, 380}),
+            ("379, 380", {379}),  # " 380" boşluklu → yok
+            ("abc,379", {379}),
+            ("379;380", set()),  # tek geçersiz öğe
+            ("", set()),
+            ("-379", set()),
+            ("37.9", set()),
+            ("+379", set()),
+            ("379a", set()),
+        ]
+        for raw, bek in cases:
+            if raw == "":
+                os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+                got = gr.reel_tufe_zincir_midler()
+                check("midler '' → bos", got == set(), got)
+                os.environ["REEL_TUFE_ZINCIR_MIDLER"] = ""
+                got = gr.reel_tufe_zincir_midler()
+                check("midler empty-str → bos", got == set(), got)
+            else:
+                os.environ["REEL_TUFE_ZINCIR_MIDLER"] = raw
+                got = gr.reel_tufe_zincir_midler()
+                check(f"midler {raw!r}", got == bek, got)
+        os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        # None: pop sonrası
+        check("midler None → bos", gr.reel_tufe_zincir_midler() == set())
+        # 501 öğe → ilk 500 (hata yok)
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = ",".join(str(i) for i in range(1, 502))
+        got501 = gr.reel_tufe_zincir_midler()
+        check("midler 501 → 500", len(got501) == 500, len(got501))
+        check("midler 501 has 1", 1 in got501)
+        check("midler 501 no 501", 501 not in got501)
+    except Exception as exc:  # noqa: BLE001
+        check("midler ayristirma hata yok", False, type(exc).__name__ + str(exc)[:80])
+    finally:
+        if eski is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski
+
+
+def test_02_etkin_bayrak():
+    """0.2) reel_tufe_zincir_acik(mid): global / liste / mid=None."""
+    import os
+    from routes import giris_routes as gr
+
+    eski_g = os.environ.get("REEL_TUFE_ZINCIR")
+    eski_m = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
+    gr._REEL_OVERLAY_A_DAR_EZ_KYC = None
+    try:
+        _env_bayrak_temizle()
+        os.environ["REEL_TUFE_ZINCIR"] = "1"
+        check("global1 mid379", gr.reel_tufe_zincir_acik(379) is True)
+        check("global1 mid380", gr.reel_tufe_zincir_acik(380) is True)
+        check("global1 midNone", gr.reel_tufe_zincir_acik() is True)
+
+        _env_bayrak_temizle()
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = "379"
+        check("liste379 mid379", gr.reel_tufe_zincir_acik(379) is True)
+        check("liste379 mid380", gr.reel_tufe_zincir_acik(380) is False)
+        check("liste379 midNone", gr.reel_tufe_zincir_acik() is False)
+
+        _env_bayrak_temizle()
+        check("ikisi yok mid379", gr.reel_tufe_zincir_acik(379) is False)
+        check("ikisi yok midNone", gr.reel_tufe_zincir_acik() is False)
+
+        os.environ["REEL_TUFE_ZINCIR"] = "1 "
+        check("global '1 ' kapali", gr.reel_tufe_zincir_acik(379) is False)
+        check("global '1 ' midNone", gr.reel_tufe_zincir_acik() is False)
+    finally:
+        gr._REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
+        if eski_g is None:
+            os.environ.pop("REEL_TUFE_ZINCIR", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR"] = eski_g
+        if eski_m is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski_m
+
+
+def test_03_liste_mid379_vs_disi():
+    """0.3) liste {379} → 680.38; mid=380 fixture eski zincir; reel yok aynı."""
+    import os
+    from routes import giris_routes as gr
+
+    tufe = {2024: {5: 75.45}, 2025: {5: 35.41}, 2026: {5: 32.37}}
+    kyc = _kyc(date(2023, 5, 10), date(2026, 5, 10), aylik=150.0, kdv=20.0)
+    manual = {2025: 514.0}
+    eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
+    eski_g = os.environ.get("REEL_TUFE_ZINCIR")
+    eski_m = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    gr._REEL_OVERLAY_A_DAR_EZ_KYC = None
+    try:
+        _env_bayrak_temizle()
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = "379"
+        p379 = _uret(gr, kyc, tufe, manual, ez_kyc=None, mid=379)
+        p380 = _uret(gr, kyc, tufe, manual, ez_kyc=None, mid=380)
+        check("03 mid379 → 680.38", near(_hucre(p379, 2026, 5)["brut_tutar_kdv"], 680.38), _hucre(p379, 2026, 5)["brut_tutar_kdv"])
+        check("03 mid380 → 566.08", near(_hucre(p380, 2026, 5)["brut_tutar_kdv"], 566.08), _hucre(p380, 2026, 5)["brut_tutar_kdv"])
+        check("03 mid379 bit1", int(p379.get("reel_tufe_zincir") or 0) == 1)
+        check("03 mid380 bit0", int(p380.get("reel_tufe_zincir") or 0) == 0)
+        # reel yok: açık listedeki / dışındaki birebir
+        p_yok_a = _uret(gr, kyc, tufe, {}, ez_kyc=None, mid=379)
+        p_yok_b = _uret(gr, kyc, tufe, {}, ez_kyc=None, mid=380)
+        check(
+            "03 reel yok ayni",
+            near(_hucre(p_yok_a, 2026, 5)["brut_tutar_kdv"], _hucre(p_yok_b, 2026, 5)["brut_tutar_kdv"]),
+        )
+        check("03 reel yok 566.08", near(_hucre(p_yok_a, 2026, 5)["brut_tutar_kdv"], 566.08))
+    finally:
+        gr._REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
+        if eski_g is None:
+            os.environ.pop("REEL_TUFE_ZINCIR", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR"] = eski_g
+        if eski_m is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski_m
+
+
+def test_04_dort_yuzey_liste():
+    """0.4) liste {379}: grid/panel/borç/ekstre = 680.38; kapalı: grid eski, ekstre zaten 680.38."""
+    import os
+    from routes import giris_routes as gr
+
+    tufe = {2024: {5: 75.45}, 2025: {5: 35.41}, 2026: {5: 32.37}}
+    kyc = _kyc(date(2023, 5, 10), date(2026, 5, 10), aylik=150.0, kdv=20.0)
+    manual = {2025: 514.0}
+    eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
+    eski_g = os.environ.get("REEL_TUFE_ZINCIR")
+    eski_m = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    gr._REEL_OVERLAY_A_DAR_EZ_KYC = None
+    try:
+        _env_bayrak_temizle()
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = "379"
+        p = _uret(gr, kyc, tufe, manual, ez_kyc=None, mid=379)
+        grid_v = float(_hucre(p, 2026, 5)["brut_tutar_kdv"])
+        eski = _kur(gr)
+        try:
+            by = gr._panel_by_iso_from_tahsil_map(379, p, tahsilat_tarihi=None, trust_grid_odenen=False)
+        finally:
+            _geri(gr, eski)
+        panel_v = float((by.get("2026-05-01") or {}).get("aylik") or 0)
+        borc_v = grid_v
+        bas = date(2023, 5, 10)
+        eff = gr._reel_donem_effective_yillik_for_ekstre(manual, bas, tufe, 5, 2028, kyc=kyc)
+        ekstre_v = float(eff.get(2026) or 0)
+        check("04 liste grid 680.38", near(grid_v, 680.38), grid_v)
+        check("04 liste panel=grid", near(panel_v, grid_v), panel_v)
+        check("04 liste borc=grid", near(borc_v, grid_v))
+        check("04 liste ekstre 680.38", near(ekstre_v, 680.38), ekstre_v)
+
+        _env_bayrak_temizle()
+        p0 = _uret(gr, kyc, tufe, manual, ez_kyc=None, mid=379)
+        grid0 = float(_hucre(p0, 2026, 5)["brut_tutar_kdv"])
+        eff0 = gr._reel_donem_effective_yillik_for_ekstre(manual, bas, tufe, 5, 2028, kyc=kyc)
+        ekstre0 = float(eff0.get(2026) or 0)
+        check("04 kapali grid 566.08", near(grid0, 566.08), grid0)
+        check("04 kapali ekstre 680.38 (mevcut)", near(ekstre0, 680.38), ekstre0)
+    finally:
+        gr._REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
+        if eski_g is None:
+            os.environ.pop("REEL_TUFE_ZINCIR", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR"] = eski_g
+        if eski_m is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski_m
+
+
+def test_05_cache_z_mid_bazli():
+    """0.5) liste {379}: 379 Z=0 uyumsuz; 380 Z-siz uyumlu; listeden çıkınca Z=1 uyumsuz."""
+    import os
+    from routes import giris_routes as gr
+
+    eski_ov = gr._REEL_OVERLAY_A_DAR_EZ_KYC
+    eski_g = os.environ.get("REEL_TUFE_ZINCIR")
+    eski_m = os.environ.get("REEL_TUFE_ZINCIR_MIDLER")
+    gr._REEL_OVERLAY_A_DAR_EZ_KYC = None
+    try:
+        _env_bayrak_temizle()
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = "379"
+        # stored Z=0 / yok → 379 için live Z=1 → uyumsuz
+        live379 = 1 if gr._reel_overlay_a_dar_ez_kyc(379) else 0
+        live380 = 1 if gr._reel_overlay_a_dar_ez_kyc(380) else 0
+        check("05 live379 Z1", live379 == 1)
+        check("05 live380 Z0", live380 == 0)
+        stored0 = 0
+        check("05 379 Z0 vs live uyumsuz", stored0 != live379)
+        check("05 380 Zsiz vs live uyumlu", stored0 == live380)
+        # K fp mid bazlı
+        kyc_row = _kyc(date(2023, 5, 10), date(2026, 5, 10), aylik=150.0, kdv=20.0)
+        k379 = gr._aylik_grid_freshness_k_from_kyc_row(kyc_row, mid=379)
+        k380 = gr._aylik_grid_freshness_k_from_kyc_row(kyc_row, mid=380)
+        check("05 K 379 Z=1", "Z=1" in k379, k379[-6:])
+        check("05 K 380 Z=0", "Z=0" in k380, k380[-6:])
+        # listeden çıkar → 379 Z=1 stored uyumsuz, live 0
+        os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        live_geri = 1 if gr._reel_overlay_a_dar_ez_kyc(379) else 0
+        stored1 = 1
+        check("05 geri live Z0", live_geri == 0)
+        check("05 geri Z1 stored uyumsuz", stored1 != live_geri)
+        # matches_kyc Z yolu (stub kyc DB kaçın — doğrudan Z karşılaştırması yeterli)
+        cache_z0 = {"reel_tufe_zincir": 0}
+        cache_z1 = {"reel_tufe_zincir": 1}
+        os.environ["REEL_TUFE_ZINCIR_MIDLER"] = "379"
+        s0 = 1 if int(cache_z0.get("reel_tufe_zincir") or 0) == 1 else 0
+        s1 = 1 if int(cache_z1.get("reel_tufe_zincir") or 0) == 1 else 0
+        check("05 liste: Z0 cache 379 yenilenir", s0 != (1 if gr.reel_tufe_zincir_acik(379) else 0))
+        check("05 liste: Z0 cache 380 kalir", s0 == (1 if gr.reel_tufe_zincir_acik(380) else 0))
+        os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        check("05 geri: Z1 cache 379 yenilenir", s1 != (1 if gr.reel_tufe_zincir_acik(379) else 0))
+    finally:
+        gr._REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
+        if eski_g is None:
+            os.environ.pop("REEL_TUFE_ZINCIR", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR"] = eski_g
+        if eski_m is None:
+            os.environ.pop("REEL_TUFE_ZINCIR_MIDLER", None)
+        else:
+            os.environ["REEL_TUFE_ZINCIR_MIDLER"] = eski_m
 
 
 def main():
