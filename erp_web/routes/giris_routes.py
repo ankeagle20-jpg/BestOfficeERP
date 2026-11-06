@@ -16691,6 +16691,112 @@ def _next_makbuz_no_aylik():
     return get_next_makbuz_no()
 
 
+
+def _borc_grid_brut_haritasi(musteri_id, payload=None):
+    """{'YYYY-MM': brut_tutar_kdv} guncel grid onbelleginden."""
+    if payload is None:
+        payload = _read_aylik_grid_cache_payload(musteri_id)
+    out = {}
+    if not isinstance(payload, dict):
+        return out
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            ym = f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}"
+            raw_b = a.get("brut_tutar_kdv")
+            if raw_b is None:
+                raw_b = a.get("tutar_kdv_dahil") or 0
+            v = round(float(raw_b), 2)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(v) and v > 0:
+            out[ym] = v
+    return out
+
+
+def _borc_tutar_grid_uyusmazligi_red(musteri_id, satirlar):
+    """Z-etkin musteride istemci tutari bayat KYC zincirine esit ve guncel gridden sapmissa 409.
+
+    Plan brutu / dondurma aylari / elle duzenlenmis (grid ve KYC-stale disi) tutarlar gecirilir.
+    Bayrak kapali veya payload reel_tufe_zincir!=1 → None (eski davranis).
+    """
+    global _REEL_OVERLAY_A_DAR_EZ_KYC
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    if not reel_tufe_zincir_acik(mid):
+        return None
+    payload = _read_aylik_grid_cache_payload(mid)
+    if not isinstance(payload, dict) or int(payload.get("reel_tufe_zincir") or 0) != 1:
+        return None
+    grid_by = _borc_grid_brut_haritasi(mid, payload)
+    if not grid_by:
+        return None
+    try:
+        plan_by = _borc_plan_brut_haritasi(mid) or {}
+    except Exception:
+        plan_by = {}
+    try:
+        dondur = _dondurma_ay_kumesi(mid) or set()
+    except Exception:
+        dondur = set()
+    adaylar = []
+    for raw in satirlar or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            yil = int(raw.get("yil"))
+            ay = int(raw.get("ay"))
+            tutar = round(float(raw.get("tutar_kdv_dahil")), 2)
+        except (TypeError, ValueError):
+            continue
+        if ay < 1 or ay > 12 or not math.isfinite(tutar):
+            continue
+        ym = f"{yil:04d}-{ay:02d}"
+        if ym in dondur:
+            continue
+        if ym in plan_by:
+            continue
+        grid_v = grid_by.get(ym)
+        if grid_v is None:
+            continue
+        if abs(tutar - grid_v) <= 0.01:
+            continue
+        adaylar.append((ym, tutar, grid_v))
+    if not adaylar:
+        return None
+    eski_ov = _REEL_OVERLAY_A_DAR_EZ_KYC
+    stale_by = {}
+    try:
+        _REEL_OVERLAY_A_DAR_EZ_KYC = False
+        stale_payload = _build_aylik_grid_cache_payload(mid)
+        stale_by = _borc_grid_brut_haritasi(mid, stale_payload)
+    except Exception:
+        logging.getLogger(__name__).exception("borc stale kyc grid")
+        return None
+    finally:
+        _REEL_OVERLAY_A_DAR_EZ_KYC = eski_ov
+    for ym, tutar, grid_v in adaylar:
+        stale_v = stale_by.get(ym)
+        if stale_v is None:
+            continue
+        if abs(tutar - float(stale_v)) <= 0.01:
+            return (
+                jsonify({
+                    "ok": False,
+                    "tutar_uyusmazligi": True,
+                    "mesaj": "Tutar güncel gridle uyuşmuyor; sayfayı yenileyip tekrar deneyin.",
+                    "ay": ym,
+                    "istemci_tutar": tutar,
+                    "grid_tutar": grid_v,
+                }),
+                409,
+            )
+    return None
+
+
 def _borc_plan_brut_haritasi(musteri_id):
     """Planli kart: {'YYYY-MM': plan katmanli brut} (yalniz plan gecerlilik ayindan itibaren).
     Plansiz kart, plan oncesi aylar, okuma hatasi veya cache yok: bos dict (istemci tutari aynen kalir)."""
@@ -17081,6 +17187,10 @@ def api_aylik_tutarlardan_borclandir():
                 plan_v = None
             _yeni_satirlar.append(dict(raw, tutar_kdv_dahil=plan_v) if plan_v is not None else raw)
         satirlar = _yeni_satirlar
+
+    _uyus_red = _borc_tutar_grid_uyusmazligi_red(musteri_id, satirlar)
+    if _uyus_red is not None:
+        return _uyus_red
 
     borc_silinen = []
     panel_plan = {"panel_n": 0, "diger_m": 0, "atla_tam": {}, "bagli": [], "uyarilar": [], "sil_tahsil": [], "sil_borc": []}
