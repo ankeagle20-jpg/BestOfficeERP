@@ -24026,7 +24026,14 @@ function girisTahsilatYilAyKeysFiltered(donemYil) {
     var panelYil = parseInt(donemYil, 10);
     var keys = [];
     var sco = window.__sozlesmelerAylikSonCacheObj;
-    if (!isNaN(panelYil) && sco && Array.isArray(sco.aylar) && sco.aylar.length) {
+    /* Z=1: panel yılı = dönem yılı → artış ayından 12 ay (takvim Oca–Ara filtresi yok). Z=0: eski. */
+    var z1Keys = (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi();
+    if (z1Keys && !isNaN(panelYil)) {
+        var basElZ = document.getElementById('sozlesme_baslangic');
+        var basStrZ = basElZ && basElZ.value ? basElZ.value.trim() : '';
+        if (!basStrZ && sco && sco.baslangic) basStrZ = String(sco.baslangic).trim();
+        keys = (typeof sozlesmeReelDonemAyKeys === 'function') ? (sozlesmeReelDonemAyKeys(basStrZ, donemYil) || []) : [];
+    } else if (!isNaN(panelYil) && sco && Array.isArray(sco.aylar) && sco.aylar.length) {
         sco.aylar.forEach(function (a) {
             if (!a || typeof a !== 'object') return;
             var yy = parseInt(a.yil, 10);
