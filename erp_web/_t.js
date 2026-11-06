@@ -7774,7 +7774,7 @@ function faturaRaporGridModalOzetHtml(meta) {
             + (pasif ? ' disabled' : '')
             + ' data-wa-tur="' + tur + '"'
             + ' onclick="faturaRaporGridWaPanelAc(event,\'' + tur + '\')">'
-            + '<i class="fa fa-whatsapp" aria-hidden="true"></i></button>';
+            + '<i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>';
     };
     var ustHam = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etHam) + '</span></div>';
     var ustGel = '<div class="fatura-rapor-grid-modal-ozet-ust"><span class="etiket">' + escTxt(etGel) + '</span>'
@@ -7953,6 +7953,38 @@ function faturaRaporGridModalAc(ev, mid) {
 }
 
 
+
+function faturaRaporGridWaAlicilarSecili() {
+    var out = [];
+    document.querySelectorAll('input[name="frg_wa_alici"]').forEach(function (inp) {
+        if (inp && inp.checked && !inp.disabled) out.push(String(inp.value || ''));
+    });
+    return out;
+}
+
+function faturaRaporGridWaSonuclaraGoreAliciKilitle(sonuclar) {
+    (sonuclar || []).forEach(function (s) {
+        var tip = String((s && s.alici) || '');
+        if (!tip) return;
+        var inp = document.querySelector('input[name="frg_wa_alici"][value="' + tip + '"]');
+        if (!inp) return;
+        if (String(s.durum || '') === 'gonderildi') {
+            inp.checked = false;
+            inp.disabled = true;
+            if (tip === 'ozel') {
+                var ozel = document.getElementById('frg_wa_ozel');
+                if (ozel) { ozel.disabled = true; ozel.hidden = true; }
+            }
+        }
+    });
+}
+function faturaRaporGridWaAliciEtiketGuncelle() {
+    var btn = document.getElementById('frg_wa_gonder');
+    if (!btn) return;
+    var n = faturaRaporGridWaAlicilarSecili().length;
+    if (n <= 0) btn.textContent = 'Gönder';
+    else btn.textContent = n + ' numaraya gönder';
+}
 function faturaRaporGridWaPanelKapat() {
     var p = document.getElementById('fatura_rapor_grid_wa_panel');
     if (p) p.hidden = true;
@@ -8036,41 +8068,45 @@ function faturaRaporGridWaDoldur(j) {
     }
     if (oniz) oniz.textContent = String(j.onizleme || '');
     var numaralar = Array.isArray(j.numaralar) ? j.numaralar : [];
-    var r1 = document.querySelector('input[name="frg_wa_alici"][value="1"]');
-    var r2 = document.getElementById('frg_wa_alici_2');
-    var ro = document.getElementById('frg_wa_alici_ozel');
+    var c1 = document.getElementById('frg_wa_alici_1');
+    var c2 = document.getElementById('frg_wa_alici_2');
+    var co = document.getElementById('frg_wa_alici_ozel');
     var ozel = document.getElementById('frg_wa_ozel');
-    if (r1) {
-        r1.disabled = !(numaralar.length >= 1);
-        r1.checked = true;
-        var lab1 = r1.parentNode;
+    if (c1) {
+        c1.disabled = !(numaralar.length >= 1);
+        c1.checked = true;
+        var lab1 = c1.parentNode;
         if (lab1 && numaralar[0] && numaralar[0].maske) {
             lab1.lastChild.textContent = ' 1. numara (' + String(numaralar[0].maske) + ')';
+        } else if (lab1) {
+            lab1.lastChild.textContent = ' 1. numara';
         }
     }
-    if (r2) {
-        r2.disabled = !(numaralar.length >= 2);
-        var lab2 = r2.parentNode;
+    if (c2) {
+        c2.disabled = !(numaralar.length >= 2);
+        c2.checked = false;
+        var lab2 = c2.parentNode;
         if (lab2) {
             lab2.lastChild.textContent = (numaralar.length >= 2 && numaralar[1] && numaralar[1].maske)
                 ? (' 2. numara (' + String(numaralar[1].maske) + ')')
                 : ' 2. numara';
         }
     }
-    if (ro && ozel) {
-        ro.onchange = r1 && r2 ? function () {
-            var v = (document.querySelector('input[name="frg_wa_alici"]:checked') || {}).value;
-            ozel.disabled = v !== 'ozel';
-        } : null;
-        document.querySelectorAll('input[name="frg_wa_alici"]').forEach(function (inp) {
-            inp.onchange = function () {
-                ozel.disabled = inp.value !== 'ozel' || !inp.checked;
-                if (inp.value !== 'ozel') ozel.value = '';
-                faturaRaporGridWaGonderBtnGuncelle();
-            };
-        });
-        ozel.disabled = true;
+    if (co) { co.disabled = false; co.checked = false; }
+    if (ozel) { ozel.value = ''; ozel.disabled = true; ozel.hidden = true; }
+    function _aliciDegisti() {
+        var ozelIs = !!(co && co.checked);
+        if (ozel) {
+            ozel.hidden = !ozelIs;
+            ozel.disabled = !ozelIs;
+            if (!ozelIs) ozel.value = '';
+        }
+        faturaRaporGridWaAliciEtiketGuncelle();
+        faturaRaporGridWaGonderBtnGuncelle();
     }
+    document.querySelectorAll('input[name="frg_wa_alici"]').forEach(function (inp) {
+        inp.onchange = _aliciDegisti;
+    });
     var uyarilar = Array.isArray(j.uyarilar) ? j.uyarilar : [];
     var uy = document.getElementById('frg_wa_uyari');
     var pw = document.getElementById('frg_wa_pasif_wrap');
@@ -8100,14 +8136,17 @@ function faturaRaporGridWaGonderBtnGuncelle() {
     if (!btn) return;
     var pasifGerek = Array.isArray(st.uyarilar) && st.uyarilar.indexOf('musteri_pasif') >= 0;
     var po = document.getElementById('frg_wa_pasif_onay');
-    var kilit = !!st.gonderiyor || !!st.yukleniyor || (pasifGerek && !(po && po.checked));
+    var alicilar = (typeof faturaRaporGridWaAlicilarSecili === 'function') ? faturaRaporGridWaAlicilarSecili() : [];
+    var kilit = !!st.gonderiyor || !!st.yukleniyor || (pasifGerek && !(po && po.checked)) || alicilar.length < 1;
     btn.disabled = kilit;
+    if (typeof faturaRaporGridWaAliciEtiketGuncelle === 'function') faturaRaporGridWaAliciEtiketGuncelle();
 }
 function faturaRaporGridWaGonder() {
     var st = window.__frgWaState;
     if (!st || !(st.mid > 0) || st.gonderiyor) return;
     var sel = document.getElementById('frg_wa_sablon');
-    var alici = (document.querySelector('input[name="frg_wa_alici"]:checked') || {}).value || '1';
+    var alicilar = faturaRaporGridWaAlicilarSecili();
+    if (!alicilar.length) return;
     var ozel = document.getElementById('frg_wa_ozel');
     var po = document.getElementById('frg_wa_pasif_onay');
     var btn = document.getElementById('frg_wa_gonder');
@@ -8118,8 +8157,8 @@ function faturaRaporGridWaGonder() {
     var body = {
         tutar_turu: st.tutarTur,
         sablon_id: sel ? String(sel.value || '') : '',
-        alici_secimi: alici,
-        ozel_numara: (alici === 'ozel' && ozel) ? String(ozel.value || '') : '',
+        alicilar: alicilar,
+        ozel_numara: (alicilar.indexOf('ozel') >= 0 && ozel) ? String(ozel.value || '') : '',
         pasif_onay: (po && po.checked) ? '1' : '0',
         deneme: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
     };
@@ -8133,11 +8172,27 @@ function faturaRaporGridWaGonder() {
         return r.json().then(function (j) { return { status: r.status, j: j }; });
     }).then(function (pak) {
         st.gonderiyor = false;
-        faturaRaporGridWaGonderBtnGuncelle();
         var j = pak.j || {};
+        var satirlar = Array.isArray(j.sonuclar) ? j.sonuclar : null;
+        if (satirlar && satirlar.length && typeof faturaRaporGridWaSonuclaraGoreAliciKilitle === 'function') {
+            faturaRaporGridWaSonuclaraGoreAliciKilitle(satirlar);
+        }
+        faturaRaporGridWaGonderBtnGuncelle();
         if (sonuc) {
             sonuc.hidden = false;
-            if (j.ok) {
+            if (satirlar && satirlar.length) {
+                var et = { '1': '1. numara', '2': '2. numara', 'ozel': 'Başka numara' };
+                var ds = { gonderildi: 'gönderildi', hata: 'hata', engellendi: 'engellendi' };
+                var lines = satirlar.map(function (s) {
+                    var ad = et[s.alici] || String(s.alici || '');
+                    var d = ds[s.durum] || String(s.durum || '');
+                    var n = s.neden ? (' – ' + String(s.neden)) : '';
+                    return ad + ': ' + d + n;
+                });
+                sonuc.className = 'fatura-rapor-grid-wa-sonuc ' + (j.ok ? 'is-ok' : 'is-err');
+                sonuc.textContent = lines.join('\n');
+                if (j.tekillestirildi) sonuc.textContent += '\n(Aynı numaralar tekilleştirildi)';
+            } else if (j.ok) {
                 sonuc.className = 'fatura-rapor-grid-wa-sonuc is-ok';
                 sonuc.textContent = String(j.mesaj || 'Gönderildi');
             } else {

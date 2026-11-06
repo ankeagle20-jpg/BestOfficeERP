@@ -5,6 +5,7 @@ Gönderim yalnız sozlesme_wa_isle. Telefon/metin loglanmaz.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 import uuid
@@ -14,7 +15,8 @@ from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Europe/Istanbul")
 KILIT_SN = 60
-_MESAJ_KILIT: dict[tuple[int, str, str], float] = {}
+# Anahtar: (mid, tutar_turu, sablon_id, tel_ozet) — alıcı dahil; 2. numara 1.'yi engellemez.
+_MESAJ_KILIT: dict[tuple[int, str, str, str], float] = {}
 
 _SABLON_AD = {
     0: "Vade günü",
@@ -29,10 +31,17 @@ _SABLON_AD = {
     365: "365 gün",
 }
 
+_ALICI_IZIN = frozenset({"1", "2", "ozel"})
+
 
 def kilit_temizle() -> None:
     """Test yardımcı."""
     _MESAJ_KILIT.clear()
+
+
+def _tel_ozet(norm: str) -> str:
+    """Kilit anahtarı için kısa özet; loglanmaz."""
+    return hashlib.sha256(str(norm or "").encode("utf-8")).hexdigest()[:16]
 
 
 def mesai_disi_mi(simdi: datetime | None = None) -> bool:
@@ -328,6 +337,59 @@ def _alici_coz(tels: list, alici_secimi: str, ozel_numara) -> tuple[str | None, 
     return None, "", "Geçersiz alıcı"
 
 
+def _alicilar_oku(data: dict) -> tuple[list[str] | None, str]:
+    """alicilar dizisi veya eski alici_secimi → tekil slot listesi."""
+    ham = data.get("alicilar")
+    if ham is None:
+        eski = data.get("alici_secimi")
+        if eski is None or str(eski).strip() == "":
+            return None, "Alıcı seçilmedi"
+        ham = [eski]
+    if not isinstance(ham, (list, tuple)):
+        return None, "Geçersiz alıcı listesi"
+    if len(ham) == 0:
+        return None, "Alıcı seçilmedi"
+    if len(ham) > 3:
+        return None, "En fazla 3 alıcı"
+    out: list[str] = []
+    gorulen: set[str] = set()
+    for x in ham:
+        tip = str(x or "").strip().lower()
+        if tip in ("birinci", "bir"):
+            tip = "1"
+        elif tip in ("ikinci", "iki"):
+            tip = "2"
+        elif tip in ("serbest", "baska"):
+            tip = "ozel"
+        if tip not in _ALICI_IZIN:
+            return None, "Geçersiz alıcı"
+        if tip in gorulen:
+            continue
+        gorulen.add(tip)
+        out.append(tip)
+    if not out:
+        return None, "Alıcı seçilmedi"
+    return out, ""
+
+
+def _alici_listesi_coz(tels: list, slotlar: list[str], ozel_numara) -> tuple[list[tuple[str, str]] | None, str, bool]:
+    """[(alici_tip, norm_tel), ...] numara tekilleştirilmiş; (liste, hata, tekillestirildi)."""
+    ham: list[tuple[str, str]] = []
+    for tip in slotlar:
+        tel, tip2, hata = _alici_coz(tels, tip, ozel_numara)
+        if hata:
+            return None, hata, False
+        ham.append((tip2, str(tel)))
+    tekil: list[tuple[str, str]] = []
+    gorulen: set[str] = set()
+    for tip, tel in ham:
+        if tel in gorulen:
+            continue
+        gorulen.add(tel)
+        tekil.append((tip, tel))
+    return tekil, "", len(tekil) < len(ham)
+
+
 def _audit(uid: int, mid: int, anlik: dict, calistir=None) -> None:
     try:
         from audit_log import audit_yaz
@@ -347,6 +409,10 @@ def _audit(uid: int, mid: int, anlik: dict, calistir=None) -> None:
         pass
 
 
+def _sonuc_satir(alici: str, durum: str, neden: str = "") -> dict:
+    return {"alici": alici, "durum": durum, "neden": str(neden or "")}
+
+
 def gonder(
     uid: int,
     mid: int,
@@ -363,14 +429,13 @@ def gonder(
     audit_fn=None,
     now_mono: Callable[[], float] | None = None,
 ) -> tuple[dict, int]:
-    """Metin ve tutar sunucuda; gönderim sozlesme_wa_isle."""
+    """Metin ve tutar sunucuda; gönderim sozlesme_wa_isle (alıcı başına)."""
     from sozlesme_whatsapp import deneme_gecerli, node_yolu_acik, sozlesme_wa_isle
 
     if not (node_fn or node_yolu_acik)():
         return {"ok": False, "kapali": True, "mesaj": "WhatsApp servisi kapalı", "wa_acik": False}, 403
 
     data = data or {}
-    # İstemci tutar/metin yok sayılır
     tutar_turu = str(data.get("tutar_turu") or "").strip()
     sablon_id = data.get("sablon_id")
     if sablon_id is None:
@@ -404,82 +469,144 @@ def gonder(
     if not sid or not metin:
         return {"ok": False, "mesaj": "Şablon bulunamadı"}, 400
 
-    tels = _telefonlar(borc.get("phone"), borc.get("phone2"))
-    tel, alici_tip, hata = _alici_coz(tels, data.get("alici_secimi"), data.get("ozel_numara"))
-    if hata:
-        return {"ok": False, "mesaj": hata}, 400
+    slotlar, hata_slot = _alicilar_oku(data)
+    if hata_slot:
+        return {"ok": False, "mesaj": hata_slot}, 400
 
-    kilit_anahtar = (int(mid), tur, str(sid))
+    tels = _telefonlar(borc.get("phone"), borc.get("phone2"))
+    hedefler, hata_tel, tekillestirildi = _alici_listesi_coz(tels, slotlar, data.get("ozel_numara"))
+    if hata_tel:
+        return {"ok": False, "mesaj": hata_tel}, 400
+
     mono = now_mono or time.monotonic
     simdi_m = float(mono())
-    once = _MESAJ_KILIT.get(kilit_anahtar)
-    if once is not None and (simdi_m - once) < KILIT_SN:
-        return {"ok": False, "mesaj": "Çok sık gönderim; biraz bekleyin"}, 409
-
-    deneme = deneme_gecerli(data.get("deneme"))
-    if not deneme:
-        deneme = str(uuid.uuid4())
-
-    if alici_tip == "ozel":
-        try:
-            from sozlesme_whatsapp import serbest_numara_audit
-
-            serbest_numara_audit(int(uid), int(mid), tel, tels)
-        except Exception:
-            pass
-
     fn = gonder_fn or sozlesme_wa_isle
-    try:
-        govde, kod = fn(
-            int(uid),
-            {
-                "buton": "ust",
-                "musteri_id": int(mid),
-                "mesaj": metin,
-                "telefon": tel,
-                "onay": True,
-                "deneme": deneme,
-                "serbest": alici_tip == "ozel",
-            },
-            origin,
-            host,
-        )
-    except Exception:
+    sonuclar: list[dict] = []
+    calls_ok = 0
+    calls_fail = 0
+    http_kod = 200
+
+    for _idx, (alici_tip, tel) in enumerate(hedefler):
+        kilit_anahtar = (int(mid), tur, str(sid), _tel_ozet(tel))
+        once = _MESAJ_KILIT.get(kilit_anahtar)
+        if once is not None and (simdi_m - once) < KILIT_SN:
+            sat = _sonuc_satir(alici_tip, "engellendi", "Çok sık gönderim; biraz bekleyin")
+            sonuclar.append(sat)
+            calls_fail += 1
+            _audit(uid, mid, {
+                "tutar_turu": tur,
+                "tutar": round(tutar_f, 2),
+                "sablon_id": sid,
+                "alici_secimi": alici_tip,
+                "sonuc": "engellendi",
+                "http": 409,
+            }, calistir=audit_fn)
+            if calls_ok == 0:
+                http_kod = 409
+            continue
+
+        if alici_tip == "ozel":
+            try:
+                from sozlesme_whatsapp import serbest_numara_audit
+
+                serbest_numara_audit(int(uid), int(mid), tel, tels)
+            except Exception:
+                pass
+
+        # Alıcı başına benzersiz deneme — deneme anahtarı diğer alıcıyı engellemesin
+        deneme = str(uuid.uuid4())
+        # İstemci deneme verdiyse yalnızca ilk alıcıda kullan; sonrakiler yeni UUID
+        if _idx == 0:
+            kim = deneme_gecerli(data.get("deneme"))
+            if kim:
+                deneme = kim
+
+        try:
+            govde, kod = fn(
+                int(uid),
+                {
+                    "buton": "ust",
+                    "musteri_id": int(mid),
+                    "mesaj": metin,
+                    "telefon": tel,
+                    "onay": True,
+                    "deneme": deneme,
+                    "serbest": alici_tip == "ozel",
+                },
+                origin,
+                host,
+            )
+        except Exception:
+            sonuclar.append(_sonuc_satir(alici_tip, "hata", "Gönderilemedi"))
+            calls_fail += 1
+            _audit(uid, mid, {
+                "tutar_turu": tur,
+                "tutar": round(tutar_f, 2),
+                "sablon_id": sid,
+                "alici_secimi": alici_tip,
+                "sonuc": "hata",
+            }, calistir=audit_fn)
+            http_kod = 500
+            continue
+
+        ok = bool((govde or {}).get("ok"))
+        if ok or int(kod) in (200, 201):
+            _MESAJ_KILIT[kilit_anahtar] = simdi_m
+            durum = "gonderildi"
+            neden = str((govde or {}).get("mesaj") or "")
+            calls_ok += 1
+            sonuc_audit = "ok"
+            if (govde or {}).get("tekrar"):
+                durum = "engellendi"
+                neden = str((govde or {}).get("mesaj") or "Tekrar")
+                sonuc_audit = "tekrar"
+                calls_ok -= 1
+                calls_fail += 1
+        else:
+            durum = "engellendi" if (govde or {}).get("tekrar") or int(kod) == 409 else "hata"
+            neden = str((govde or {}).get("mesaj") or "Gönderilemedi")
+            calls_fail += 1
+            sonuc_audit = "tekrar" if (govde or {}).get("tekrar") else "hata"
+            if http_kod == 200:
+                http_kod = int(kod) if int(kod) >= 400 else 400
+
+        sonuclar.append(_sonuc_satir(alici_tip, durum, neden))
         _audit(uid, mid, {
             "tutar_turu": tur,
             "tutar": round(tutar_f, 2),
             "sablon_id": sid,
             "alici_secimi": alici_tip,
-            "sonuc": "hata",
+            "sonuc": sonuc_audit,
+            "http": int(kod),
         }, calistir=audit_fn)
-        return {"ok": False, "mesaj": "Gönderilemedi"}, 500
 
-    ok = bool((govde or {}).get("ok"))
-    if ok or int(kod) in (200, 201):
-        _MESAJ_KILIT[kilit_anahtar] = simdi_m
+    hepsi_ok = calls_ok > 0 and calls_fail == 0
+    kismi = calls_ok > 0 and calls_fail > 0
+    if hepsi_ok:
+        http_kod = 200
+    elif kismi:
+        http_kod = 200
+    elif calls_fail and http_kod == 200:
+        http_kod = 400
 
-    sonuc = "ok" if ok else "hata"
-    if (govde or {}).get("tekrar"):
-        sonuc = "tekrar"
-    _audit(uid, mid, {
-        "tutar_turu": tur,
-        "tutar": round(tutar_f, 2),
-        "sablon_id": sid,
-        "alici_secimi": alici_tip,
-        "sonuc": sonuc,
-        "http": int(kod),
-    }, calistir=audit_fn)
-
-    mesaj = str((govde or {}).get("mesaj") or ("Gönderildi" if ok else "Gönderilemedi"))
+    mesaj = "Gönderildi" if hepsi_ok else (
+        "Kısmi gönderim" if kismi else (sonuclar[0].get("neden") if sonuclar else "Gönderilemedi")
+    )
     out = {
-        "ok": ok,
+        "ok": hepsi_ok or kismi,
         "mesaj": mesaj,
-        "durum": (govde or {}).get("durum") or ("gonderiliyor" if ok else "hata"),
+        "durum": "gonderiliyor" if (hepsi_ok or kismi) else "hata",
         "uyarilar": _uyarilar(borc, simdi),
         "tutar_turu": tur,
         "sablon_id": sid,
-        "alici_secimi": alici_tip,
+        "sonuclar": sonuclar,
+        "alici_adet": len(sonuclar),
+        "tekillestirildi": bool(tekillestirildi),
     }
-    if (govde or {}).get("tekrar"):
-        out["tekrar"] = True
-    return out, int(kod)
+    # Geriye uyumluluk: tek alıcıda eski alan
+    if len(sonuclar) == 1:
+        out["alici_secimi"] = sonuclar[0].get("alici")
+        if sonuclar[0].get("durum") == "engellendi" and "sık" in str(sonuclar[0].get("neden") or "").lower():
+            out["ok"] = False
+            http_kod = 409
+    return out, int(http_kod)

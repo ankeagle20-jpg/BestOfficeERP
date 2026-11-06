@@ -322,6 +322,246 @@ def test_sunucu_tutar_sablon_alici():
     g.kilit_temizle()
 
 
+def test_coklu_alici():
+    import grid_wa_popup as g
+    from odeme_linki import normalize_wa_telefon
+
+    g.kilit_temizle()
+    bugun = date(2026, 11, 5)
+    calls = {"gonder": 0, "tels": [], "audit": []}
+
+    def fetch_one(sql, params=None):
+        return _fake_musteri()
+
+    def payload_fn(mid):
+        return _fake_payload()
+
+    def gonder_fn(uid, data, origin, host, **kw):
+        calls["gonder"] += 1
+        calls["tels"].append(data.get("telefon"))
+        calls["last"] = dict(data)
+        return {"ok": True, "durum": "gonderiliyor", "mesaj": "Gönderim sürüyor"}, 200
+
+    def _audit_cap(uid, mid, anlik, calistir=None):
+        calls["audit"].append(dict(anlik or {}))
+
+    g._audit = _audit_cap
+    simdi = datetime(2026, 11, 5, 12, 0, tzinfo=IST)
+    kw = dict(
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn,
+        node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+
+    # (a) ["1","2"] → iki çağrı, farklı numara
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    calls["tels"] = []
+    gov_a, kod_a = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"},
+        "https://example.local", "example.local", **kw,
+    )
+    check("ca iki ok", kod_a == 200 and gov_a.get("ok") is True)
+    check("ca iki adet", calls["gonder"] == 2)
+    check("ca iki farkli", len(set(calls["tels"])) == 2)
+    check("ca iki sonuc", len(gov_a.get("sonuclar") or []) == 2)
+
+    # (b) ["1","2","ozel"] → üç
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    calls["tels"] = []
+    gov_b, kod_b = g.gonder(
+        1, 10,
+        {
+            "tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2", "ozel"],
+            "ozel_numara": _sahte_tel_05(3),
+            "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2",
+        },
+        "https://example.local", "example.local", **kw,
+    )
+    check("cb uc ok", kod_b == 200 and gov_b.get("ok") is True)
+    check("cb uc adet", calls["gonder"] == 3)
+    check("cb uc farkli", len(set(calls["tels"])) == 3)
+
+    # (c) 1. gönderildikten sonra 2. aynı pencerede engellenmez; aynı alıcı 60sn engellenir
+    g.kilit_temizle()
+    mono = {"t": 5000.0}
+
+    def now():
+        return mono["t"]
+
+    calls["gonder"] = 0
+    g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3"},
+        "https://example.local", "example.local", now_mono=now, **kw,
+    )
+    mono["t"] = 5010.0
+    gov_c2, kod_c2 = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4"},
+        "https://example.local", "example.local", now_mono=now, **kw,
+    )
+    check("cc iki engellenmez", kod_c2 == 200 and gov_c2.get("ok") is True, gov_c2)
+    gov_c3, kod_c3 = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa5"},
+        "https://example.local", "example.local", now_mono=now, **kw,
+    )
+    check("cc ayni alici 60sn", kod_c3 == 409 and gov_c3.get("ok") is False)
+
+    # (d) ozel = 1. numara → tekilleştir, tek çağrı
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    gov_d, kod_d = g.gonder(
+        1, 10,
+        {
+            "tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "ozel"],
+            "ozel_numara": _sahte_tel_05(1),
+            "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa6",
+        },
+        "https://example.local", "example.local", **kw,
+    )
+    check("cd tekil adet", calls["gonder"] == 1)
+    check("cd tekil bayrak", gov_d.get("tekillestirildi") is True)
+    check("cd tekil sonuc1", len(gov_d.get("sonuclar") or []) == 1)
+    n1 = normalize_wa_telefon(_sahte_tel_05(1))
+    check("cd ayni norm", calls["last"].get("telefon") == n1)
+
+    # (e) validasyonlar
+    g.kilit_temizle()
+
+    def fetch_tek(sql, params=None):
+        return _fake_musteri(phone2=False)
+
+    gov_e2, kod_e2 = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa7"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_tek, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+    check("ce2 yok 400", kod_e2 == 400)
+
+    gov_eb, kod_eb = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": [], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa8"},
+        "https://example.local", "example.local", **kw,
+    )
+    check("ce bos 400", kod_eb == 400)
+
+    gov_ef, kod_ef = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2", "ozel", "1"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9"},
+        "https://example.local", "example.local", **kw,
+    )
+    # tekrar eden eleman tekilleşir; 4. eleman "1" zaten var → len ham 4 ama max check before dedupe of slots
+    # Bizim _alicilar_oku: len(ham)>3 → 400 even if duplicates
+    check("ce fazla 400", kod_ef == 400)
+
+    gov_eo, kod_eo = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["ozel"], "ozel_numara": "abc", "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa10"},
+        "https://example.local", "example.local", **kw,
+    )
+    check("ce ozel gecersiz", kod_eo == 400)
+
+    # (f) kısmi hata + yeniden deneme yalnız başarısız
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    calls["tels"] = []
+    fail_once = {"n": 0}
+
+    def gonder_kismi(uid, data, origin, host, **kw2):
+        calls["gonder"] += 1
+        calls["tels"].append(data.get("telefon"))
+        fail_once["n"] += 1
+        if fail_once["n"] == 2:
+            return {"ok": False, "mesaj": "Mock hata"}, 500
+        return {"ok": True, "durum": "gonderiliyor", "mesaj": "Gönderim sürüyor"}, 200
+
+    gov_f, kod_f = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa11"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_kismi,
+    )
+    son_f = gov_f.get("sonuclar") or []
+    check("cf kismi len", len(son_f) == 2)
+    check("cf kismi 1 ok", son_f[0].get("durum") == "gonderildi")
+    check("cf kismi 2 hata", son_f[1].get("durum") == "hata")
+    before = calls["gonder"]
+    gov_fr, kod_fr = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa12"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_kismi,
+    )
+    check("cf retry sadece 2", calls["gonder"] == before + 1 and gov_fr.get("ok") is True)
+    # başarılı 1 yeniden gönderilse engellenir
+    gov_f1, kod_f1 = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa13"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_one, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_kismi,
+    )
+    check("cf basarili kilit", kod_f1 == 409)
+
+    # (g) pasif_onay bir kez, çoklu alıcı
+    g.kilit_temizle()
+    calls["gonder"] = 0
+
+    def fetch_pasif(sql, params=None):
+        return _fake_musteri(pasif=True)
+
+    gov_g0, kod_g0 = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa14"},
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_pasif, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+    check("cg pasif yok", kod_g0 == 400 and calls["gonder"] == 0)
+    gov_g1, kod_g1 = g.gonder(
+        1, 10,
+        {
+            "tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "pasif_onay": "1",
+            "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa15",
+        },
+        "https://example.local", "example.local",
+        bugun=bugun, simdi=simdi, fetch_one_fn=fetch_pasif, payload_fn=payload_fn, node_fn=lambda: True, gonder_fn=gonder_fn,
+    )
+    check("cg pasif ok", kod_g1 == 200 and calls["gonder"] == 2)
+
+    # (h) audit alıcı başına; tel/metin yok
+    calls["audit"] = []
+    g.kilit_temizle()
+    g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alicilar": ["1", "2"], "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa16"},
+        "https://example.local", "example.local", **kw,
+    )
+    check("ch audit adet", len(calls["audit"]) == 2)
+    for a in calls["audit"]:
+        blob = str(a).lower()
+        check("ch audit alan", "alici_secimi" in a and "sonuc" in a)
+        check(
+            "ch audit pii yok",
+            _sahte_tel(1) not in blob and _sahte_tel_05(1) not in blob and "telefon" not in blob and "mesaj" not in blob,
+        )
+
+    # (i) geriye uyumluluk alici_secimi
+    g.kilit_temizle()
+    calls["gonder"] = 0
+    gov_i, kod_i = g.gonder(
+        1, 10,
+        {"tutar_turu": "toplam", "sablon_id": "7", "alici_secimi": "1", "deneme": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa17"},
+        "https://example.local", "example.local", **kw,
+    )
+    check("ci eski alici", kod_i == 200 and calls["gonder"] == 1 and gov_i.get("alici_secimi") == "1")
+
+    g._audit = lambda *a, **k: None
+    g.kilit_temizle()
+
+
 def test_route_methods_and_ui():
     html = _html()
     src = (ROOT / "routes" / "sozlesme_whatsapp_routes.py").read_text(encoding="utf-8")
@@ -336,23 +576,35 @@ def test_route_methods_and_ui():
     check("p tarih ayrac", "tarih-ayrac" in html and " · " in html)
     check("p pointer-events aylik", "fatura-rapor-grid-modal-aylik" in html and "pointer-events: none" in html)
 
-    # (i) auth decorator present — yetkisiz flask testi hafif: giris_gerekli satırı
     check("i decorator onizleme", "@giris_gerekli" in src)
 
-    # (l) node: ikon POST atmaz
+    # (j) checkbox bağımsız + (k) ikon
+    check("j checkbox", 'type="checkbox" name="frg_wa_alici"' in html)
+    check("j radio yok panel", 'type="radio" name="frg_wa_alici"' not in html)
+    check("j varsayilan 1", 'id="frg_wa_alici_1" checked' in html or "id=\"frg_wa_alici_1\" checked" in html)
+    check("j etiket fn", "faturaRaporGridWaAliciEtiketGuncelle" in html and "numaraya gönder" in html)
+    check("j alicilar body", "alicilar:" in html or "alicilar :" in html)
+
+    # ikon: popup kutusu aynı kaynak (fa-brands fa-whatsapp) toolbar ile
+    check("k ikon brands popup", "fa-brands fa-whatsapp" in html)
+    # ozet builder satırı
+    ozet_i = html.find("function faturaRaporGridModalOzetHtml")
+    ozet_blk = html[ozet_i: ozet_i + 2500] if ozet_i >= 0 else ""
+    check("k ikon ozet brands", "fa-brands fa-whatsapp" in ozet_blk)
+    check("k ikon eski fa yok ozet", 'fa fa-whatsapp' not in ozet_blk)
+
     try:
-        ozet = _js_brace_extract(html, "function faturaRaporGridModalOzetHtml")
-        # WA panel helpers are separate functions — extract by markers
         ac_i = html.find("function faturaRaporGridWaPanelAc")
-        gonder_i = html.find("function faturaRaporGridWaGonder")
         firma_i = html.find("function faturaRaporFirmaKartaGit")
         wa_blk = html[ac_i:firma_i]
+        helpers_i = html.find("function faturaRaporGridWaAlicilarSecili")
+        helpers_blk = html[helpers_i: ac_i] if helpers_i >= 0 else ""
+        wa_blk = helpers_blk + wa_blk
     except ValueError as e:
         check("l extract", False, str(e))
         return
     check("l panelAc post yok", "grid-wa-gonder" not in html[ac_i:html.find("function faturaRaporGridWaYukle")])
     check("l gonder post var", "grid-wa-gonder" in wa_blk and "method: 'POST'" in wa_blk)
-    check("l varsayilan 1", 'value="1" checked' in html or "value=\"1\" checked" in html)
 
     node = (
         r"""
@@ -369,22 +621,63 @@ global.fetch = function(url, opts){ fetchCalls.push({url:String(url), opts:opts|
 """
         + wa_blk
         + r"""
-// PanelAc should not POST
 window.__faturaRaporGridModalMid = 10;
 window.__faturaRaporGridWaKapali = false;
-// stub elements minimally via getElementById
 var store = {};
 document.getElementById = function(id){
   if(!store[id]) store[id] = { hidden:true, textContent:'', value:'', innerHTML:'', disabled:false, checked:false, className:'', onchange:null };
   return store[id];
 };
+var aliciBoxes = [
+  { value:'1', checked:true, disabled:false, onchange:null },
+  { value:'2', checked:false, disabled:false, onchange:null },
+  { value:'ozel', checked:false, disabled:false, onchange:null }
+];
 document.querySelector = function(){ return { value:'1', checked:true, disabled:false, parentNode:{ lastChild:{ textContent:'' } } }; };
-document.querySelectorAll = function(){ return []; };
+document.querySelectorAll = function(sel){
+  if (sel === 'input[name="frg_wa_alici"]') return aliciBoxes;
+  return [];
+};
 faturaRaporGridWaPanelAc({stopPropagation:function(){}, preventDefault:function(){}}, 'toplam');
 setTimeout(function(){
   var posts = fetchCalls.filter(function(c){ return (c.opts.method||'').toUpperCase()==='POST'; });
   console.log(posts.length === 0 ? 'ok l ikon postsuz' : 'FAIL l ikon postsuz');
   console.log(fetchCalls.some(function(c){ return c.url.indexOf('grid-wa-onizleme')>=0; }) ? 'ok l onizleme get' : 'FAIL l onizleme get');
+  aliciBoxes[0].checked = true; aliciBoxes[1].checked = true; aliciBoxes[2].checked = false;
+  var sec = faturaRaporGridWaAlicilarSecili();
+  console.log(sec.length === 2 && sec.indexOf('1')>=0 && sec.indexOf('2')>=0 ? 'ok j bagimsiz' : 'FAIL j bagimsiz');
+  aliciBoxes[0].checked = false; aliciBoxes[1].checked = false; aliciBoxes[2].checked = false;
+  console.log(faturaRaporGridWaAlicilarSecili().length === 0 ? 'ok j hicbiri' : 'FAIL j hicbiri');
+  window.__frgWaState = { uyarilar: [], gonderiyor:false, yukleniyor:false, mid:10, tutarTur:'toplam' };
+  var btn = document.getElementById('frg_wa_gonder');
+  faturaRaporGridWaGonderBtnGuncelle();
+  console.log(btn.disabled ? 'ok j gonder kapali' : 'FAIL j gonder kapali');
+  aliciBoxes[0].checked = true;
+  faturaRaporGridWaGonderBtnGuncelle();
+  console.log((!btn.disabled && String(btn.textContent||'').indexOf('1 numaraya')>=0) ? 'ok j etiket1' : 'FAIL j etiket1 '+btn.textContent);
+  aliciBoxes[1].checked = true;
+  faturaRaporGridWaGonderBtnGuncelle();
+  console.log(String(btn.textContent||'').indexOf('2 numaraya')>=0 ? 'ok j etiket2' : 'FAIL j etiket2 '+btn.textContent);
+  // ADIM1: karışık sonuç — gerçek kilitleme fonksiyonu
+  aliciBoxes[0].checked = true; aliciBoxes[0].disabled = false;
+  aliciBoxes[1].checked = true; aliciBoxes[1].disabled = false;
+  aliciBoxes[2].checked = false; aliciBoxes[2].disabled = false;
+  document.querySelector = function(sel){
+    if (sel === 'input[name="frg_wa_alici"][value="1"]') return aliciBoxes[0];
+    if (sel === 'input[name="frg_wa_alici"][value="2"]') return aliciBoxes[1];
+    if (sel === 'input[name="frg_wa_alici"][value="ozel"]') return aliciBoxes[2];
+    return null;
+  };
+  faturaRaporGridWaSonuclaraGoreAliciKilitle([
+    {alici:'1', durum:'gonderildi', neden:''},
+    {alici:'2', durum:'hata', neden:'Mock'}
+  ]);
+  faturaRaporGridWaGonderBtnGuncelle();
+  var ok1 = (!aliciBoxes[0].checked && aliciBoxes[0].disabled);
+  var ok2 = (aliciBoxes[1].checked && !aliciBoxes[1].disabled);
+  var et = String(btn.textContent||'');
+  console.log(ok1 && ok2 ? 'ok j kilit karisik' : 'FAIL j kilit karisik');
+  console.log(et.indexOf('1 numaraya')>=0 ? 'ok j kilit etiket' : 'FAIL j kilit etiket '+et);
 }, 50);
 """
     )
@@ -399,6 +692,13 @@ setTimeout(function(){
         print(out.strip())
         check("l node ikon", "ok l ikon postsuz" in out)
         check("l node get", "ok l onizleme get" in out)
+        check("j node bagimsiz", "ok j bagimsiz" in out)
+        check("j node hicbiri", "ok j hicbiri" in out)
+        check("j node gonder kapali", "ok j gonder kapali" in out)
+        check("j node etiket1", "ok j etiket1" in out)
+        check("j node etiket2", "ok j etiket2" in out)
+        check("j node kilit karisik", "ok j kilit karisik" in out)
+        check("j node kilit etiket", "ok j kilit etiket" in out)
     except FileNotFoundError:
         check("l node", False, "node yok")
     finally:
@@ -407,10 +707,15 @@ setTimeout(function(){
         except OSError:
             pass
 
-    # GET gönderim yapmaz — onizleme fonksiyonunda sozlesme_wa_isle çağrısı yok
+    check("j kilitle fn", "function faturaRaporGridWaSonuclaraGoreAliciKilitle" in html)
+    check("j kilitle cagri", "faturaRaporGridWaSonuclaraGoreAliciKilitle(satirlar)" in html)
+
     mod = (ROOT / "grid_wa_popup.py").read_text(encoding="utf-8")
     oniz_blk = mod[mod.find("def onizleme"): mod.find("def _alici_coz")]
     check("k get gonderim yok", "sozlesme_wa_isle" not in oniz_blk and "gonder_fn" not in oniz_blk)
+    # log/print sızıntı yok
+    check("h print yok", "print(" not in mod)
+    check("h logger yok", "logger." not in mod)
 
 
 def test_gun_cozumleme_asistan_ayni():
@@ -425,6 +730,7 @@ def test_gun_cozumleme_asistan_ayni():
 if __name__ == "__main__":
     test_gun_cozumleme_asistan_ayni()
     test_sunucu_tutar_sablon_alici()
+    test_coklu_alici()
     test_route_methods_and_ui()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
