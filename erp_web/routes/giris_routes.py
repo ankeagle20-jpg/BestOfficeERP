@@ -20087,24 +20087,35 @@ def api_reel_donem_tutar_delete():
             )
     if n <= 0:
         return jsonify({"ok": False, "mesaj": "Reel dönem kaydı bulunamadı."}), 404
+    guncel_grid = None
+    guncel_panel = None
+    guncel_grid_hata = False
+    guncel_panel_hata = False
     try:
-        _cari_ekstre_api_cache.clear()
+        guncel_sonuc = _ekstre_invalidate_after_change(musteri_id)
+        if isinstance(guncel_sonuc, dict):
+            guncel_grid = guncel_sonuc.get("grid")
+            guncel_panel = guncel_sonuc.get("panel")
+            guncel_grid_hata = bool(guncel_sonuc.get("grid_hata"))
+            guncel_panel_hata = bool(guncel_sonuc.get("panel_hata"))
+        else:
+            guncel_grid_hata = True
+            guncel_panel_hata = True
     except Exception:
-        pass
-    try:
-        mid_int = int(musteri_id)
-        _invalidate_aylik_grid_payload_mem(mid_int)
-        _ensure_aylik_grid_cache_table()
-        _ensure_tahsilat_panel_detay_table()
-        _delete_aylik_grid_cache_guarded(mid_int)
-        execute(
-            "DELETE FROM musteri_tahsilat_panel_detay WHERE musteri_id = %s", (mid_int,)
-        )
-    except Exception:
+        guncel_grid = None
+        guncel_panel = None
+        guncel_grid_hata = True
+        guncel_panel_hata = True
         logging.getLogger(__name__).exception(
-            "reel_donem_tutar silme sonrasi cache/panel musteri_id=%s", musteri_id
+            "reel_donem_tutar silme sonrasi invalidate musteri_id=%s", musteri_id
         )
-    return jsonify({"ok": True})
+    return jsonify({
+        "ok": True,
+        "guncel_grid": guncel_grid,
+        "guncel_panel": guncel_panel,
+        "guncel_grid_hata": guncel_grid_hata,
+        "guncel_panel_hata": guncel_panel_hata,
+    })
 
 
 @bp.route('/api/aylik-grid-cache/rebuild-all', methods=['POST'])

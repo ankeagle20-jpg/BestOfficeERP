@@ -18510,11 +18510,21 @@ function girisAylikSatirYilEkstreSenkron() {
 function girisAylikSatirYilKaydet(y) {
     window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
     var k = String(y);
+    var midKay = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
+    var dbMap = (window.__musteriReelDonemDbMap && typeof window.__musteriReelDonemDbMap === 'object') ? window.__musteriReelDonemDbMap : {};
+    var kayitliDb = dbMap[k] != null && !isNaN(parseFloat(dbMap[k])) && parseFloat(dbMap[k]) > 0;
     var cur = girisAylikSatirYilDomOku(y);
+    var reelAlan = parseFloat(cur.reel);
+    if (isNaN(reelAlan) || reelAlan < 0) reelAlan = 0;
+    var reelAktif = !!cur.__reel_aktif && reelAlan > 0;
     cur.__manual_saved = true;
     cur.__manual_aylik = true;
     cur.__locked = true;
     delete cur.__vazgec_snapshot;
+    if (!reelAktif) {
+        cur.__reel_aktif = false;
+        cur.reel = 0;
+    }
     window.__aylikSatirYilDetay[k] = cur;
     var h = girisAylikSatirYilHesapla(y);
     var p = document.getElementById('aylik_yil_row_' + k);
@@ -18528,6 +18538,29 @@ function girisAylikSatirYilKaydet(y) {
         girisAylikSatirYilSatirKilitUygula(p, true);
     }
     if ((window.__aylikSatirYilAcik || {})[k]) girisAylikSatirYilAyPanelGuncelle(y);
+    if (!reelAktif) {
+        girisAylikSatirYilKayitYaz();
+        try {
+            if (typeof sozlesmelerAylikNormGridKartTutarlariniYenile === 'function') sozlesmelerAylikNormGridKartTutarlariniYenile();
+        } catch (_eGridOnKay) {}
+        try { girisAylikSatirYilEkstreSenkron(); } catch (_eEkOnKay) {}
+        if (kayitliDb && typeof girisAylikSatirYilDbSilTek === 'function') {
+            if (!confirm(y + ' dönemi reel tutarı silinecek. Emin misiniz?')) {
+                if (typeof girisTahsilatOzetGuncelle === 'function') girisTahsilatOzetGuncelle();
+                return;
+            }
+            girisAylikSatirYilDbSilTek(y)
+                .then(function () { return girisAylikSatirYilDbSonrasi(midKay); })
+                .then(function () {
+                    if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
+                    if (typeof girisTahsilatOzetGuncelle === 'function') girisTahsilatOzetGuncelle();
+                })
+                .catch(function (e) { alert(e.message || 'Silinemedi.'); });
+        } else if (typeof girisTahsilatOzetGuncelle === 'function') {
+            girisTahsilatOzetGuncelle();
+        }
+        return;
+    }
     var tKay = girisAylikSatirYilKaydetTutarAl(y);
     if (tKay > 0) {
         cur.reel = tKay;
@@ -18539,7 +18572,6 @@ function girisAylikSatirYilKaydet(y) {
         if (typeof sozlesmelerAylikNormGridKartTutarlariniYenile === 'function') sozlesmelerAylikNormGridKartTutarlariniYenile();
     } catch (_eGridOnKay) {}
     try { girisAylikSatirYilEkstreSenkron(); } catch (_eEkOnKay) {}
-    var midKay = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
     girisAylikSatirYilDbKaydetTek(y).then(function () {
         return girisAylikSatirYilDbSonrasi(midKay);
     }).catch(function (err) {
