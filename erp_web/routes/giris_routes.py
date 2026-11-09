@@ -2409,6 +2409,15 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     live_z = 1 if _reel_overlay_a_dar_ez_kyc(musteri_id) else 0
     if stored_z != live_z:
         return False
+    # Z=1: son açıklanan yıllık TÜFE oranı değişince cache bayat (Z=0 bu alana bakmaz).
+    if live_z == 1:
+        try:
+            live_fp = _reel_tufe_son_aciklanan_parmak(_tufe_map_by_year_month_cached())
+        except Exception:
+            live_fp = "0"
+        stored_fp = str(cache_obj.get("reel_tufe_son_aciklanan") or "")
+        if stored_fp != live_fp:
+            return False
     # Tahsilat tarafı değiştiyse (eski kayıtlar/manuel düzeltmeler dahil) cache'i geçersiz say.
     if cache_obj.get("tahsilat_imza") != _aylik_tahsil_cache_imza(musteri_id):
         return False
@@ -2531,6 +2540,74 @@ def _tufe_latest_positive_oran_in_year_map(year_map) -> float:
         if ovv > 0 and math.isfinite(ovv) and mi > best_m:
             best_m, best_o = mi, ovv
     return best_o
+
+
+def _reel_tufe_son_aciklanan_pozitif_once(tufe_map: dict, y: int, artis_month: int) -> float:
+    """Hedef (y, artis_month) öncesindeki kronolojik en son pozitif yıllık oran; yoksa 0."""
+    try:
+        ty, tm = int(y), int(artis_month)
+    except (TypeError, ValueError):
+        return 0.0
+    if tm < 1 or tm > 12:
+        return 0.0
+    best = None  # (yy, mm, oran)
+    if not isinstance(tufe_map, dict):
+        return 0.0
+    for yk, inner in tufe_map.items():
+        try:
+            yy = int(yk)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(inner, dict):
+            continue
+        for mk, ow in inner.items():
+            try:
+                mm = int(mk)
+            except (TypeError, ValueError):
+                continue
+            if mm < 1 or mm > 12:
+                continue
+            if (yy, mm) >= (ty, tm):
+                continue
+            try:
+                ovv = float(ow or 0)
+            except (TypeError, ValueError):
+                ovv = 0.0
+            if ovv > 0 and math.isfinite(ovv):
+                if best is None or (yy, mm) > (best[0], best[1]):
+                    best = (yy, mm, ovv)
+    return float(best[2]) if best else 0.0
+
+
+def _reel_tufe_son_aciklanan_parmak(tufe_map: dict) -> str:
+    """Tüm haritada kronolojik en son pozitif oran parmak izi (YYYY-MM:oran); yoksa '0'."""
+    best = None  # (yy, mm, oran)
+    if not isinstance(tufe_map, dict):
+        return "0"
+    for yk, inner in tufe_map.items():
+        try:
+            yy = int(yk)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(inner, dict):
+            continue
+        for mk, ow in inner.items():
+            try:
+                mm = int(mk)
+            except (TypeError, ValueError):
+                continue
+            if mm < 1 or mm > 12:
+                continue
+            try:
+                ovv = float(ow or 0)
+            except (TypeError, ValueError):
+                ovv = 0.0
+            if ovv > 0 and math.isfinite(ovv):
+                if best is None or (yy, mm) > (best[0], best[1]):
+                    best = (yy, mm, ovv)
+    if not best:
+        return "0"
+    return "%04d-%02d:%.4f" % (best[0], best[1], float(best[2]))
 
 
 def _aylik_grid_months_inclusive_from(bas_first: date, target_first: date) -> int:
@@ -3030,41 +3107,12 @@ def _aylik_grid_contract_core(kyc, tufe_map):
             yillik_map[yil] = round(current * kdv_mult, 2)
         if oranli_map is None and yil < max_year:
             sonraki = yil + 1
-            inner = tufe_map.get(sonraki) or {}
-            if not isinstance(inner, dict):
-                inner = {}
-            raw_o = inner.get(artis_month)
-            if raw_o is None and artis_month is not None:
-                raw_o = inner.get(str(artis_month))
-            try:
-                oran = float(raw_o or 0)
-            except (TypeError, ValueError):
-                oran = 0.0
-            # Gelecek yılın TÜFE satırı henüz yoksa (örn. 2026 Eylül), reel zincirdeki gibi
-            # bir önceki takvim yılının aynı artış ayı oranıyla projeksiyon yap.
-            if (not oran or not math.isfinite(oran)) and sonraki > start_year:
-                inner_prev = tufe_map.get(sonraki - 1) or {}
-                if isinstance(inner_prev, dict):
-                    raw_p = inner_prev.get(artis_month)
-                    if raw_p is None and artis_month is not None:
-                        raw_p = inner_prev.get(str(artis_month))
-                    try:
-                        oran2 = float(raw_p or 0)
-                    except (TypeError, ValueError):
-                        oran2 = 0.0
-                    if oran2 > 0 and math.isfinite(oran2):
-                        oran = oran2
-            # Hedef yılda artış ayı (örn. Eylül) henüz boş; Ocak–Mayıs gibi girilmiş son ayı kullan.
-            if (not oran or not math.isfinite(oran)):
-                o3 = _tufe_latest_positive_oran_in_year_map(inner)
-                if o3 > 0 and math.isfinite(o3):
-                    oran = o3
-            # Hedef yıl tamamen boşsa bir önceki yılın en son girilmiş ayı.
-            if (not oran or not math.isfinite(oran)) and sonraki > start_year:
-                inner_prev2 = tufe_map.get(sonraki - 1) or {}
-                o4 = _tufe_latest_positive_oran_in_year_map(inner_prev2)
-                if o4 > 0 and math.isfinite(o4):
-                    oran = o4
+            oran = _reel_tufe_oran_yillik_gecis(
+                tufe_map if isinstance(tufe_map, dict) else {},
+                int(sonraki),
+                int(artis_month),
+                int(start_year),
+            )
             if oran > 0 and math.isfinite(oran):
                 current = round(current * (1 + oran / 100.0), 2)
     return {
@@ -4160,6 +4208,12 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
         "reel_tufe_zincir": 1 if _reel_overlay_a_dar_ez_kyc(musteri_id) else 0,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
+    # Z=1: son açıklanan TÜFE oranı parmak izi — yeni oran girilince cache uyumsuz → rebuild.
+    # Z=0: alan eklenmez (Z=0 fingerprint değişmesin).
+    if int(payload.get("reel_tufe_zincir") or 0) == 1:
+        payload["reel_tufe_son_aciklanan"] = _reel_tufe_son_aciklanan_parmak(
+            tufe_map if isinstance(tufe_map, dict) else {}
+        )
     if plan_katmani:
         if planlar is None:
             try:
@@ -10911,6 +10965,11 @@ def _reel_kart_yillik_toplam_haritasi(kyc: dict, tufe_map: dict, y_start: int, y
 
 
 def _reel_tufe_oran_yillik_gecis(tufe_map: dict, y: int, artis_month: int, y_start: int) -> float:
+    """Yıllık TÜFE geçiş oranı (Z=1 yedek: tam ay → hedef öncesi en son açıklanan pozitif → 0).
+
+    y_start imza uyumu için korunur (eski çağrılar); yeni yedek sırası y_start kullanmaz.
+    """
+    _ = y_start  # imza uyumu; eski çağrı noktaları kırılmasın
     inner = tufe_map.get(y) if isinstance(tufe_map, dict) else {}
     if not isinstance(inner, dict):
         inner = {}
@@ -10921,28 +10980,12 @@ def _reel_tufe_oran_yillik_gecis(tufe_map: dict, y: int, artis_month: int, y_sta
         oran = float(raw_o or 0)
     except (TypeError, ValueError):
         oran = 0.0
-    if (not oran or not math.isfinite(oran)) and y > y_start:
-        inner_prev = tufe_map.get(y - 1) if isinstance(tufe_map, dict) else {}
-        if isinstance(inner_prev, dict):
-            raw_p = inner_prev.get(artis_month)
-            if raw_p is None and artis_month is not None:
-                raw_p = inner_prev.get(str(artis_month))
-            try:
-                oran2 = float(raw_p or 0)
-            except (TypeError, ValueError):
-                oran2 = 0.0
-            if oran2 > 0 and math.isfinite(oran2):
-                oran = oran2
-    if not oran or not math.isfinite(oran):
-        o3 = _tufe_latest_positive_oran_in_year_map(inner)
-        if o3 > 0 and math.isfinite(o3):
-            oran = o3
-    if (not oran or not math.isfinite(oran)) and y > y_start:
-        inner_prev2 = tufe_map.get(y - 1) or {} if isinstance(tufe_map, dict) else {}
-        o4 = _tufe_latest_positive_oran_in_year_map(inner_prev2)
-        if o4 > 0 and math.isfinite(o4):
-            oran = o4
-    return oran if (oran and math.isfinite(oran)) else 0.0
+    if oran > 0 and math.isfinite(oran):
+        return oran
+    o2 = _reel_tufe_son_aciklanan_pozitif_once(tufe_map if isinstance(tufe_map, dict) else {}, y, artis_month)
+    if o2 > 0 and math.isfinite(o2):
+        return o2
+    return 0.0
 
 
 def _reel_donem_effective_yillik_for_ekstre(

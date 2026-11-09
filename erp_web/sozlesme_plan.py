@@ -103,35 +103,60 @@ def _tufe_ay(inner: dict, ay: int):
     return inner.get(str(ay))
 
 
+def _tufe_son_aciklanan_once(tufe: dict, y: int, artis_ay: int) -> float:
+    """Hedef (y, artis_ay) öncesi kronolojik en son pozitif oran; yoksa 0."""
+    try:
+        ty, tm = int(y), int(artis_ay)
+    except (TypeError, ValueError):
+        return 0.0
+    best = None
+    if not isinstance(tufe, dict):
+        return 0.0
+    for yk, inner in tufe.items():
+        try:
+            yy = int(yk)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(inner, dict):
+            continue
+        for mk, ow in inner.items():
+            try:
+                mm = int(mk)
+            except (TypeError, ValueError):
+                continue
+            if mm < 1 or mm > 12:
+                continue
+            if (yy, mm) >= (ty, tm):
+                continue
+            try:
+                ovv = float(ow or 0)
+            except (TypeError, ValueError):
+                ovv = 0.0
+            if ovv > 0 and math.isfinite(ovv):
+                if best is None or (yy, mm) > (best[0], best[1]):
+                    best = (yy, mm, ovv)
+    return float(best[2]) if best else 0.0
+
+
 def tufe_oran_bloga_giris(tufe: dict, sonraki_yil: int, artis_ay: int, baslangic_yil: int) -> float:
-    """_aylik_grid_contract_core ile aynı TÜFE yedek sırası.
+    """_reel_tufe_oran_yillik_gecis ile aynı TÜFE yedek sırası.
 
     sonraki_yil: bloğun takvim yılı (sözleşme yılı + blok indeksi).
+    baslangic_yil imza uyumu için korunur.
     """
+    _ = baslangic_yil
     inner = _tufe_yil(tufe, sonraki_yil)
     raw = _tufe_ay(inner, artis_ay)
     try:
         oran = float(raw or 0)
     except (TypeError, ValueError):
         oran = 0.0
-    if (not oran or not math.isfinite(oran)) and sonraki_yil > baslangic_yil:
-        prev = _tufe_yil(tufe, sonraki_yil - 1)
-        raw_p = _tufe_ay(prev, artis_ay)
-        try:
-            oran2 = float(raw_p or 0)
-        except (TypeError, ValueError):
-            oran2 = 0.0
-        if oran2 > 0 and math.isfinite(oran2):
-            oran = oran2
-    if not oran or not math.isfinite(oran):
-        o3 = _tufe_son_pozitif(inner)
-        if o3 > 0 and math.isfinite(o3):
-            oran = o3
-    if (not oran or not math.isfinite(oran)) and sonraki_yil > baslangic_yil:
-        o4 = _tufe_son_pozitif(_tufe_yil(tufe, sonraki_yil - 1))
-        if o4 > 0 and math.isfinite(o4):
-            oran = o4
-    return oran if (oran and math.isfinite(oran) and oran > 0) else 0.0
+    if oran > 0 and math.isfinite(oran):
+        return oran
+    o2 = _tufe_son_aciklanan_once(tufe if isinstance(tufe, dict) else {}, sonraki_yil, artis_ay)
+    if o2 > 0 and math.isfinite(o2):
+        return o2
+    return 0.0
 
 
 def _kart_oranlari(kart_net: float, nakit, banka) -> tuple[bool, float]:

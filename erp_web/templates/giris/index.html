@@ -6744,29 +6744,51 @@ function sozlesmelerReelManualGercekKayitMi(y, yStart, mv, prevEff, kartVal) {
     return true;
 }
 
-/** yil → yil+1 geçişi için TÜFE % (backend _aylik_grid_contract_core ile aynı yedekler). */
+/** Hedef ay öncesi kronolojik en son pozitif TÜFE % (backend _reel_tufe_son_aciklanan_pozitif_once). */
+function sozlesmelerTufeSonAciklananOnce(tufeListe, hedefYil, hedefAyNo) {
+    var bestKey = null;
+    var bestO = NaN;
+    if (!tufeListe || typeof tufeListe !== 'object') return NaN;
+    Object.keys(tufeListe).forEach(function (yk) {
+        var yy = parseInt(yk, 10);
+        if (isNaN(yy)) return;
+        var inner = tufeListe[yk];
+        if (!inner || typeof inner !== 'object') return;
+        Object.keys(inner).forEach(function (mk) {
+            var mm = parseInt(mk, 10);
+            if (isNaN(mm) || mm < 1 || mm > 12) return;
+            if (yy > hedefYil || (yy === hedefYil && mm >= hedefAyNo)) return;
+            var ovv = parseFloat(String(inner[mk]).replace(',', '.').trim());
+            if (isNaN(ovv) || ovv <= 0) return;
+            var key = yy * 100 + mm;
+            if (bestKey == null || key > bestKey) {
+                bestKey = key;
+                bestO = ovv;
+            }
+        });
+    });
+    return bestO;
+}
+
+/** yil → yil+1 geçişi için TÜFE % (backend _reel_tufe_oran_yillik_gecis ile aynı yedekler). */
 function sozlesmelerTufeOranYillikGecis(tufeListe, sonrakiYil, sozlesmeAyAdi, baslangicYil) {
     if (!tufeListe || !sozlesmeAyAdi || sonrakiYil == null) return NaN;
+    void baslangicYil;
     var oran = NaN;
     var inner = tufeListe[sonrakiYil];
     if (inner && typeof inner === 'object') {
         oran = sozlesmelerReelTufeOranOku(inner, sozlesmeAyAdi);
     }
-    if ((isNaN(oran) || oran <= 0) && sonrakiYil > baslangicYil) {
-        var innerPrev = tufeListe[sonrakiYil - 1];
-        if (innerPrev && typeof innerPrev === 'object') {
-            oran = sozlesmelerReelTufeOranOku(innerPrev, sozlesmeAyAdi);
-        }
-    }
-    if (isNaN(oran) || oran <= 0) {
-        var o3 = sozlesmelerTufeLatestPositiveInYear(inner);
-        if (!isNaN(o3) && o3 > 0) oran = o3;
-    }
-    if ((isNaN(oran) || oran <= 0) && sonrakiYil > baslangicYil) {
-        var o4 = sozlesmelerTufeLatestPositiveInYear(tufeListe[sonrakiYil - 1]);
-        if (!isNaN(o4) && o4 > 0) oran = o4;
-    }
-    return oran;
+    if (!isNaN(oran) && oran > 0) return oran;
+    var ayNo = NaN;
+    var idxAy = (typeof SOZLESME_TUFE_AY_ANAHTAR !== 'undefined' && Array.isArray(SOZLESME_TUFE_AY_ANAHTAR))
+        ? SOZLESME_TUFE_AY_ANAHTAR.indexOf(sozlesmeAyAdi)
+        : -1;
+    if (idxAy >= 0) ayNo = idxAy + 1;
+    if (isNaN(ayNo) || ayNo < 1 || ayNo > 12) return NaN;
+    var o2 = sozlesmelerTufeSonAciklananOnce(tufeListe, sonrakiYil, ayNo);
+    if (!isNaN(o2) && o2 > 0) return o2;
+    return NaN;
 }
 
 /**
