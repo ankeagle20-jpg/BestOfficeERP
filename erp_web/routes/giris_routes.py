@@ -629,7 +629,7 @@ def _panel_by_iso_from_tahsil_map(
                 "kalan": kalan_e,
                 "tahsil_tarih": prev_e.get("tahsil_tarih") or "",
             }
-        return duzeltilmis
+        return _panel_apply_pasif_kapanis_sonrasi_koruma(mid, duzeltilmis, existing)
     dagitim_isos = set()
     for a in payload.get("aylar") or []:
         if not isinstance(a, dict):
@@ -706,7 +706,7 @@ def _panel_by_iso_from_tahsil_map(
         for iso_m in dagitim_isos:
             if iso_m in by_iso:
                 by_iso[iso_m]["tahsil_tarih"] = tarih_s
-    return by_iso
+    return _panel_apply_pasif_kapanis_sonrasi_koruma(mid, by_iso, existing)
 
 
 def _ekstre_panel_filter_db_tahsil(musteri_id: int, panel_by_iso: dict | None) -> dict:
@@ -1875,6 +1875,60 @@ def _aylik_grid_son_borc_for_mid(musteri_id) -> tuple[date | None, dict]:
     except Exception:
         return None, dict(kyc or {})
     return son, dict(kyc or {})
+
+
+def _panel_apply_pasif_kapanis_sonrasi_koruma(mid, by_iso: dict, existing: dict) -> dict:
+    """Z=1 + pasif/iptal: kapanış/son_borc sonrası aylar existing'den birebir.
+
+    Üretim son_borc = kira_son_borc_ayi; yoksa (Hepsi/cap yok) kapanis_tarihi ayı kesit.
+    Aktif veya Z=0 veya kesit yok → by_iso aynen.
+    """
+    try:
+        mid_i = int(mid)
+    except (TypeError, ValueError):
+        return by_iso if isinstance(by_iso, dict) else {}
+    if mid_i <= 0:
+        return by_iso if isinstance(by_iso, dict) else {}
+    if not _reel_overlay_a_dar_ez_kyc(mid_i):
+        return by_iso if isinstance(by_iso, dict) else {}
+    son, kyc = _aylik_grid_son_borc_for_mid(mid_i)
+    durum = str((kyc or {}).get("durum") or "").strip().lower()
+    iptal = _musteri_iptal_mi((kyc or {}).get("iptal"))
+    if durum != "pasif" and not iptal:
+        return by_iso if isinstance(by_iso, dict) else {}
+    if not isinstance(son, date):
+        kap = _aylik_grid_coerce_date((kyc or {}).get("kapanis_tarihi"))
+        if kap is None:
+            return by_iso if isinstance(by_iso, dict) else {}
+        son = date(int(kap.year), int(kap.month), 1)
+    try:
+        son_m = date(int(son.year), int(son.month), 1)
+    except (TypeError, ValueError):
+        return by_iso if isinstance(by_iso, dict) else {}
+    out: dict = {}
+    for iso, cell in (by_iso or {}).items():
+        if not isinstance(cell, dict):
+            continue
+        try:
+            d = datetime.strptime(str(iso)[:10], "%Y-%m-%d").date()
+            cur = date(d.year, d.month, 1)
+        except Exception:
+            out[str(iso)] = cell
+            continue
+        if cur > son_m:
+            continue
+        out[date(cur.year, cur.month, 1).isoformat()] = cell
+    for iso, cell in (existing or {}).items():
+        if not isinstance(cell, dict):
+            continue
+        try:
+            d = datetime.strptime(str(iso)[:10], "%Y-%m-%d").date()
+            cur = date(d.year, d.month, 1)
+        except Exception:
+            continue
+        if cur > son_m:
+            out[date(cur.year, cur.month, 1).isoformat()] = dict(cell)
+    return out
 
 
 def _aylik_grid_should_skip_placeholder_collapse(
