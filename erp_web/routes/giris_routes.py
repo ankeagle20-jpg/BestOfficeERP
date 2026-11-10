@@ -2757,6 +2757,55 @@ def reel_tufe_zincir_acik(mid=None) -> bool:
     return mid_i in reel_tufe_zincir_midler()
 
 
+def tahsilat_donem_gorunum_midler() -> set:
+    """TAHSILAT_DONEM_GORUNUM_MIDLER: virgülle ayrılmış mid listesi. Her çağrıda env; önbellek yok.
+
+    Kati ayrıştırma: ',' böl; öğe yalnız rakam (isdigit); boşluk/harf/işaret → yok say;
+    en fazla 500 geçerli öğe; boş/None → boş küme. Hata fırlatmaz.
+    REEL_TUFE_ZINCIR_MIDLER ile aynı desen; bayraklar birbirinden bağımsız.
+    """
+    raw = os.environ.get("TAHSILAT_DONEM_GORUNUM_MIDLER")
+    if raw is None or raw == "":
+        return set()
+    out = set()
+    for part in str(raw).split(","):
+        if not part.isdigit():
+            continue
+        out.add(int(part))
+        if len(out) >= 500:
+            break
+    return out
+
+
+def tahsilat_donem_gorunum_acik(mid=None) -> bool:
+    """TAHSILAT_DONEM_GORUNUM strip sonrası tam '1' → tüm mid; yoksa MIDLER listesi.
+
+    mid=None → yalnız global bayrak. Her çağrıda env okunur (önbellek yok).
+    REEL_TUFE_ZINCIR bayraklarından bağımsız.
+    """
+    raw = os.environ.get("TAHSILAT_DONEM_GORUNUM")
+    if raw is not None and str(raw).strip() == "1":
+        return True
+    if mid is None:
+        return False
+    try:
+        mid_i = int(mid)
+    except (TypeError, ValueError):
+        return False
+    return mid_i in tahsilat_donem_gorunum_midler()
+
+
+def _aylik_grid_payload_tahsilat_donem_stamp(musteri_id, payload):
+    """FE boolean: tahsilat_donem_gorunum (canlı env; önbellekten serviste tazele)."""
+    if not isinstance(payload, dict):
+        return payload
+    try:
+        payload["tahsilat_donem_gorunum"] = bool(tahsilat_donem_gorunum_acik(musteri_id))
+    except Exception:
+        payload["tahsilat_donem_gorunum"] = False
+    return payload
+
+
 def _reel_overlay_a_dar_ez_kyc(mid=None) -> bool:
     """Canlı: reel_tufe_zincir_acik(mid). Test: _REEL_OVERLAY_A_DAR_EZ_KYC True/False override."""
     if _REEL_OVERLAY_A_DAR_EZ_KYC is not None:
@@ -4206,6 +4255,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
         "aylar": aylar,
         "compute_rev": AYLIK_GRID_COMPUTE_REV,
         "reel_tufe_zincir": 1 if _reel_overlay_a_dar_ez_kyc(musteri_id) else 0,
+        "tahsilat_donem_gorunum": bool(tahsilat_donem_gorunum_acik(musteri_id)),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
     # Z=1: son açıklanan TÜFE oranı parmak izi — yeni oran girilince cache uyumsuz → rebuild.
@@ -4744,6 +4794,8 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
 
 def _aylik_grid_payload_reel_overlay_from_db(musteri_id: int, payload: dict | None) -> dict | None:
     """Önbellekten dönen payload'a DB'deki reel dönem tutarlarını uygular."""
+    if isinstance(payload, dict):
+        _aylik_grid_payload_tahsilat_donem_stamp(musteri_id, payload)
     if not payload or not isinstance(payload.get("aylar"), list):
         return payload
     manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
@@ -12105,6 +12157,7 @@ def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=
         return payload
     try:
         mid = int(musteri_id)
+        _aylik_grid_payload_tahsilat_donem_stamp(mid, payload)
         panel_db = panel_by_iso if panel_by_iso is not None else _load_musteri_panel_by_iso(mid)
         if tahsil_rows is None:
             tahsil_rows = _ekstre_tahsil_rows_for_musteri(mid)
@@ -18627,6 +18680,10 @@ def api_aylik_grid_cache():
                         try:
                             _aylik_grid_mem_set(musteri_id, mem_hit[1])
                         except (TypeError, ValueError):
+                            pass
+                        try:
+                            _aylik_grid_payload_tahsilat_donem_stamp(musteri_id, mem_hit[1])
+                        except Exception:
                             pass
                         _skip_body = {
                             "ok": True,

@@ -24045,13 +24045,49 @@ function girisTahsilatYilAyPanelHtml(donemYil, ayKeys) {
     }
     return html;
 }
+function girisTahsilatDonemGorunumAktifMi(cacheObj) {
+    var sco = cacheObj;
+    if (sco == null && typeof window !== 'undefined') sco = window.__sozlesmelerAylikSonCacheObj;
+    try {
+        var v = sco && sco.tahsilat_donem_gorunum;
+        if (v === true || v === 1 || v === '1') return true;
+        if (parseInt(v, 10) === 1) return true;
+    } catch (_eDg) {}
+    return false;
+}
+function girisTahsilatArtisAyNum(cacheObj) {
+    var sco = cacheObj;
+    if (sco == null && typeof window !== 'undefined') sco = window.__sozlesmelerAylikSonCacheObj;
+    try {
+        if (sco && sco.artis_ay != null && sco.artis_ay !== '') {
+            var aa = parseInt(sco.artis_ay, 10);
+            if (!isNaN(aa) && aa >= 1 && aa <= 12) return aa;
+        }
+    } catch (_eAa) {}
+    try {
+        var basEl = document.getElementById('sozlesme_baslangic');
+        var basStr = basEl && basEl.value ? String(basEl.value).trim() : '';
+        if (!basStr && sco && sco.baslangic) basStr = String(sco.baslangic).trim();
+        if (basStr && typeof sozlesmelerReelDonemAnchor === 'function') {
+            var an = sozlesmelerReelDonemAnchor(basStr);
+            if (an && typeof an.month === 'number') return an.month + 1;
+        }
+    } catch (_eAb) {}
+    return 1;
+}
 function girisTahsilatYilAyKeysFiltered(donemYil) {
     var panelYil = parseInt(donemYil, 10);
     var keys = [];
     var sco = window.__sozlesmelerAylikSonCacheObj;
     /* Z=1: panel yılı = dönem yılı → artış ayından 12 ay (takvim Oca–Ara filtresi yok). Z=0: eski. */
     var z1Keys = (typeof girisReelTufeZincirAktifMi === 'function') && girisReelTufeZincirAktifMi();
-    if (z1Keys && !isNaN(panelYil)) {
+    /* Bayrak: Z=0 + artis_ay!=1 → ayni sozlesmeReelDonemAyKeys yolu; Ocak artisi takvimde kalir. */
+    var donemGorunumKeys = false;
+    if (!z1Keys && (typeof girisTahsilatDonemGorunumAktifMi === 'function') && girisTahsilatDonemGorunumAktifMi(sco)) {
+        var artisAyN = (typeof girisTahsilatArtisAyNum === 'function') ? girisTahsilatArtisAyNum(sco) : 1;
+        if (artisAyN !== 1) donemGorunumKeys = true;
+    }
+    if ((z1Keys || donemGorunumKeys) && !isNaN(panelYil)) {
         var basElZ = document.getElementById('sozlesme_baslangic');
         var basStrZ = basElZ && basElZ.value ? basElZ.value.trim() : '';
         if (!basStrZ && sco && sco.baslangic) basStrZ = String(sco.baslangic).trim();
