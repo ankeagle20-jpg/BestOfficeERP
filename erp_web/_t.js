@@ -14545,8 +14545,10 @@ function girisTahsilatYilAyPanelHucreSatirBul(yNum, mNum) {
         ayKey: akEsas
     };
 }
-/** FE Kural A: |AYLIK_TAH| / tahsil set / cache tahsil_edildi → tutar farkına bakmadan tam kapalı. */
-function sozlesmeAylikMarkerTamKapandiMi(yil, ay) {
+/** FE Kural A kismi esigi (BE KURAL_A_KISMI_ESIK ile ayni): eksik oran <= 0.17 → tam. */
+var KURAL_A_KISMI_ESIK = 0.17;
+/** FE Kural A: |AYLIK_TAH| / tahsil set / cache tahsil_edildi; eksik oran > esik ise kismi. */
+function sozlesmeAylikMarkerTamKapandiMi(yil, ay, brutOpt, tahOpt) {
     var yNum = parseInt(yil, 10);
     var mNum = parseInt(ay, 10);
     if (isNaN(yNum) || isNaN(mNum) || mNum < 1 || mNum > 12) return false;
@@ -14557,29 +14559,40 @@ function sozlesmeAylikMarkerTamKapandiMi(yil, ay) {
         ? sozlesmeAylikAyKeyNormalize(ayKey)
         : ayKey;
     if (!ayKeyNorm) return false;
+    var marked = false;
     try {
         if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined'
             && sozlesmeTahsilEdilenAyAnahtarlari
             && sozlesmeTahsilEdilenAyAnahtarlari.has
             && sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm)) {
-            return true;
+            marked = true;
         }
     } catch (_eSet) {}
-    try {
-        var sco = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
-        var aylar = sco && Array.isArray(sco.aylar) ? sco.aylar : null;
-        if (aylar) {
-            for (var i = 0; i < aylar.length; i++) {
-                var a = aylar[i];
-                if (!a || !a.tahsil_edildi) continue;
-                var akn = (typeof sozlesmeAylikAyKeyNormalize === 'function')
-                    ? sozlesmeAylikAyKeyNormalize(String(a.ay_key || (a.yil + '-' + a.ay)))
-                    : String(a.ay_key || (a.yil + '-' + a.ay));
-                if (akn === ayKeyNorm) return true;
+    if (!marked) {
+        try {
+            var sco = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
+            var aylar = sco && Array.isArray(sco.aylar) ? sco.aylar : null;
+            if (aylar) {
+                for (var i = 0; i < aylar.length; i++) {
+                    var a = aylar[i];
+                    if (!a || !a.tahsil_edildi) continue;
+                    var akn = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+                        ? sozlesmeAylikAyKeyNormalize(String(a.ay_key || (a.yil + '-' + a.ay)))
+                        : String(a.ay_key || (a.yil + '-' + a.ay));
+                    if (akn === ayKeyNorm) { marked = true; break; }
+                }
             }
-        }
-    } catch (_eSco) {}
-    return false;
+        } catch (_eSco) {}
+    }
+    if (!marked) return false;
+    var tolKa = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var brutKa = Math.round((parseFloat(brutOpt) || 0) * 100) / 100;
+    var tahKa = Math.round((parseFloat(tahOpt) || 0) * 100) / 100;
+    if (brutKa > tolKa && (brutOpt != null || tahOpt != null)) {
+        var minTam = Math.round(brutKa * (1 - KURAL_A_KISMI_ESIK) * 100) / 100;
+        if (tahKa + tolKa < minTam) return false;
+    }
+    return true;
 }
 
 /** Tahsilat paneli Kalan/Tahsil/Reel → grid rengi (panel sütunları esas). */
@@ -14603,28 +14616,26 @@ function girisTahsilatYilAyPaneldenHucreDurum(yil, ay) {
             return { tip: 'kirmizi', brut: brutB0, kalan: kalB0, tahsil: 0, goster: brutB0, odenen: 0 };
         }
     }
-    /* FE Kural A: marker/tahsil set/cache tahsil_edildi → tutar farkını yok say (bilinçli kısmi hariç). */
-    if (!d.__kismi_tahsil_girildi && typeof sozlesmeAylikMarkerTamKapandiMi === 'function'
-        && sozlesmeAylikMarkerTamKapandiMi(yNum, mNum)) {
+    /* FE Kural A: marker + eksik oran <= KURAL_A_KISMI_ESIK → yesil; ustu kismi yolu. */
+    if (!d.__kismi_tahsil_girildi && typeof sozlesmeAylikMarkerTamKapandiMi === 'function') {
         var brutMk = (typeof girisTahsilatYilAyKiraTutar === 'function')
             ? girisTahsilatYilAyKiraTutar(donemHit, hit.ayKey) : 0;
         if (!(brutMk > tol)) brutMk = girisTahsilatYilAyPanelReelBrutAl(d, donemHit, hit.ayKey, null);
         brutMk = Math.round((brutMk > tol ? brutMk : 0) * 100) / 100;
-        if (!(brutMk > tol)) {
-            var tahMk0 = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
-            if (tahMk0 > tol) brutMk = tahMk0;
-        }
-        if (brutMk > tol) d.aylik_tutar = brutMk;
         var tahMk = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
-        var odMk = brutMk > tol ? brutMk : tahMk;
-        return {
-            tip: 'yesil',
-            brut: odMk > tol ? odMk : brutMk,
-            kalan: 0,
-            tahsil: tahMk > tol ? tahMk : odMk,
-            goster: odMk > tol ? odMk : brutMk,
-            odenen: odMk > tol ? odMk : tahMk
-        };
+        if (!(brutMk > tol) && tahMk > tol) brutMk = tahMk;
+        if (sozlesmeAylikMarkerTamKapandiMi(yNum, mNum, brutMk, tahMk)) {
+            if (brutMk > tol) d.aylik_tutar = brutMk;
+            var odMk = brutMk > tol ? brutMk : tahMk;
+            return {
+                tip: 'yesil',
+                brut: odMk > tol ? odMk : brutMk,
+                kalan: 0,
+                tahsil: tahMk > tol ? tahMk : odMk,
+                goster: odMk > tol ? odMk : brutMk,
+                odenen: odMk > tol ? odMk : tahMk
+            };
+        }
     }
     var brut = (typeof girisTahsilatYilAyKiraTutar === 'function')
         ? girisTahsilatYilAyKiraTutar(donemHit, hit.ayKey) : 0;
@@ -14635,7 +14646,10 @@ function girisTahsilatYilAyPaneldenHucreDurum(yil, ay) {
         d.aylik_tutar = brut;
     }
     var tah = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
-    if (!d.__kismi_tahsil_girildi && brut > tol && tah > tol && tah < brut - tol) tah = brut;
+    if (!d.__kismi_tahsil_girildi && brut > tol && tah > tol && tah < brut - tol) {
+        var minTamFe = Math.round(brut * (1 - KURAL_A_KISMI_ESIK) * 100) / 100;
+        if (tah + tol >= minTamFe) tah = brut;
+    }
     var kalan = parseFloat(d.kalan);
     if (!isFinite(kalan) || kalan < 0) {
         kalan = Math.max(Math.round((brut - tah) * 100) / 100, 0);

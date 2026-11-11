@@ -444,8 +444,10 @@ def _load_musteri_panel_by_iso(musteri_id: int, tahsil_rows=None, ekstre_batch=N
                 pay_t = round(float(_pay_raw), 2) if _pay_raw is not None else None
             except (TypeError, ValueError):
                 pay_t = None
-            # Marker + Kural A → kayıtlı pk'ye güven, düzeltmeyi atla.
-            if not _grid_payload_marker_panel_tam_kapandi(mk_t, pb, yy_m, None, tol, pay_t=pay_t):
+            # Marker + Kural A → kayıtlı pk'ye güven, düzeltmeyi atla (panel esik yok).
+            if not _grid_payload_marker_panel_tam_kapandi(
+                mk_t, pb, yy_m, None, tol, pay_t=pay_t, kismi_esik=False
+            ):
                 pk = round(max(pb - pt, 0), 2)
         out[iso_key] = {
             "aylik": pb,
@@ -618,7 +620,9 @@ def _panel_by_iso_from_tahsil_map(
                 pay_e = round(float(_pay_raw_e), 2) if _pay_raw_e is not None else None
             except (TypeError, ValueError):
                 pay_e = None
-            if _grid_payload_marker_panel_tam_kapandi(mk_e, brut_e, yy_e, None, tol, pay_t=pay_e):
+            if _grid_payload_marker_panel_tam_kapandi(
+                mk_e, brut_e, yy_e, None, tol, pay_t=pay_e, kismi_esik=False
+            ):
                 kalan_e = 0.0
             else:
                 kalan_e = round(max(brut_e - tah_e, 0), 2) if brut_e > tol else 0.0
@@ -659,8 +663,10 @@ def _panel_by_iso_from_tahsil_map(
             pay_tm = round(float(_pay_raw_m), 2) if _pay_raw_m is not None else None
         except (TypeError, ValueError):
             pay_tm = None
-        # Kural A: |AYLIK_TAH| marker varsa tutar farkına bakmadan kalan=0.
-        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_tm):
+        # Kural A panel: marker → kalan=0 (kismi_esik yok; grid ayri).
+        if _grid_payload_marker_panel_tam_kapandi(
+            mk_t, brut, yy_m, None, tol, pay_t=pay_tm, kismi_esik=False
+        ):
             kalan = 0.0
         else:
             _eff_uygulandi = False
@@ -12010,6 +12016,9 @@ def grid_kismi_goster_aktif(musteri_id) -> bool:
 
 # Kural A daraltma esigi: TAH tutari brut - bu fark icindeyse tam kapali sayilir.
 KURAL_A_DARALTMA_ESIK_TL = 1.00
+# Kural A kismi esigi: eksik oran = (brut-tahsil)/brut. <= esik → tam (KDV/TUFE bandi,
+# ~brut/1.2); > esik → kismi (turuncu, kalan=brut-tahsil). Ortam degiskeni yok.
+KURAL_A_KISMI_ESIK = 0.17
 
 
 def _grid_payload_marker_panel_tam_kapandi(
@@ -12020,11 +12029,14 @@ def _grid_payload_marker_panel_tam_kapandi(
     tol: float,
     pay_t: float | None = None,
     daralt: bool = False,
+    kismi_esik: bool = True,
 ) -> bool:
     """|AYLIK_TAH| marker reel dönem tutarını (panel) karşılıyorsa grid tam ödendi say.
 
     İstisna: açık |AYLIK_PAY| tutarı (pay_t) verilmiş ve brütten tol dışında
     azsa bilinçli kısmi sayılır — Kural A tam kapama uygulanmaz.
+    kismi_esik=True (grid): eksik oran > KURAL_A_KISMI_ESIK ise kısmi.
+    kismi_esik=False (panel/ekstre): eski 7908721 (marker → tam; panel/ekstre değişmez).
     """
     mk_t = round(float(mk_t or 0), 2)
     if mk_t <= tol:
@@ -12050,10 +12062,16 @@ def _grid_payload_marker_panel_tam_kapandi(
             brut_d = 0.0
         if brut_d > tol and mk_t < brut_d - KURAL_A_DARALTMA_ESIK_TL:
             return False
-    # |AYLIK_TAH| marker'lı tahsilat varsa
-    # tutar farkına bakmadan tam ödendi say
-    # (reel tutar değişiminden kaynaklanan
-    # farkları kısmi gösterme)
+    if kismi_esik:
+        try:
+            brut_e = round(float(brut or 0), 2)
+        except (TypeError, ValueError):
+            brut_e = 0.0
+        if brut_e > tol:
+            # min tam = brut*(1-esik); mk+tol altindaysa gercek kismi.
+            min_tam = round(brut_e * (1.0 - float(KURAL_A_KISMI_ESIK)), 2)
+            if mk_t + float(tol) < min_tam:
+                return False
     return True
 
 
@@ -12346,6 +12364,7 @@ def _ekstre_tahsil_alacak_hucre(
         tol,
         pay_t=pay_c3,
         daralt=grid_kismi_goster_aktif(musteri_id),
+        kismi_esik=False,
     ):
         return hedef
     return round(min(out, hedef), 2)
@@ -14215,6 +14234,7 @@ def _ekstre_acilis_bakiyesi_fifo(
                     float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                     pay_t=pay_c2,
                     daralt=grid_kismi_goster_aktif(musteri_id),
+                    kismi_esik=False,
                 ):
                     need[iso_m] = 0.0
             return
@@ -15359,6 +15379,7 @@ def _cari_ekstre_hareketler(
                         float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                         pay_t=pay_c2,
                         daralt=grid_kismi_goster_aktif(musteri_id),
+                        kismi_esik=False,
                     ):
                         need[iso_m] = 0.0
                 return
@@ -15580,6 +15601,7 @@ def _cari_ekstre_hareketler(
                 float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                 pay_t=pay_c1,
                 daralt=grid_kismi_goster_aktif(musteri_id),
+                kismi_esik=False,
             )
             if extra_borc_iso > tol_f:
                 # Panel yalnız normal kira tabanını bilir; ekstra fatura tahsilatını ezmesine izin verme.

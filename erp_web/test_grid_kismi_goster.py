@@ -63,7 +63,9 @@ def test_bayrak():
 
 def test_daraltma_birim():
     f = gr._grid_payload_marker_panel_tam_kapandi
-    check("daralt yok eski kural A", f(720.0, 1454.71, 2026, None, TOL) is True)
+    # KURAL_A_KISMI_ESIK=0.17: 720/1454.71 eksik oran ~0.50 → kismi (eski "hep tam" kalkti)
+    check("daralt yok esik ustu kismi", f(720.0, 1454.71, 2026, None, TOL) is False)
+    check("daralt yok esik alti tam", f(1207.41, 1454.71, 2026, None, TOL) is True)
     check("daralt var kucuk TAH", f(720.0, 1454.71, 2026, None, TOL, daralt=True) is False)
     check("daralt var tam TAH (153 tipi)", f(540.0, 540.0, 2024, None, TOL, daralt=True) is True)
     check("daralt esik ici (brut-0.50)", f(1454.21, 1454.71, 2026, None, TOL, daralt=True) is True)
@@ -96,9 +98,10 @@ def _apply_867():
 def test_payload_867():
     with _Env():
         a = _apply_867()
-        check("bayrak kapali kalan 0", a["kalan_tutar_kdv"] == 0.0, a)
-        check("bayrak kapali tahsil_edildi", a["tahsil_edildi"] is True, a)
-        check("bayrak kapali kismi degil", a["kismi_tahsilat"] is False, a)
+        # global esik: 720/1454.71 → kismi (bayrak kapali olsa da)
+        check("bayrak kapali kalan 734.71", a["kalan_tutar_kdv"] == 734.71, a)
+        check("bayrak kapali tahsil_edildi degil", a["tahsil_edildi"] is False, a)
+        check("bayrak kapali kismi", a["kismi_tahsilat"] is True, a)
     with _Env(enabled="1"):
         a = _apply_867()
         check("bayrak acik kalan 734.71", a["kalan_tutar_kdv"] == 734.71, a)
@@ -107,7 +110,8 @@ def test_payload_867():
         check("bayrak acik odenen 720", float(a["odenen_tutar_kdv"]) == 720.0, a)
     with _Env(enabled="1", ids="153"):
         a = _apply_867()
-        check("allowlist disi sifir etki", a["kalan_tutar_kdv"] == 0.0 and a["tahsil_edildi"] is True, a)
+        # allowlist disi: daralt yok ama global esik hâlâ kismi
+        check("allowlist disi esik kismi", a["kalan_tutar_kdv"] == 734.71 and a["kismi_tahsilat"] is True, a)
 
 
 def test_kaynak():
@@ -115,6 +119,7 @@ def test_kaynak():
     check("kaynak bayrak fn", "def grid_kismi_goster_aktif" in src)
     check("kaynak daralt param", "pay_t: float | None = None,\n    daralt: bool = False," in src)
     check("kaynak esik", "KURAL_A_DARALTMA_ESIK_TL = 1.00" in src)
+    check("kaynak kismi esik", "KURAL_A_KISMI_ESIK = 0.17" in src)
     # panel fonksiyonlarina daralt gecilmemis (kapsam: panel zaten dogru)
     panel_bolum = src[src.find("def _load_musteri_panel_by_iso"):src.find("def _ekstre_panel_filter_db_tahsil")]
     check("panel kapsami disinda", "daralt=" not in panel_bolum)
