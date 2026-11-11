@@ -22310,13 +22310,55 @@ function girisDondurmaYilToplam(yy) {
     return Math.round(sum * 100) / 100;
 }
 function girisTahsilatYilBorcTek(yy) {
-    var aylikTop = girisTahsilatYilAylikTek(yy);
-    if (aylikTop <= 0) return 0;
-    var planToplam = girisPlanYilToplam(yy);
-    if (planToplam != null) return planToplam;
-    var dondurmaToplam = girisDondurmaYilToplam(yy);
-    if (dondurmaToplam != null) return dondurmaToplam;
-    return Math.round(aylikTop * 12 * 100) / 100;
+    try {
+        if (typeof girisPlanYilToplam === 'function') {
+            var planToplam = girisPlanYilToplam(yy);
+            if (planToplam != null) return planToplam;
+        }
+    } catch (_ePlT) {}
+    try {
+        if (typeof girisDondurmaYilToplam === 'function') {
+            var dondurmaToplam = girisDondurmaYilToplam(yy);
+            if (dondurmaToplam != null) return dondurmaToplam;
+        }
+    } catch (_eDnT) {}
+    var keys = [];
+    try {
+        if (typeof girisTahsilatYilAyKeysFiltered === 'function') {
+            keys = girisTahsilatYilAyKeysFiltered(yy) || [];
+        }
+    } catch (_eKy) { keys = []; }
+    if (!keys.length) return 0;
+    var sum = 0;
+    var nPos = 0;
+    for (var i = 0; i < keys.length; i++) {
+        var ak = keys[i];
+        var t = 0;
+        try {
+            var yaG = (typeof girisTahsilatAyKeyToYilAy === 'function')
+                ? girisTahsilatAyKeyToYilAy(ak) : null;
+            if (yaG && typeof girisAylikGridCacheAyBrut === 'function') {
+                var gb = girisAylikGridCacheAyBrut(yaG.yil, yaG.ay);
+                if (gb != null && gb > 0) t = gb;
+            }
+        } catch (_eGb) { t = 0; }
+        if (!(t > 0)) {
+            try {
+                if (typeof girisTahsilatYilAyKiraTutar === 'function') {
+                    t = girisTahsilatYilAyKiraTutar(yy, ak);
+                }
+            } catch (_eKt) { t = 0; }
+        }
+        if (!(t > 0) && typeof girisTahsilatYilAylikTek === 'function') {
+            try { t = girisTahsilatYilAylikTek(yy); } catch (_eAy) { t = 0; }
+        }
+        t = parseFloat(t);
+        if (!isFinite(t) || t <= 0) continue;
+        sum += t;
+        nPos += 1;
+    }
+    if (nPos <= 0) return 0;
+    return Math.round(sum * 100) / 100;
 }
 function girisTahsilatYilYilListesi() {
     var liste = girisAylikSatirYilYilListesi();
