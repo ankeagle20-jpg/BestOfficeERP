@@ -91,8 +91,8 @@ def test_veri_varsa_gorunur():
     os.environ["KAPANIS_N0_KAPANIS_AYI_HARIC"] = "1"
     try:
         check(
-            "reel_istisna",
-            donem_yil_satiri_gosterilsin(2026, kyc, reel_map={2026: 1071.54}) is True,
+            "reel_only_gizli",
+            donem_yil_satiri_gosterilsin(2026, kyc, reel_map={2026: 1071.54}) is False,
         )
         check(
             "panel_istisna",
@@ -131,10 +131,14 @@ def test_hepsi_donem_sonu_bayrak_kapali():
     check("hepsi_son_2023_11", son == date(2023, 11, 1), str(son))
     # 2023 donem bas=Ara-2023 > Kas-2023 → gizli (veri yok)
     check("hepsi_2023_gizli", donem_yil_satiri_gosterilsin(2023, kyc) is False)
-    # reel varsa gorunur
+    # yalniz reel kaydi gostermeye yetmez
     check(
-        "hepsi_2023_reel_kalir",
-        donem_yil_satiri_gosterilsin(2023, kyc, reel_map={2023: 1.0}) is True,
+        "hepsi_2023_reel_gizli",
+        donem_yil_satiri_gosterilsin(2023, kyc, reel_map={2023: 1.0}) is False,
+    )
+    check(
+        "hepsi_2023_marker_kalir",
+        donem_yil_satiri_gosterilsin(2023, kyc, marker_by_iso={"2024-01-01": 10.0}) is True,
     )
 
 
@@ -155,8 +159,15 @@ def test_n_ay_ve_z_bagimsiz():
     try:
         check("z1_ayni_gizli", donem_yil_satiri_gosterilsin(2025, kyc) is False)
         check(
-            "z1_reel_kalir",
-            donem_yil_satiri_gosterilsin(2025, kyc, reel_map={2025: 10.0}) is True,
+            "z1_reel_gizli",
+            donem_yil_satiri_gosterilsin(2025, kyc, reel_map={2025: 10.0}) is False,
+        )
+        check(
+            "z1_panel_kalir",
+            donem_yil_satiri_gosterilsin(
+                2025, kyc, panel_by_iso={"2025-12-01": {"tahsil": 10.0}}
+            )
+            is True,
         )
     finally:
         os.environ.pop("REEL_TUFE_ZINCIR", None)
@@ -250,11 +261,17 @@ assert('2025_kalir', girisPasifDonemYilSatiriGosterilsinMi(2025, {
   durum:'pasif', kapanis_tarihi:'2026-03-12', kapanis_sonrasi_borc_ay:0,
   giris_iso:'2024-06-12', basStr:'2024-06-12', artisAy:6
 }) === true);
-// veri istisna
-assert('veri_kalir', girisPasifDonemYilSatiriGosterilsinMi(2026, {
+// yalniz reel → gizli
+assert('reel_only_gizli', girisPasifDonemYilSatiriGosterilsinMi(2026, {
   durum:'pasif', kapanis_tarihi:'2026-03-12', kapanis_sonrasi_borc_ay:0,
   giris_iso:'2024-06-12', basStr:'2024-06-12', artisAy:6,
   reelMap:{2026: 100}
+}) === false);
+// marker/tahsil istisna
+assert('veri_kalir', girisPasifDonemYilSatiriGosterilsinMi(2026, {
+  durum:'pasif', kapanis_tarihi:'2026-03-12', kapanis_sonrasi_borc_ay:0,
+  giris_iso:'2024-06-12', basStr:'2024-06-12', artisAy:6,
+  markerSet:{has:function(k){ return String(k).indexOf('2026-7')>=0 || String(k).indexOf('2026-07')>=0; }}
 }) === true);
 // Hepsi donem sonu
 assert('hepsi_gizli', girisPasifDonemYilSatiriGosterilsinMi(2023, {

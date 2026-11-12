@@ -78,12 +78,14 @@ def donem_yilinda_veri_var(
     pay_by_iso: Mapping[str, Any] | None = None,
     fatura_ym: Iterable[str] | None = None,
 ) -> bool:
-    """Donem yilinda odeme/tahsil/fatura/marker/reel/nakit-banka var mi."""
+    """Donem yilinda tahsil/odeme/fatura/marker/nakit-banka var mi.
+
+    reel_map parametresi uyumluluk icin kalir; yalniz reel kaydi VERİ sayilmaz
+    (pasif/iptal kapanis sonrasi donem satirini gostermeye yetmez).
+    """
     bas = donem_baslangic(donem_yil, artis_ay)
     months = [_add_months(bas, i) for i in range(12)]
-    rm = reel_map or {}
-    if _f(rm.get(donem_yil)) > _TOL or _f(rm.get(str(donem_yil))) > _TOL:
-        return True
+    _ = reel_map  # bilinçli: reel-only istisna kaldirildi
     fat_set = {str(x)[:7] for x in (fatura_ym or []) if x}
     for m in months:
         iso = m.isoformat()
