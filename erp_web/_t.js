@@ -13575,6 +13575,173 @@ function girisAylikKiraToplamGuncelle() {
         }
     } catch (_eTpGrid) {}
 }
+/** Hepsi gorunum: sozlesme yili son borc ayi (dahil). Borc hesabini degistirmez. */
+function girisHepsiSozlesmeYiliSonBorcAyi(girisDate, kapDate) {
+    if (!girisDate || !kapDate || isNaN(girisDate.getTime()) || isNaN(kapDate.getTime())) return null;
+    var anchor = girisDate.getMonth() + 1;
+    var yearEndM = (anchor === 1) ? 12 : (anchor - 1);
+    var kM = kapDate.getMonth() + 1;
+    var deltaH;
+    if (kM === yearEndM) deltaH = 0;
+    else if (kM < yearEndM) deltaH = yearEndM - kM;
+    else deltaH = 12 - kM + yearEndM;
+    return new Date(kapDate.getFullYear(), kapDate.getMonth() + deltaH, 1);
+}
+/** Pasif/iptal gorunum son borc ayi (dahil). Hepsi+bayrak0'da da hepsi formulu. */
+function girisPasifGorunumSonBorcAyInclusive(opts) {
+    opts = opts || {};
+    var durum = String(opts.durum != null ? opts.durum : ((document.getElementById('musteri_durum') || {}).value || '')).toLowerCase().trim();
+    var iptal = opts.iptal;
+    if (iptal == null && typeof girisFormMusteriIptalMi === 'function') iptal = girisFormMusteriIptalMi();
+    if (iptal === true || iptal === 1 || iptal === '1' || durum === 'iptal') return null;
+    if (durum !== 'pasif') return null;
+    var kapRaw = opts.kapanis_tarihi != null ? opts.kapanis_tarihi : ((document.getElementById('kapanis_tarihi') || {}).value || '');
+    var kap = kapRaw ? (parseTarihStr(String(kapRaw).trim()) || new Date(String(kapRaw).trim())) : null;
+    if (!kap || isNaN(kap.getTime())) return null;
+    var ekAy = (opts.kapanis_sonrasi_borc_ay !== undefined)
+        ? kapanisSonrasiBorcAyDegeri(opts.kapanis_sonrasi_borc_ay)
+        : ((typeof formKapanisSonrasiBorcAy === 'function') ? formKapanisSonrasiBorcAy() : null);
+    if (ekAy !== null && ekAy !== undefined) {
+        var n0Haric = !!(typeof window !== 'undefined' && window.KAPANIS_N0_KAPANIS_AYI_HARIC);
+        var nDahil = !!(typeof window !== 'undefined' && window.KAPANIS_N_KAPANIS_AYI_DAHIL);
+        var delta = ekAy;
+        if (n0Haric && ekAy === 0) delta = -1;
+        else if (n0Haric && nDahil && ekAy >= 1) delta = ekAy - 1;
+        return new Date(kap.getFullYear(), kap.getMonth() + delta, 1);
+    }
+    var gIso = opts.giris_iso != null ? opts.giris_iso : ((typeof girisTarihiFormdanISO === 'function') ? girisTarihiFormdanISO() : '');
+    var gH = gIso ? (parseTarihStr(String(gIso)) || new Date(String(gIso))) : null;
+    if (!gH || isNaN(gH.getTime())) return null;
+    return girisHepsiSozlesmeYiliSonBorcAyi(gH, kap);
+}
+/** Donem yilinin baslangic ayi (artis ayi). */
+function girisPasifDonemYilDonemBas(donemYil, basStr, artisAy) {
+    var y = parseInt(donemYil, 10);
+    if (isNaN(y)) return null;
+    if (artisAy != null && !isNaN(parseInt(artisAy, 10))) {
+        var am = parseInt(artisAy, 10);
+        if (am >= 1 && am <= 12) return new Date(y, am - 1, 1);
+    }
+    basStr = basStr != null ? String(basStr) : '';
+    if (!basStr) {
+        try {
+            var basEl = document.getElementById('sozlesme_baslangic');
+            basStr = (basEl && basEl.value) ? String(basEl.value).trim() : '';
+        } catch (_eBas) { basStr = ''; }
+    }
+    if (basStr && typeof sozlesmeReelDonemAyKeys === 'function') {
+        var keys = sozlesmeReelDonemAyKeys(basStr, y) || [];
+        if (keys.length) {
+            var ya0 = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(keys[0]) : null;
+            if (ya0 && !isNaN(ya0.yil) && !isNaN(ya0.ay)) return new Date(ya0.yil, ya0.ay - 1, 1);
+            var mm0 = String(keys[0]).match(/^(\d{4})-(\d{1,2})$/);
+            if (mm0) return new Date(parseInt(mm0[1], 10), parseInt(mm0[2], 10) - 1, 1);
+        }
+    }
+    if (basStr && typeof sozlesmelerReelDonemAnchor === 'function') {
+        var a = sozlesmelerReelDonemAnchor(basStr);
+        if (a) return new Date(y, a.month, 1);
+    }
+    return null;
+}
+/** Donem yilinda gercek veri (odeme/tahsil/fatura/marker/reel/nakit/banka) var mi. */
+function girisPasifDonemYilindaVeriVarMi(donemYil, ctx) {
+    ctx = ctx || {};
+    var yy = parseInt(donemYil, 10);
+    if (isNaN(yy)) return false;
+    var tol = 0.05;
+    var dbMap = ctx.reelDbMap || (typeof window !== 'undefined' && window.__musteriReelDonemDbMap) || {};
+    if ((parseFloat(dbMap[yy]) || parseFloat(dbMap[String(yy)]) || 0) > tol) return true;
+    var mapRef = ctx.reelMap || (typeof window !== 'undefined' && window.__musteriReelDonemTutarlari) || {};
+    if ((parseFloat(mapRef[yy]) || parseFloat(mapRef[String(yy)]) || 0) > tol) return true;
+    var detY = ((ctx.aylikDetay || (typeof window !== 'undefined' && window.__aylikSatirYilDetay) || {})[String(yy)]) || {};
+    if ((parseFloat(detY.reel) || 0) > tol) return true;
+    if ((parseFloat(detY.hibrit_toplam) || 0) > tol || (parseFloat(detY.hibrit_net) || 0) > tol || (parseFloat(detY.hibrit_banka) || 0) > tol) return true;
+    var fatSet = ctx.faturaYmSet || (typeof window !== 'undefined' && window.__musteriFaturaYmSet) || null;
+    var basStr = ctx.basStr != null ? String(ctx.basStr) : '';
+    if (!basStr) {
+        try {
+            var basEl2 = document.getElementById('sozlesme_baslangic');
+            basStr = (basEl2 && basEl2.value) ? String(basEl2.value).trim() : '';
+        } catch (_eB2) { basStr = ''; }
+    }
+    var keys = [];
+    if (basStr && typeof sozlesmeReelDonemAyKeys === 'function') keys = sozlesmeReelDonemAyKeys(basStr, yy) || [];
+    else if (ctx.artisAy != null) {
+        var am2 = parseInt(ctx.artisAy, 10);
+        if (!isNaN(am2) && am2 >= 1 && am2 <= 12) {
+            for (var ki = 0; ki < 12; ki++) {
+                var tot = (am2 - 1) + ki;
+                keys.push((yy + Math.floor(tot / 12)) + '-' + ((tot % 12) + 1));
+            }
+        }
+    }
+    var byIso = ctx.panelByIso;
+    if (!byIso && typeof window !== 'undefined') {
+        var scoP = window.__sozlesmelerAylikSonCacheObj;
+        if (scoP && scoP.panel_by_iso) byIso = scoP.panel_by_iso;
+    }
+    byIso = byIso || {};
+    var tahY = ((ctx.tahsilDetay || (typeof window !== 'undefined' && window.__tahsilatSatirYilAyDetay) || {})[String(yy)]) || {};
+    var markerSet = ctx.markerSet || (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' ? sozlesmeTahsilEdilenAyAnahtarlari : null);
+    var scoG = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
+    var aylarG = (ctx.gridAylar) || (scoG && Array.isArray(scoG.aylar) ? scoG.aylar : []);
+    for (var i = 0; i < keys.length; i++) {
+        var ak = String(keys[i]);
+        var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(ak) : ak;
+        var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ak) : null;
+        var ym = (ya && !isNaN(ya.yil) && !isNaN(ya.ay))
+            ? (ya.yil + '-' + String(ya.ay).padStart(2, '0'))
+            : '';
+        var iso = (typeof girisTahsilatYilAyIsoOneri === 'function') ? girisTahsilatYilAyIsoOneri(ak) : (ym ? (ym + '-01') : '');
+        if (fatSet && ym) { var hitFat = (typeof fatSet.has === 'function') ? fatSet.has(ym) : !!fatSet[ym]; if (hitFat) return true; }
+        if (markerSet && markerSet.has && (markerSet.has(kn) || markerSet.has(ak))) return true;
+        var td = tahY[ak] || tahY[kn];
+        if (td && (parseFloat(td.tahsil) || 0) > tol) return true;
+        if (iso && byIso[iso] && (parseFloat(byIso[iso].tahsil) || 0) > tol) return true;
+        if (ym && byIso[ym + '-01'] && (parseFloat(byIso[ym + '-01'].tahsil) || 0) > tol) return true;
+    }
+    for (var gi = 0; gi < aylarG.length; gi++) {
+        var ga = aylarG[gi];
+        if (!ga) continue;
+        var gy = parseInt(ga.yil, 10);
+        var gay = parseInt(ga.ay, 10);
+        if (isNaN(gy) || isNaN(gay)) continue;
+        var gDonem = (typeof sozlesmeAylikBorcPanelDonemYil === 'function') ? sozlesmeAylikBorcPanelDonemYil(gy, gay) : gy;
+        if (parseInt(gDonem, 10) !== yy && !(basStr && keys.length)) {
+            /* donem eslesmesi keys uzerinden */
+        }
+        var gKey = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(gy, gay) : (gy + '-' + gay);
+        var inDonem = false;
+        for (var kj = 0; kj < keys.length; kj++) {
+            var kn2 = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(String(keys[kj])) : String(keys[kj]);
+            var gn2 = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(String(gKey)) : String(gKey);
+            if (kn2 === gn2) { inDonem = true; break; }
+        }
+        if (!inDonem && parseInt(gDonem, 10) !== yy) continue;
+        if (!inDonem && parseInt(gDonem, 10) === yy) inDonem = true;
+        if (!inDonem) continue;
+        if ((parseFloat(ga.odenen_tutar_kdv) || 0) > tol || ga.tahsil_edildi) return true;
+        if ((parseFloat(ga.nakit) || 0) > tol || (parseFloat(ga.banka) || 0) > tol) return true;
+        if (ga.acik_aylik_borc_faturasi) return true;
+    }
+    return false;
+}
+/** Pasif/iptal: son borc ayindan sonra baslayan bos donem/yil satiri gizlensin. */
+function girisPasifDonemYilSatiriGosterilsinMi(donemYil, opts) {
+    opts = opts || {};
+    var durum = String(opts.durum != null ? opts.durum : ((document.getElementById('musteri_durum') || {}).value || '')).toLowerCase().trim();
+    var iptal = opts.iptal;
+    if (iptal == null && typeof girisFormMusteriIptalMi === 'function') iptal = girisFormMusteriIptalMi();
+    if (!iptal && durum !== 'pasif') return true;
+    var son = girisPasifGorunumSonBorcAyInclusive(opts);
+    if (!son) return true;
+    var bas = girisPasifDonemYilDonemBas(donemYil, opts.basStr, opts.artisAy);
+    if (!bas) return true;
+    if (bas.getTime() <= son.getTime()) return true;
+    if (girisPasifDonemYilindaVeriVarMi(donemYil, opts)) return true;
+    return false;
+}
 function girisAylikSatirYilYilListesi() {
     if (typeof girisFormMusteriIptalMi === 'function' && girisFormMusteriIptalMi()) {
         return { yStart: NaN, yEnd: NaN, years: [] };
@@ -13632,6 +13799,16 @@ function girisAylikSatirYilYilListesi() {
             years = years.filter(function (y) { return y <= yCap; });
             if (years.length) yEnd = years[years.length - 1];
             else return { yStart: yStart, yEnd: yStart, years: [] };
+        }
+    }
+    /* Pasif/iptal: son borc ayindan sonra baslayan bos donem/yil satirlari gizle (veri varsa birak). */
+    if (years.length && typeof girisPasifDonemYilSatiriGosterilsinMi === 'function') {
+        years = years.filter(function (y) { return girisPasifDonemYilSatiriGosterilsinMi(y); });
+        if (years.length) {
+            yStart = years[0];
+            yEnd = years[years.length - 1];
+        } else {
+            return { yStart: yStart, yEnd: yStart, years: [] };
         }
     }
     return { yStart: yStart, yEnd: yEnd, years: years };
@@ -14072,6 +14249,21 @@ function girisTahsilatYilAyPanelDbYukle(musteriId, doneCb, opts) {
             return;
         }
         var byIso = j.by_iso || {};
+        try {
+            var fatYm = j.fatura_ym || j.fatura_aylar || [];
+            if (Array.isArray(fatYm)) {
+                window.__musteriFaturaYmSet = {};
+                fatYm.forEach(function (ym) {
+                    var s = String(ym || '').slice(0, 7);
+                    if (/^\d{4}-\d{2}$/.test(s)) window.__musteriFaturaYmSet[s] = true;
+                });
+            }
+            var rm = j.reel_map || {};
+            if (rm && typeof rm === 'object') {
+                window.__musteriReelDonemDbMap = Object.assign({}, window.__musteriReelDonemDbMap || {}, rm);
+                window.__musteriReelDonemTutarlari = Object.assign({}, window.__musteriReelDonemTutarlari || {}, rm);
+            }
+        } catch (_eFatYm) {}
         var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
         window.__tahsilatSatirYilAyDetay = window.__tahsilatSatirYilAyDetay || {};
         Object.keys(byIso).forEach(function (iso) {
@@ -14171,6 +14363,16 @@ function girisTahsilatYilAyPanelDbYukle(musteriId, doneCb, opts) {
                 });
             }
         } catch (_eDbPan) {}
+        /* Pasif donem satiri: fatura/reel map geldikten sonra yil listesini yenile. */
+        try {
+            if (typeof girisAylikSatirYilSelectDoldur === 'function') {
+                var prevKira = (document.getElementById('aylik_kira_yil_select') || {}).value;
+                var prevTah = (document.getElementById('tahsilat_yil_select') || {}).value;
+                girisAylikSatirYilSelectDoldur('aylik_kira_yil_select', prevKira);
+                girisAylikSatirYilSelectDoldur('tahsilat_yil_select', prevTah);
+            }
+            if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
+        } catch (_eDbYilYenile) {}
         window.__girisPanelDbAzOnceYuklendi = true;
         __panelDbYukleBitti(j);
     }).catch(function () {

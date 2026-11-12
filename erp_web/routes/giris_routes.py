@@ -1174,8 +1174,76 @@ def _kapanis_cap_sonrasi_satir_red(musteri_id, satirlar):
     return True, None
 
 
+def _fatura_ym_list_for_musteri(musteri_id) -> list[str]:
+    """Pasif donem satiri gorunurluk: fatura ayi YYYY-MM listesi (SELECT)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return []
+    if mid <= 0:
+        return []
+    try:
+        rows = fetch_all(
+            f"""
+            SELECT to_char(date_trunc('month', fatura_tarihi::date), 'YYYY-MM') AS ym
+            FROM faturalar
+            WHERE musteri_id = %s
+              AND fatura_tarihi IS NOT NULL
+              AND {sql_expr_fatura_not_gib_taslak("notlar")}
+              AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            (mid,),
+        ) or []
+    except Exception:
+        return []
+    out: list[str] = []
+    for r in rows:
+        ym = str((r or {}).get("ym") or "").strip()[:7]
+        if len(ym) == 7 and ym[4] == "-":
+            out.append(ym)
+    return out
+
+
+def _reel_donem_map_for_musteri(musteri_id) -> dict:
+    """Pasif donem satiri gorunurluk: reel donem_yil -> tutar (SELECT)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return {}
+    if mid <= 0:
+        return {}
+    try:
+        rows = fetch_all(
+            """
+            SELECT donem_yil, tutar_kdv_dahil
+            FROM musteri_reel_donem_tutar
+            WHERE musteri_id = %s
+            """,
+            (mid,),
+        ) or []
+    except Exception:
+        return {}
+    out: dict = {}
+    for r in rows:
+        try:
+            y = int((r or {}).get("donem_yil"))
+        except (TypeError, ValueError):
+            continue
+        try:
+            t = round(float((r or {}).get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError):
+            t = 0.0
+        if y and t > 0.05:
+            out[str(y)] = t
+    return out
+
+
 def _tahsilat_panel_detay_okuma_yaniti(mid, by_iso):
     """GET/POST yanıt: iptal boş+mesaj; kapanışlıda cap kırp (disk yazılmaz)."""
+    fatura_ym = _fatura_ym_list_for_musteri(mid)
+    reel_map = _reel_donem_map_for_musteri(mid)
     if _musteri_sozlesme_iptal_mi(mid):
         return _json_no_cache(
             {
@@ -1184,6 +1252,8 @@ def _tahsilat_panel_detay_okuma_yaniti(mid, by_iso):
                 "musteri_id": mid,
                 "iptal": True,
                 "iptal_mesaj": IPTAL_PANEL_MESAJ,
+                "fatura_ym": fatura_ym,
+                "reel_map": reel_map,
             }
         )
     return _json_no_cache(
@@ -1191,6 +1261,8 @@ def _tahsilat_panel_detay_okuma_yaniti(mid, by_iso):
             "ok": True,
             "by_iso": _panel_by_iso_cap_kirp_okuma(mid, by_iso or {}),
             "musteri_id": mid,
+            "fatura_ym": fatura_ym,
+            "reel_map": reel_map,
         }
     )
 
