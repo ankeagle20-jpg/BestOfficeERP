@@ -50,7 +50,8 @@ def test_strip_and_rebuild_helpers():
             odeme_turu="havale",
         )
     check("rebuild has pay", yeni and "|AYLIK_PAY|2026-08-01=51799.00|" in yeni, yeni)
-    check("rebuild has tah", yeni and "|AYLIK_TAH|2026-08-01|" in yeni, yeni)
+    # manuel_makbuz düzenleme: TAH üretilmez (8a923dd düzenleme yolu)
+    check("rebuild tah yok", yeni is not None and "|AYLIK_TAH|" not in (yeni or ""), yeni)
     check("eski pay yok", yeni and "51779.20" not in yeni, yeni)
 
     skip = yeniden_hesapla_makbuz_dagitim_aciklama(

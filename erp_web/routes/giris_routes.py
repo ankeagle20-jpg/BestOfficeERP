@@ -21517,17 +21517,26 @@ def api_ekstre_tahsilat_guncelle():
             tahsilat_tarihi = date.today()
     aciklama_in = (data.get("aciklama") or "").strip()
     tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120] or None
-    if aciklama_in:
+    kay_ex = str(row.get("kaynak") or "").strip().lower()
+    if aciklama_in and kay_ex != "manuel_makbuz":
         aciklama = aciklama_in
     else:
+        # manuel_makbuz (dolu/boş) veya açıklamasız diğer: FIFO yenile.
+        # manuel: TAH üretme/koruma yok (yalnız PAY) — 8a923dd düzenleme yolu.
+        _strip_fn = None
+        ac_yeni = None
         try:
-            from routes.faturalar_routes import yeniden_hesapla_makbuz_dagitim_aciklama
+            from routes.faturalar_routes import (
+                _strip_aylik_dagitim_markers as _strip_fn,
+                yeniden_hesapla_makbuz_dagitim_aciklama,
+            )
 
+            ac_kaynak = (aciklama_in or ac_old) if kay_ex == "manuel_makbuz" else ac_old
             ac_yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
                 musteri_id,
                 tutar=tutar,
                 tahsilat_tarihi=tahsilat_tarihi,
-                aciklama_eski=ac_old,
+                aciklama_eski=ac_kaynak,
                 haric_tahsilat_id=tid,
                 kaynak=row.get("kaynak"),
                 odeme_turu=odeme,
@@ -21537,7 +21546,12 @@ def api_ekstre_tahsilat_guncelle():
                 "ekstre-tahsilat-guncelle marker yenile mid=%s tid=%s", musteri_id, tid
             )
             ac_yeni = None
-        aciklama = ac_yeni if ac_yeni is not None else (ac_old or "Tahsilat")
+        if ac_yeni is not None:
+            aciklama = ac_yeni
+        elif kay_ex == "manuel_makbuz" and _strip_fn:
+            aciklama = _strip_fn(aciklama_in or ac_old) or "Tahsilat"
+        else:
+            aciklama = ac_old or "Tahsilat"
     execute(
         """
         UPDATE tahsilatlar

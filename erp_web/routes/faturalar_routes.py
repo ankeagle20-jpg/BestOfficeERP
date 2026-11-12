@@ -689,11 +689,13 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
     onceki_tahsilatlar=None,
     borc_satirlari=None,
 ) -> str | None:
-    """Makbuz tutar/tarih sonrası |AYLIK_TAH|/|AYLIK_PAY| FIFO yenile.
+    """Makbuz tutar/tarih sonrası dağıtım marker yenile.
 
     grid_toplu / eşitle satırına dokunmaz (None → çağıran eski metni korur).
     Dönüş: yeni açıklama metni veya None (yenileme yok).
 
+    manuel_makbuz: |AYLIK_TAH| üretilmez / yeniden yazılmaz; yalnız FIFO |AYLIK_PAY|
+    (alt makbuz kaydı 8a923dd ile aynı mantık). banka_import / odeme_linki: TAH+PAY.
     tam_fifo=True: eski TAH/PAY aylarını allowlist yapmaz (onarım scripti).
     Varsayılan False → mevcut allowlist davranışı değişmez.
     onceki_tahsilatlar / borc_satirlari: yalnız test/onarım simülasyonu (DB yerine).
@@ -724,7 +726,7 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
     odeme = str(tahsilat_tarihi or "")[:10]
     if len(odeme) != 10:
         odeme = date.today().isoformat()
-    # Mevcut TAH aylarını allowlist yap (seçim korunur); yoksa / tam_fifo: tam FIFO.
+    # Mevcut TAH/PAY aylarını allowlist yap (ay ilişkisi korunur); yoksa / tam_fifo: tam FIFO.
     allow = []
     if not tam_fifo:
         for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac_eski):
@@ -769,7 +771,11 @@ def yeniden_hesapla_makbuz_dagitim_aciklama(
             )
         except Exception:
             plain = "Tahsilat"
-    text = _aciklama_with_aylik_markers(plain, iso_list)
+    # manuel_makbuz düzenleme/yenile: TAH yok (yalnız PAY); diğer makbuz kaynakları TAH+PAY.
+    if kay == "manuel_makbuz":
+        text = plain
+    else:
+        text = _aciklama_with_aylik_markers(plain, iso_list)
     text = _aciklama_with_aylik_pay_tokens(text, pay_items)
     return text
 
@@ -11356,11 +11362,29 @@ def tahsilat_guncelle():
         else:
             tahsil_eden = existing.get("tahsil_eden")
 
+        kay_ex = str(existing.get("kaynak") or "").strip().lower()
         if "aciklama" in data:
             aciklama_text = (data.get("aciklama") or "").strip()
             if len(aciklama_text) > 4000:
                 aciklama_text = aciklama_text[:4000]
-            aciklama_text = aciklama_text or None
+            # Manuel makbuz Düzenle: FE eski TAH birleştirebilir — TAH'ı düşür, yalnız PAY/FIFO.
+            if kay_ex == "manuel_makbuz":
+                ac_yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
+                    int(existing.get("musteri_id") or 0),
+                    tutar=tutar,
+                    tahsilat_tarihi=tahsilat_tarihi,
+                    aciklama_eski=aciklama_text or existing.get("aciklama"),
+                    haric_tahsilat_id=tahsilat_id,
+                    kaynak="manuel_makbuz",
+                    odeme_turu=odeme_turu,
+                )
+                aciklama_text = (
+                    ac_yeni
+                    if ac_yeni is not None
+                    else (_strip_aylik_dagitim_markers(aciklama_text) or None)
+                )
+            else:
+                aciklama_text = aciklama_text or None
         else:
             # Tutar/tarih değişiminde dağıtımı FIFO ile yenile (bayat |AYLIK_PAY| kalmasın).
             ac_yeni = yeniden_hesapla_makbuz_dagitim_aciklama(
