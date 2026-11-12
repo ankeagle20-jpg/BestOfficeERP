@@ -25519,31 +25519,8 @@ function girisTahsilatFormPayload() {
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
         tutar = cekDetay.reduce(function(s, r){ return s + (r.tutar || 0); }, 0);
     }
-    var seciliSatirlar = (typeof tahsilatMakbuzSecilenAylikSatirlari === 'function')
-        ? tahsilatMakbuzSecilenAylikSatirlari()
-        : [];
-    var ayRefIsoListRaw = tahsilatAyRefIsoListFromSecilenSatirlar(seciliSatirlar);
-    var seciliToplam = tahsilatSecilenSatirlarToplami(seciliSatirlar);
-    // Tek ay seçiliyse ve girilen tutar o ayı aşmıyorsa (kısmi/tam), marker yaz:
-    // ay turuncu/yeşil + kalan tutar doğru görünsün.
-    // Tek ay seçiliyken girilen tutar ayı aşıyorsa (örn. 5000), kilitleme yapma:
-    // oldest açık aylara dağıtılsın.
-    // Çoklu seçimde eski güvenli davranış korunur (toplam ile tam eşleşince marker).
-    var ayRefIsoList = [];
-    if (ayRefIsoListRaw.length === 1) {
-        var tekAyTol = 0.01;
-        var tekAyTutar = parseFloat(tutar || 0) || 0;
-        if (tekAyTutar > 0 && tekAyTutar <= (seciliToplam + tekAyTol)) ayRefIsoList = ayRefIsoListRaw.slice();
-    } else if (ayRefIsoListRaw.length > 1) {
-        if (Math.abs(seciliToplam - (tutar || 0)) <= 0.01) ayRefIsoList = ayRefIsoListRaw.slice();
-    }
-    var ayRefIso = ayRefIsoList.length ? ayRefIsoList[0] : null;
-    var ayRefStartIso = ayRefIsoListRaw.length ? ayRefIsoListRaw[0] : null;
-    var ayRefTutar = null;
-    if (Array.isArray(seciliSatirlar) && seciliSatirlar.length === 1) {
-        var s0 = seciliSatirlar[0] || {};
-        ayRefTutar = parseFloat(s0.tutar_kdv_dahil) || 0;
-    }
+    // Manuel makbuz: grid seçimi yalnız tutar doldurur; ay_ref/AYLIK_TAH taşınmaz.
+    // Üstteki «Seçilen aylardan tahsilat oluştur» ayrı API (grid_toplu) kullanır.
     return {
         musteri_id: musteriId ? parseInt(musteriId, 10) : null,
         musteri_adi: musteriAdiSecilen || musteriAdiAra,
@@ -25553,10 +25530,10 @@ function girisTahsilatFormPayload() {
         tahsilat_tarihi: document.getElementById('giris_tahsilat_tarih').value,
         tahsil_eden: (document.getElementById('giris_tahsilat_tahsil_eden').value || 'DÖNDÜ GÜLGÖSTEREN'),
         aciklama: (document.getElementById('giris_tahsilat_aciklama').value || '').trim(),
-        ay_ref_iso: ayRefIso,
-        ay_ref_iso_list: ayRefIsoList,
-        ay_ref_start_iso: ayRefStartIso,
-        ay_ref_tutar: ayRefTutar,
+        ay_ref_iso: null,
+        ay_ref_iso_list: [],
+        ay_ref_start_iso: null,
+        ay_ref_tutar: null,
         aylik_borc_listesi: tahsilatAylikBorcListesiFromGrid(),
         havale_banka: '',
         cek_detay: cekDetay,
@@ -26050,20 +26027,8 @@ function sozlesmeTahsilatFormPayload() {
     if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
         tutar = cekDetay.reduce(function(s, r){ return s + (r.tutar || 0); }, 0);
     }
-    var seciliSatirlar = (typeof tahsilatMakbuzSecilenAylikSatirlari === 'function')
-        ? tahsilatMakbuzSecilenAylikSatirlari()
-        : [];
-    var ayRefIsoListRaw = tahsilatAyRefIsoListFromSecilenSatirlar(seciliSatirlar);
-    // Tutar grid toplamına uymasa da seçili aylar gönderilir. Sunucu bu listeyi
-    // iso_allowlist olarak kullanır; fazla tutar soft-confirm ile onaylanır.
-    var ayRefIsoList = ayRefIsoListRaw.slice();
-    var ayRefIso = ayRefIsoList.length ? ayRefIsoList[0] : null;
-    var ayRefStartIso = ayRefIsoListRaw.length ? ayRefIsoListRaw[0] : null;
-    var ayRefTutar = null;
-    if (Array.isArray(seciliSatirlar) && seciliSatirlar.length === 1) {
-        var s0 = seciliSatirlar[0] || {};
-        ayRefTutar = parseFloat(s0.tutar_kdv_dahil) || 0;
-    }
+    // Alt makbuz kaydı: grid seçiminden tutar dolsa bile ay_ref/AYLIK_TAH gönderilmez.
+    // Sunucu FIFO + AYLIK_PAY ile dağıtır (manuel_makbuz). Üst buton grid_toplu ayrıdır.
     return {
         musteri_id: musteriId ? parseInt(musteriId, 10) : null,
         musteri_adi: musteriAdiSecilen || musteriAdiAra,
@@ -26073,10 +26038,10 @@ function sozlesmeTahsilatFormPayload() {
         tahsilat_tarihi: document.getElementById('sozlesme_tahsilat_tarih').value,
         tahsil_eden: (document.getElementById('sozlesme_tahsilat_tahsil_eden').value || 'DÖNDÜ GÜLGÖSTEREN'),
         aciklama: (document.getElementById('sozlesme_tahsilat_aciklama').value || '').trim(),
-        ay_ref_iso: ayRefIso,
-        ay_ref_iso_list: ayRefIsoList,
-        ay_ref_start_iso: ayRefStartIso,
-        ay_ref_tutar: ayRefTutar,
+        ay_ref_iso: null,
+        ay_ref_iso_list: [],
+        ay_ref_start_iso: null,
+        ay_ref_tutar: null,
         aylik_borc_listesi: tahsilatAylikBorcListesiFromGrid(),
         havale_banka: '',
         cek_detay: cekDetay,

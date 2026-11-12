@@ -10999,31 +10999,21 @@ def tahsilat_ekle():
             tahsilat_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
         else:
             tahsilat_tarihi = raw_tarih[:10] if len(raw_tarih) >= 10 else datetime.now().strftime("%Y-%m-%d")
-        ay_ref_isos = _ay_ref_iso_list_from_tahsilat_payload(data)
+        # Manuel makbuz (alt form / tahsilat-ekle): istemci ay seçimini yok say.
+        # AYLIK_TAH üretilmez; tutar cariye iner, aylara FIFO + AYLIK_PAY ile dağılır.
+        # Üstteki «Seçilen aylardan tahsilat oluştur» (grid_toplu) bu endpoint'i kullanmaz.
+        ay_ref_isos = []
         raw_aciklama = (data.get('aciklama') or '').strip()
         auto_pay_items = []
-        # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur (hangi aylar).
-        # Dağıtım tutarları her zaman gerçek kalandan (FIFO); eşit bölme yok.
         skip_ay_dagitim = bool(data.get("yillik_tek_tahsilat") or data.get("tahsilat_dagitimsiz"))
         if not skip_ay_dagitim:
-            if not ay_ref_isos:
-                auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
-                    musteri_id,
-                    tutar,
-                    odeme_tarihi=tahsilat_tarihi,
-                )
-                if auto_isos:
-                    ay_ref_isos = auto_isos
-            else:
-                # Seçili aylar: yalnız onlar. Tutar ekstre açık borcundan; eşit bölme yok.
-                _sel_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
-                    musteri_id,
-                    tutar,
-                    odeme_tarihi=tahsilat_tarihi,
-                    iso_allowlist=ay_ref_isos,
-                )
-                if auto_pay_items:
-                    ay_ref_isos = [iso for iso, _ in auto_pay_items]
+            _fifo_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
+                musteri_id,
+                tutar,
+                odeme_tarihi=tahsilat_tarihi,
+            )
+            if _fifo_isos:
+                ay_ref_isos = list(_fifo_isos)
             # Soft-confirm: tutar açık aylara dağıtılandan fazlaysa (eşleşmeyen kısım)
             # onay flag'i olmadan INSERT etme. Fazla ay/avans yazılmaz; sadece uyarı.
             if auto_pay_items is not None:
@@ -11059,10 +11049,8 @@ def tahsilat_ekle():
                 )
                 if _ileri:
                     return jsonify(_ileri), 400
-        aciklama_text = _aciklama_with_aylik_markers(
-            raw_aciklama,
-            ay_ref_isos,
-        )
+        # AYLIK_TAH yok — yalnız düz açıklama + FIFO AYLIK_PAY.
+        aciklama_text = _strip_aylik_dagitim_markers(raw_aciklama)
         if auto_pay_items:
             aciklama_text = _aciklama_with_aylik_pay_tokens(aciklama_text, auto_pay_items)
 
@@ -11870,10 +11858,8 @@ def tahsilat_makbuz_onizle():
             tahsilat_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
         else:
             tahsilat_tarihi = raw_tarih[:10] if len(raw_tarih) >= 10 else datetime.now().strftime("%Y-%m-%d")
-        aciklama = _aciklama_with_aylik_markers(
-            (data.get('aciklama') or '').strip(),
-            _ay_ref_iso_list_from_tahsilat_payload(data),
-        )
+        # Önizleme de kaydet ile aynı: istemci ay_ref → AYLIK_TAH yok.
+        aciklama = _strip_aylik_dagitim_markers((data.get('aciklama') or '').strip())
         tahsil_eden = (data.get('tahsil_eden') or '').strip()[:120]
         cek_detay_raw = data.get('cek_detay')
         cek_list = cek_detay_raw if isinstance(cek_detay_raw, list) else []
