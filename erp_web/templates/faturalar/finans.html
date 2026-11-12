@@ -1181,6 +1181,7 @@
 
 </div>
 
+<script src="/static/js/gib_cikis.js"></script>
 <script>
 /** Finans sekmeleri — en üstte tanımlı; aşağıdaki scriptte oluşabilecek hatalar tıklamayı engellemesin. */
 
@@ -1766,21 +1767,7 @@ function gibFaturaOzetLookup() {
 }
 
 var gibTaslakDogrulandi = false;
-function gibCikisYap() {
-    var btn = document.getElementById('gib_cikis_btn');
-    var st = document.getElementById('gib_manual_status');
-    autoSetBusy(btn, true, 'Çıkılıyor...');
-    if (st) st.textContent = 'GİB oturumu kapatılıyor...';
-    fetch('/faturalar/api/gib-cikis', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-            if (st) st.textContent = (j && j.mesaj) ? j.mesaj : 'GİB çıkış isteği bitti.';
-        })
-        .catch(function (err) {
-            if (st) st.textContent = 'GİB çıkış isteği başarısız: ' + (err && err.message ? err.message : err);
-        })
-        .finally(function () { autoSetBusy(btn, false); });
-}
+/* gibCikisYap: /static/js/gib_cikis.js (ortak) */
 function gibSetFlowEnabled(enabled) {
     var on = !!enabled;
     var smsSend = document.getElementById('gib_sms_send_btn');

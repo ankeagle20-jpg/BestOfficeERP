@@ -325,10 +325,11 @@
     <div class="panel">
         <div class="panel-row-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h3 style="margin-bottom:0;">{% if irsaliye_modu %}İrsaliye Satırları{% else %}Fatura Satırları{% endif %}</h3>
-            <div style="display:inline-flex; align-items:center; gap:8px;">
+            <div class="fatura-satir-aksiyonlar" style="display:inline-flex; flex-wrap:wrap; align-items:center; gap:8px; max-width:100%;">
                 <button type="button" id="btn-kaydet-inline" class="btn-icon" style="background:#2e7d32; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                     <i class="fa fa-save"></i> Taslak Kaydet
                 </button>
+                <button type="button" id="gib_cikis_btn" class="btn-icon" style="background:#6d4c41; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" onclick="gibCikisYap()" title="Bellekteki GİB oturumunu kapatır. «Başka oturum açık» hatasında işe yaramaz; earsivportal.efatura.gov.tr adresinden tarayıcıyla çıkış yapın.">GİB Çıkış</button>
                 <button type="button" id="btn-kaydet-inline-taslak" class="btn-icon" style="background:#455a64; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                     <i class="fa fa-clipboard"></i> Taslak Kaydet
                 </button>
@@ -1777,6 +1778,7 @@
         })();
     })();
     </script>
+    <script src="/static/js/gib_cikis.js"></script>
     <script src="/static/js/erp-tarih-hizli.js"></script>
 </body>
 </html>
