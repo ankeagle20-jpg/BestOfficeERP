@@ -318,14 +318,18 @@ def test_ekstre_ekran_n_set():
         "kapanis_sonrasi_borc_ay": 2,
         "sozlesme_tarihi": date(2024, 1, 1),
     }
-    with mock.patch.object(gr, "_musteri_kyc_grup_for_aylik_grid", return_value=kyc):
+    with mock.patch.object(gr, "_musteri_kyc_grup_for_aylik_grid", return_value=kyc), mock.patch.object(
+        gr, "_ekstre_odenen_en_son_ay", return_value=None
+    ):
         bas, bit = gr._cari_ekstre_ekran_varsayilan_bas_bit(1, bugun=date(2026, 10, 30))
     # N=2 → Kasım 2025 sonu
     check("ekran_n2_bit", bit == date(2025, 11, 30), bit)
     check("ekran_n2_bas", bas == date(2025, 1, 1), bas)
 
     kyc0 = dict(kyc, kapanis_sonrasi_borc_ay=0)
-    with mock.patch.object(gr, "_musteri_kyc_grup_for_aylik_grid", return_value=kyc0):
+    with mock.patch.object(gr, "_musteri_kyc_grup_for_aylik_grid", return_value=kyc0), mock.patch.object(
+        gr, "_ekstre_odenen_en_son_ay", return_value=None
+    ):
         _, bit0 = gr._cari_ekstre_ekran_varsayilan_bas_bit(1, bugun=date(2026, 10, 30))
     check("ekran_n0_bit", bit0 == date(2025, 9, 30), bit0)
 

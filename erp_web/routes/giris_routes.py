@@ -16497,8 +16497,34 @@ def _ekstre_pasif_sonrasi_kayit_var(musteri_id: int, kyc: dict | None = None) ->
     return False
 
 
-# Ekran ufku: marker ayı bugünden en fazla bu kadar ay ileri gidebilir.
+# Ekran ufku: ödenmiş ay bugünden en fazla bu kadar ay ileri gidebilir.
 _EKSTRE_EKRAN_MARKER_TAVAN_AY = 12
+
+
+def _ekstre_odenen_en_son_ay(musteri_id: int) -> date | None:
+    """Ödenmiş en son ay (ayın 1'i).
+
+    Tek kaynak: max(|AYLIK_TAH|/|AYLIK_PAY| marker ayı, son tahsilat_tarihi ayı).
+    İleri tarihli peşin ödenmiş ay dahildir. Tam ödeme şartı yok.
+    """
+    candidates: list[date] = []
+    try:
+        m = _ekstre_son_tahsil_marker_ayi(int(musteri_id))
+        if isinstance(m, date):
+            candidates.append(date(m.year, m.month, 1))
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre odenen son marker mid=%s", musteri_id
+        )
+    try:
+        t = _ekstre_son_tahsilat_hareket_tarihi(int(musteri_id))
+        if isinstance(t, date):
+            candidates.append(date(t.year, t.month, 1))
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre odenen son tahsil mid=%s", musteri_id
+        )
+    return max(candidates) if candidates else None
 
 
 def _cari_ekstre_ekran_varsayilan_bas_bit(
@@ -16507,18 +16533,22 @@ def _cari_ekstre_ekran_varsayilan_bas_bit(
 ) -> tuple[date, date]:
     """Yalnız ekranda açılan Cari Ekstre tarih kutularının varsayılanı.
 
-    AKTİF: bas = bu yıl 1 Ocak; bit = max(bugünün ayı sonu, son marker ayı sonu)
-            (marker tavani: bugün + 12 ay).
-    PASİF: bit = kapanış ayı sonu (dahil); bas = o yılın 1 Ocak'ı.
-           kapanış yoksa grid/sözleşme bitiş yedeği.
+    AKTİF: bas = bu yıl 1 Ocak; bit = max(içinde bulunulan ay sonu, ödenmiş en son ay sonu)
+            (ödenmiş ay tavani: bugün + 12 ay).
+    PASİF/İPTAL: taban = gorunum_son_borc_ayi (Hepsi→hepsi_sozlesme_yili_son_borc_ayi;
+            N0 bayrağı dahil); bas = taban yılının 1 Ocak'ı;
+            bit = max(taban ay sonu, ödenmiş en son ay sonu).
     API/Excel/PDF boş-tarih yedeği (_cari_ekstre_varsayilan_bas_bit) değişmez.
     """
+    from pasif_donem_satir_gorunum import gorunum_son_borc_ayi
+
     bugun = bugun if isinstance(bugun, date) else date.today()
     mid = int(musteri_id)
     kyc = _musteri_kyc_grup_for_aylik_grid(mid)
     durum = str((kyc or {}).get("durum") or "").strip().lower()
-    if durum == "pasif":
-        son = kira_son_borc_ayi(kyc)
+    iptal = _musteri_iptal_mi((kyc or {}).get("iptal"))
+    if durum == "pasif" or iptal:
+        son = gorunum_son_borc_ayi(kyc)
         if isinstance(son, date):
             ay1 = date(son.year, son.month, 1)
         else:
@@ -16527,30 +16557,28 @@ def _cari_ekstre_ekran_varsayilan_bas_bit(
                 ay1 = date(kap.year, kap.month, 1)
             else:
                 ay1 = _ekstre_pasif_ay_yedek(mid, kyc) or date(bugun.year, bugun.month, 1)
-        bit = _ekstre_ay_sonu(ay1.year, ay1.month)
-        bas = date(bit.year, 1, 1)
-        if bas > bit:
-            bas = bit
-        return bas, bit
+        taban_son = _ekstre_ay_sonu(ay1.year, ay1.month)
+        bas = date(taban_son.year, 1, 1)
+        bit = taban_son
+    else:
+        # Aktif
+        bas = date(bugun.year, 1, 1)
+        bit = _ekstre_ay_sonu(bugun.year, bugun.month)
 
-    # Aktif
-    bas = date(bugun.year, 1, 1)
-    bugun_ay_sonu = _ekstre_ay_sonu(bugun.year, bugun.month)
-    bit = bugun_ay_sonu
     try:
-        son_m = _ekstre_son_tahsil_marker_ayi(mid)
+        son_m = _ekstre_odenen_en_son_ay(mid)
     except Exception:
         logging.getLogger(__name__).exception(
-            "ekstre ekran son marker mid=%s", mid
+            "ekstre ekran odenen son mid=%s", mid
         )
         son_m = None
     if son_m:
         tavan = _add_months(date(bugun.year, bugun.month, 1), _EKSTRE_EKRAN_MARKER_TAVAN_AY)
         if (son_m.year, son_m.month) > (tavan.year, tavan.month):
             son_m = tavan
-        marker_son = _ekstre_ay_sonu(son_m.year, son_m.month)
-        if marker_son > bit:
-            bit = marker_son
+        odenen_son = _ekstre_ay_sonu(son_m.year, son_m.month)
+        if odenen_son > bit:
+            bit = odenen_son
     if bas > bit:
         bas = bit
     return bas, bit

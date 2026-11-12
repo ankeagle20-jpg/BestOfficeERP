@@ -36961,14 +36961,17 @@ function girisCariEkstreVarsayilanTarihleriYaz(m) {
     var bBas = document.getElementById('cari_ekstre_b_baslangic');
     var bBit = document.getElementById('cari_ekstre_b_bitis');
     if (!eb || !ebit) return;
-    /* Yeni müşteri / ilk açılış: elle seçim bayrağını sıfırla, varsayılanı yaz. */
-    try { window.__cariEkstreBitisKullaniciDokundu = false; } catch (_eDokRst) {}
     var ar = girisCariEkstreVarsayilanTarihAraligi(m || {});
     eb.value = ar.bas;
-    ebit.value = ar.bit;
     if (bBas) bBas.value = ar.bas;
-    if (bBit) bBit.value = ar.bit;
-    try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOto) {}
+    /* Elle değiştirilmiş bitiş ezilmez; mid değişince HorizonMid bayrağı sıfırlar. */
+    var elle = false;
+    try { elle = !!window.__cariEkstreBitisKullaniciDokundu; } catch (_eElle) { elle = false; }
+    if (!elle) {
+        ebit.value = ar.bit;
+        if (bBit) bBit.value = ar.bit;
+        try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOto) {}
+    }
     if (typeof girisCariEkstrePasifSonrasiUyariGoster === 'function') {
         girisCariEkstrePasifSonrasiUyariGoster(m || {});
     }

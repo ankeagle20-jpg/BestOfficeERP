@@ -24,7 +24,7 @@ def _patch_kyc(gr, kyc):
 
 
 def test_pasif_kapanis_ayi_dahil():
-    """117-benzeri: pasif ay 2023-08 → 2023-01-01 … 2023-08-31."""
+    """117-benzeri Hepsi: gorunum son borc (giriş Ara→Kas) → 2023-01-01 … 2023-11-30."""
     from routes import giris_routes as gr
 
     kyc = {
@@ -33,13 +33,14 @@ def test_pasif_kapanis_ayi_dahil():
         "sozlesme_tarihi": date(2022, 12, 7),
         "sozlesme_bitis": date(2025, 1, 1),
         "aylik_kira": 2300.0,
+        "kapanis_sonrasi_borc_ay": None,
     }
     with _patch_kyc(gr, kyc), mock.patch.object(
-        gr, "_ekstre_son_tahsil_marker_ayi", return_value=None
+        gr, "_ekstre_odenen_en_son_ay", return_value=None
     ), mock.patch.object(gr, "_ekstre_pasif_ay_yedek", return_value=None):
         bas, bit = gr._cari_ekstre_ekran_varsayilan_bas_bit(117, bugun=date(2026, 10, 16))
     check("pasif_bas", bas == date(2023, 1, 1), bas)
-    check("pasif_bit", bit == date(2023, 8, 31), bit)
+    check("pasif_bit", bit == date(2023, 11, 30), bit)
 
 
 def test_aktif_son_marker_ufuk():
@@ -48,7 +49,7 @@ def test_aktif_son_marker_ufuk():
 
     kyc = {"durum": "aktif", "sozlesme_tarihi": date(2020, 1, 1), "aylik_kira": 1000.0}
     with _patch_kyc(gr, kyc), mock.patch.object(
-        gr, "_ekstre_son_tahsil_marker_ayi", return_value=date(2027, 3, 1)
+        gr, "_ekstre_odenen_en_son_ay", return_value=date(2027, 3, 1)
     ):
         bas, bit = gr._cari_ekstre_ekran_varsayilan_bas_bit(9, bugun=date(2026, 10, 16))
     check("aktif_bas", bas == date(2026, 1, 1), bas)
@@ -60,7 +61,7 @@ def test_aktif_odemesiz_bugun_ayi():
 
     kyc = {"durum": "aktif", "sozlesme_tarihi": date(2024, 5, 1), "aylik_kira": 500.0}
     with _patch_kyc(gr, kyc), mock.patch.object(
-        gr, "_ekstre_son_tahsil_marker_ayi", return_value=None
+        gr, "_ekstre_odenen_en_son_ay", return_value=None
     ):
         bas, bit = gr._cari_ekstre_ekran_varsayilan_bas_bit(99, bugun=date(2026, 10, 16))
     check("odemesiz_bas", bas == date(2026, 1, 1), bas)
@@ -73,7 +74,7 @@ def test_marker_tavan_12_ay():
 
     kyc = {"durum": "aktif", "aylik_kira": 1.0}
     with _patch_kyc(gr, kyc), mock.patch.object(
-        gr, "_ekstre_son_tahsil_marker_ayi", return_value=date(2030, 6, 1)
+        gr, "_ekstre_odenen_en_son_ay", return_value=date(2030, 6, 1)
     ):
         bas, bit = gr._cari_ekstre_ekran_varsayilan_bas_bit(1, bugun=date(2026, 10, 16))
     # tavan = 2026-10 + 12 ay = 2027-10 ay sonu

@@ -26397,9 +26397,18 @@ function girisCariEkstreVarsayilanTarihleriYaz(m) {
     if (!eb || !ebit) return;
     var ar = girisCariEkstreVarsayilanTarihAraligi(m || {});
     eb.value = ar.bas;
-    ebit.value = ar.bit;
     if (bBas) bBas.value = ar.bas;
-    if (bBit) bBit.value = ar.bit;
+    /* Elle değiştirilmiş bitiş ezilmez; mid değişince HorizonMid bayrağı sıfırlar. */
+    var elle = false;
+    try { elle = !!window.__cariEkstreBitisKullaniciDokundu; } catch (_eElle) { elle = false; }
+    if (!elle) {
+        ebit.value = ar.bit;
+        if (bBit) bBit.value = ar.bit;
+        try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOto) {}
+    }
+    if (typeof girisCariEkstrePasifSonrasiUyariGoster === 'function') {
+        girisCariEkstrePasifSonrasiUyariGoster(m || {});
+    }
 }
 
 /** Grid tahsil API → tahsilat paneli (ekstre panel_tahsil_json ile aynı kaynak). */
