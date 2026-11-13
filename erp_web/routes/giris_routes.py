@@ -17864,6 +17864,92 @@ def _tahsilden_cikar_makbuz_parcasi(row) -> bool:
     return len(re.findall(r"\|AYLIK_PAY\|[0-9]{4}-[0-9]{2}-[0-9]{2}=", ac)) > 1
 
 
+def _tahsil_et_ay_kalan_durum(
+    payload: dict | None,
+    panel_by: dict | None,
+    yil: int,
+    ay: int,
+    tol: float | None = None,
+) -> dict:
+    """Seçilen ay için kalan / kapalı bilgisi (grid_toplu tahsil-et savunması).
+
+    Kapalı: kalan ≤ tol veya tahsil_edildi veya Kural A (KURAL_A_KISMI_ESIK) tam.
+    Dönüş: {kapali:bool, kalan:float, brut:float, kaynak:str}
+    """
+    tol_v = float(tol if tol is not None else AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    yi, ai = int(yil), int(ay)
+    iso = f"{yi:04d}-{ai:02d}-01"
+    brut = 0.0
+    kalan = None
+    tahsil_edildi = False
+    odenen = 0.0
+    if isinstance(payload, dict):
+        for a in payload.get("aylar") or []:
+            if not isinstance(a, dict):
+                continue
+            try:
+                if int(a.get("yil")) != yi or int(a.get("ay")) != ai:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            try:
+                brut = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
+            except (TypeError, ValueError):
+                brut = 0.0
+            try:
+                kalan = float(a.get("kalan_tutar_kdv"))
+            except (TypeError, ValueError):
+                kalan = None
+            try:
+                odenen = float(a.get("odenen_tutar_kdv") or 0)
+            except (TypeError, ValueError):
+                odenen = 0.0
+            tahsil_edildi = bool(a.get("tahsil_edildi"))
+            break
+    if kalan is None and isinstance(panel_by, dict):
+        prow = panel_by.get(iso) or panel_by.get(iso[:7]) or {}
+        if isinstance(prow, dict):
+            try:
+                brut = float(prow.get("aylik") or brut or 0)
+            except (TypeError, ValueError):
+                pass
+            try:
+                odenen = float(prow.get("tahsil") or 0)
+            except (TypeError, ValueError):
+                odenen = 0.0
+            try:
+                kalan = float(prow.get("kalan"))
+            except (TypeError, ValueError):
+                kalan = None
+            if kalan is None and brut > tol_v:
+                kalan = round(max(brut - odenen, 0.0), 2)
+    if kalan is None:
+        kalan = round(max(float(brut or 0) - float(odenen or 0), 0.0), 2)
+    kalan = round(max(float(kalan or 0), 0.0), 2)
+    brut = round(max(float(brut or 0), 0.0), 2)
+    odenen = round(max(float(odenen or 0), 0.0), 2)
+    kapali = False
+    if tahsil_edildi and brut > tol_v:
+        kapali = True
+    elif kalan <= tol_v and (odenen > tol_v or brut > tol_v):
+        # Ödenmiş / Kural A bandı (grid kalan=0)
+        kapali = True
+    elif brut > tol_v and _grid_payload_marker_panel_tam_kapandi(
+        odenen, brut, yi, None, tol_v, kismi_esik=True
+    ):
+        kapali = True
+        kalan = 0.0
+    if kapali:
+        kalan = 0.0
+    return {
+        "kapali": bool(kapali),
+        "kalan": kalan,
+        "brut": brut,
+        "odenen": odenen,
+        "iso": iso,
+    }
+
+
 @bp.route('/api/aylik-tutarlardan-tahsil-et', methods=['POST'])
 @giris_gerekli
 def api_aylik_tutarlardan_tahsil_et():
@@ -17872,6 +17958,8 @@ def api_aylik_tutarlardan_tahsil_et():
     Tutarlar griddeki gibi KDV dahil; cari kart ve ekstrelerde tahsilat olarak görünür.
     Aynı ay için tekrar kayıt engellenir; kira/TÜFE artışı sonrası marker tutarı
     grid tutarından düşükse mevcut kayıt güncellenir veya fark için ek kayıt açılır.
+    Tam ödenmiş (kalan≤tol / Kural A kapalı) aylara yeni kayıt yazılmaz; kısmi ayda
+    yalnız kalan tutar kadar tahsil edilir.
     """
     try:
         data = request.get_json(force=True, silent=True) or {}
@@ -18118,6 +18206,10 @@ def api_aylik_tutarlardan_tahsil_et():
                 return p_item["ay_bir"]
 
             tol_tah = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+            try:
+                panel_by_odeme = _load_musteri_panel_by_iso_okuma(musteri_id) or {}
+            except Exception:
+                panel_by_odeme = {}
             for p in parsed:
                 iso = p["ay_bir"].isoformat()
                 _atla = (panel_plan.get("atla_tam") or {}).get(f"{p['yil']:04d}-{p['ay']:02d}")
@@ -18144,9 +18236,48 @@ def api_aylik_tutarlardan_tahsil_et():
                         }
                     )
                     continue
+                # Tam ödenmiş / Kural A kapalı aya yeni grid_toplu yazma.
+                durum_ay = _tahsil_et_ay_kalan_durum(
+                    payload_cap, panel_by_odeme, p["yil"], p["ay"], tol_tah
+                )
+                ay_adi = _AY_ADLARI[p["ay"] - 1]
+                if durum_ay.get("kapali"):
+                    atlanan.append(
+                        {
+                            "neden": "zaten_odenmis",
+                            "yil": p["yil"],
+                            "ay": p["ay"],
+                            "makbuz_no": None,
+                            "mesaj": f"{ay_adi} {p['yil']} ayı zaten ödenmiş, tahsilat girilemez",
+                        }
+                    )
+                    continue
+                kalan_ay = float(durum_ay.get("kalan") or 0)
+                if kalan_ay <= tol_tah:
+                    atlanan.append(
+                        {
+                            "neden": "zaten_odenmis",
+                            "yil": p["yil"],
+                            "ay": p["ay"],
+                            "makbuz_no": None,
+                            "mesaj": f"{ay_adi} {p['yil']} ayı zaten ödenmiş, tahsilat girilemez",
+                        }
+                    )
+                    continue
+                # Kısmi ay: yalnız kalan tutara kadar.
+                if p["tutar"] > kalan_ay + tol_tah:
+                    p["tutar"] = round(kalan_ay, 2)
+                if p["tutar"] <= tol_tah:
+                    atlanan.append(
+                        {
+                            "neden": "tutar_sifir",
+                            "yil": p["yil"],
+                            "ay": p["ay"],
+                        }
+                    )
+                    continue
                 makbuz_seq += 1
                 makbuz_no = str(makbuz_seq)
-                ay_adi = _AY_ADLARI[p["ay"] - 1]
                 marker = f"|AYLIK_TAH|{iso}|"
                 aciklama = f"{ay_adi} {p['yil']} Tahsilat {harf}{marker}"
                 tahsilat_tarihi = _p_tahsil_tarihi(p)
@@ -18182,6 +18313,40 @@ def api_aylik_tutarlardan_tahsil_et():
                     }
                 )
                 yerel_tahsil_iso.add(iso)
+                # Aynı batch'te sonraki satırlar için kalanı düş (panel bellek).
+                try:
+                    pb = panel_by_odeme.get(iso) or {}
+                    if isinstance(pb, dict):
+                        pb = dict(pb)
+                        eski_k = float(pb.get("kalan") or kalan_ay)
+                        pb["kalan"] = round(max(eski_k - float(p["tutar"]), 0.0), 2)
+                        pb["tahsil"] = round(
+                            float(pb.get("tahsil") or 0) + float(p["tutar"]), 2
+                        )
+                        panel_by_odeme[iso] = pb
+                except Exception:
+                    pass
+                if isinstance(payload_cap, dict):
+                    for a in payload_cap.get("aylar") or []:
+                        if not isinstance(a, dict):
+                            continue
+                        try:
+                            if int(a.get("yil")) != int(p["yil"]) or int(a.get("ay")) != int(p["ay"]):
+                                continue
+                        except (TypeError, ValueError):
+                            continue
+                        try:
+                            a["kalan_tutar_kdv"] = round(
+                                max(float(a.get("kalan_tutar_kdv") or 0) - float(p["tutar"]), 0.0),
+                                2,
+                            )
+                            a["odenen_tutar_kdv"] = round(
+                                float(a.get("odenen_tutar_kdv") or 0) + float(p["tutar"]),
+                                2,
+                            )
+                        except (TypeError, ValueError):
+                            pass
+                        break
     except RuntimeError as e:
         if str(e) == "panel tek baglanti yok":
             return _panel_guvenli_degil_yaniti()
@@ -18205,11 +18370,15 @@ def api_aylik_tutarlardan_tahsil_et():
     # Cache rebuild frontend isteğinde yapılacak (force=1)
     _cari_ekstre_api_cache.clear()
     zaten_n = sum(
-        1 for x in atlanan if isinstance(x, dict) and x.get("neden") == "zaten_tahsil"
+        1
+        for x in atlanan
+        if isinstance(x, dict)
+        and x.get("neden") in ("zaten_tahsil", "zaten_odenmis", "panel_kopya_yok")
     )
     yeni_n = len(olusturulan)
     _neden_etiket = {
         "zaten_tahsil": "zaten tahsilatlı",
+        "zaten_odenmis": "zaten ödenmiş, tahsilat girilemez",
         "panel_kopya_yok": "zaten tahsilatlı (grid_toplu)",
         "baska_kaynak": panel_tekrar.neden_kullanici_metni("baska_kaynak"),
         "eski_bos_kaynak": panel_tekrar.neden_kullanici_metni("eski_bos_kaynak"),
@@ -18247,9 +18416,19 @@ def api_aylik_tutarlardan_tahsil_et():
             {"yil": x.get("yil"), "ay": x.get("ay"), "neden": neden, "etiket": etiket, "ay_adi": ay_e}
         )
     if yeni_n == 0 and zaten_n > 0:
-        mesaj = (
-            f"{zaten_n} ay zaten tahsil edilmişti; panel ve grid güncellendi."
-        )
+        odenmis_msg = [
+            str(x.get("mesaj") or "").strip()
+            for x in atlanan
+            if isinstance(x, dict) and x.get("neden") == "zaten_odenmis" and x.get("mesaj")
+        ]
+        if odenmis_msg:
+            mesaj = "; ".join(odenmis_msg[:8])
+            if len(odenmis_msg) > 8:
+                mesaj += f" (+{len(odenmis_msg) - 8} ay)"
+        else:
+            mesaj = (
+                f"{zaten_n} ay zaten tahsil edilmişti; panel ve grid güncellendi."
+            )
     elif yeni_n > 0:
         mesaj = (
             f"{yeni_n} tahsilat kaydı oluşturuldu"

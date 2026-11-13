@@ -6034,27 +6034,11 @@ function sozlesmelerAyKartHayaletYesilMi(card) {
 function sozlesmelerAyKartYeniTahsilEdilebilirMi(card) {
     if (!card || !card.getAttribute('data-ay-key')) return false;
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
-    var yT = parseInt(card.getAttribute('data-yil') || '', 10);
-    var aT = parseInt(card.getAttribute('data-ay') || '', 10);
-    if (!isNaN(yT) && !isNaN(aT)) {
-        var stT = (typeof girisTahsilatYilAyPaneldenHucreDurum === 'function')
-            ? girisTahsilatYilAyPaneldenHucreDurum(yT, aT) : null;
-        if (!stT && typeof girisTahsilatYilAyPaneldenHucreDurumCacheDen === 'function') {
-            stT = girisTahsilatYilAyPaneldenHucreDurumCacheDen(yT, aT);
-        }
-        if (stT && stT.tip === 'kirmizi') return true;
-        if (stT && stT.tip === 'yesil') {
-            return (typeof sozlesmelerAyKartHayaletYesilMi === 'function')
-                ? !!sozlesmelerAyKartHayaletYesilMi(card) : false;
-        }
-    }
     if (sozlesmelerAyKartHucreTutar(card) <= tol) return false;
-    if (card.classList.contains('sozlesmeler-ay-kart-kismi')) {
-        var kalan = parseFloat(String(card.getAttribute('data-tutar-kdv') || '').replace(/\s/g, '').replace(',', '.'));
-        if (isFinite(kalan) && kalan > tol) return true;
-    }
-    if (card.classList.contains('sozlesmeler-ay-kart-odenmedi')) return true;
-    if (card.getAttribute('data-acik-aylik-borc') === '1') return true;
+    if (card.classList.contains('sozlesmeler-ay-kart-odendi')) return false;
+    if (card.getAttribute('data-tahsil-kapandi') === '1') return false;
+    var kalanAttr = parseFloat(String(card.getAttribute('data-tutar-kdv') || '').replace(/\s/g, '').replace(',', '.'));
+    if (isFinite(kalanAttr) && kalanAttr <= tol) return false;
     var keyNorm = (typeof sozlesmeAylikAyKeyNormalize === 'function')
         ? sozlesmeAylikAyKeyNormalize(String(card.getAttribute('data-ay-key') || ''))
         : String(card.getAttribute('data-ay-key') || '');
@@ -6062,18 +6046,14 @@ function sozlesmelerAyKartYeniTahsilEdilebilirMi(card) {
         && sozlesmeTahsilEdilenAyAnahtarlari
         && sozlesmeTahsilEdilenAyAnahtarlari.has
         && sozlesmeTahsilEdilenAyAnahtarlari.has(keyNorm)) {
-        if (typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(card)) {
-            return true;
-        }
         return false;
     }
-    if (card.getAttribute('data-tahsil-kapandi') === '1' && card.classList.contains('sozlesmeler-ay-kart-odendi')) {
-        if (typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(card)) {
-            return true;
-        }
-        return false;
+    if (card.classList.contains('sozlesmeler-ay-kart-kismi')) {
+        return isFinite(kalanAttr) ? (kalanAttr > tol) : true;
     }
-    return true;
+    if (card.classList.contains('sozlesmeler-ay-kart-odenmedi')) return true;
+    if (card.getAttribute('data-acik-aylik-borc') === '1') return true;
+    return false;
 }
 
 function sozlesmelerAyKartSecimToggle(card) {
@@ -20810,50 +20790,45 @@ function sozlesmeAylikTahsilEt(onayFazla) {
     }
     var grid = sozlesmelerAylikAktifGridEl();
     if (!grid) return;
-    try { if (typeof sozlesmeTahsilSetPanelBorcTemizle === 'function') sozlesmeTahsilSetPanelBorcTemizle(); } catch (_eTePb) {}
     var satirlarHam = sozlesmelerAylikSecimSatirlariKdvTutarli(grid);
     if (!satirlarHam.length) {
         alert('Tahsilat kaydı için en az bir ay seçin (tutarı olan hücreler).');
         return;
     }
     var satirlar = [];
+    var odenmisAtlanan = [];
     satirlarHam.forEach(function (s) {
         var ayKeyT = sozlesmeAylikAyKeyFromYilAy(s.yil, s.ay);
         var card = (typeof _sozlesmeAyKartBul === 'function')
             ? _sozlesmeAyKartBul(grid, ayKeyT)
             : ((typeof sozlesmelerAylikSeciliAyKartiBul === 'function') ? sozlesmelerAylikSeciliAyKartiBul(grid, ayKeyT) : null);
         if (card && typeof sozlesmelerAyKartYeniTahsilEdilebilirMi === 'function' && !sozlesmelerAyKartYeniTahsilEdilebilirMi(card)) {
+            odenmisAtlanan.push(ayKeyT || (s.yil + '-' + s.ay));
             return;
         }
-        satirlar.push(s);
+        var s2 = { yil: s.yil, ay: s.ay, tutar_kdv_dahil: s.tutar_kdv_dahil };
+        if (card) {
+            var kalanKart = parseFloat(String(card.getAttribute('data-tutar-kdv') || '').replace(/\s/g, '').replace(',', '.'));
+            var tolKart = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+            if (isFinite(kalanKart) && kalanKart > tolKart && s2.tutar_kdv_dahil > kalanKart + tolKart) {
+                s2.tutar_kdv_dahil = Math.round(kalanKart * 100) / 100;
+            }
+        }
+        satirlar.push(s2);
     });
     if (!satirlar.length) {
-        alert('Seçtiğiniz ayların tamamı zaten tahsil edilmiş görünüyor. Tahsilden çıkar veya borçlu/kısmi ayları seçin.');
+        alert((odenmisAtlanan.length ? (odenmisAtlanan.join(', ') + ' ayı zaten ödenmiş, tahsilat girilemez. ') : '') +
+            'Seçtiğiniz ayların tamamı zaten tahsil edilmiş görünüyor. Tahsilden çıkar veya borçlu/kısmi ayları seçin.');
         return;
     }
     if (satirlar.length < satirlarHam.length) {
         if (!confirm(
-            (satirlarHam.length - satirlar.length) + ' ay zaten tahsil edilmiş; yalnızca ' + satirlar.length +
+            (satirlarHam.length - satirlar.length) + ' ay zaten ödenmiş (tahsilat girilemez); yalnızca ' + satirlar.length +
             ' ay işlenecek. Devam edilsin mi?'
         )) return;
     }
-    var hayaletN = 0;
-    satirlar.forEach(function (sH) {
-        var ayKeyH = sozlesmeAylikAyKeyFromYilAy(sH.yil, sH.ay);
-        var cardH = (typeof _sozlesmeAyKartBul === 'function')
-            ? _sozlesmeAyKartBul(grid, ayKeyH)
-            : null;
-        if (cardH && typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(cardH)) {
-            hayaletN += 1;
-        }
-    });
-    if (hayaletN > 0) {
-        if (!confirm(
-            hayaletN + ' ay yeşil görünüyor ama tahsilat kaydı yok (hayalet). Bu aylar için yeni tahsilat satırı yazılacak. Devam edilsin mi?'
-        )) return;
-    }
     var toplamStr = satirlar.reduce(function(s, r) { return s + r.tutar_kdv_dahil; }, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    var panelSoruTahsil = satirlar.length + ' ay için toplam ' + toplamStr + ' ₺ (KDV dahil) tahsilat olarak cari akışa yazılsın mı? Daha önce tahsil edilmiş aylar atlanır.';
+    if (!confirm(satirlar.length + ' ay için toplam ' + toplamStr + ' ₺ (KDV dahil) tahsilat olarak cari akışa yazılsın mı? Daha önce tahsil edilmiş aylar atlanır.')) return;
     window.__aylikTahsilInFlight = true;
     var tahsilBtn = document.querySelector('button.btn-aylik-tahsil');
     var eskiYazi = tahsilBtn ? tahsilBtn.innerHTML : '';
@@ -20863,113 +20838,96 @@ function sozlesmeAylikTahsilEt(onayFazla) {
         tahsilBtn.style.cursor = 'not-allowed';
         tahsilBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> İşleniyor...';
     }
-    if (!onayFazla) window.__ileriDonemOnayPanel = false;
     var fazlaRetry = false;
     var tahsilAbort = new AbortController();
     var tahsilTimeoutId = setTimeout(function () {
         try { tahsilAbort.abort(); } catch (eAb) {}
     }, 180000);
-    panelTekrarGonder('/giris/api/aylik-tutarlardan-tahsil-et', {
-        __panelSoru: panelSoruTahsil,
+    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-tahsil-et', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         timeoutMs: 120000,
         signal: tahsilAbort.signal,
-        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0, ileri_donem_onay: window.__ileriDonemOnayPanel ? 1 : 0 })
-    }, 2).then(function (res) {
-        if (res.iptal || (res.j && res.j.iptal)) {
-            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
-            if (typeof doneCb === 'function') doneCb(false);
-            return;
-        }
+        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale', onay_fazla_tutar: onayFazla ? 1 : 0 })
+    }, 2).then(function (r) {
+        return r.text().then(function (text) {
+            var j = null;
+            try {
+                j = text ? JSON.parse(text) : null;
+            } catch (eParse) {
+                throw new Error((text && text.slice) ? text.slice(0, 300) : ('HTTP ' + r.status));
+            }
+            return { ok: r.ok, j: j };
+        });
+    }).then(function (res) {
         if (!res.j || !res.j.ok) {
             var fazlaMetin = girisTahsilFazlaTutarOnayMetni(res.j);
             if (fazlaMetin && !onayFazla && confirm(fazlaMetin)) {
                 fazlaRetry = true;
                 return;
             }
-            if (res.j && res.j.kod === 'ileri_donem_onay_gerekli' && !window.__ileriDonemOnayPanel) {
-                if (confirm(res.j.mesaj || 'Tutar vadesi gelmiş borcu aşıyor; fazlası ileri döneme yazılacak. Emin misiniz?')) {
-                    window.__ileriDonemOnayPanel = true;
-                    fazlaRetry = true;
-                    return;
-                }
-                alert('İptal edildi; ileri döneme yazılmadı.');
-                return;
-            }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'İşlem başarısız.');
             return;
         }
-        if (res.j.ls_temizle) {
-            var lsKey = '__aylik_yil_kayit__|' + String(mid);
-            try { localStorage.removeItem(lsKey); } catch (_eLs) {}
-        }
-        setTimeout(function () {
-            try {
-                var lsKey = '__aylik_yil_kayit__|' + String(mid);
-                localStorage.removeItem(lsKey);
-                var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
-                localStorage.removeItem(lsAyKey);
-                localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid)); try { localStorage.removeItem('__tahsilat_yil_ay_kayit__|v' + String(typeof GIRIS_TAHSILAT_YIL_AY_KAYIT_VER !== 'undefined' ? GIRIS_TAHSILAT_YIL_AY_KAYIT_VER : 2) + '|' + String(mid)); } catch (_eRmV) {}
-            } catch (_e) {}
-        }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
-        var msg = (typeof girisTahsilEtSonucMesaji === 'function')
-            ? girisTahsilEtSonucMesaji(res.j)
-            : ((res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length);
-        o.forEach(function (row) {
-            var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
-            if (k) {
-                sozlesmeTahsilEdilenAyAnahtarlari.add(k);
-                if (sozlesmeAylikZorlaBorcluAyAnahtarlari && sozlesmeAylikZorlaBorcluAyAnahtarlari.delete) {
-                    sozlesmeAylikZorlaBorcluAyAnahtarlari.delete(sozlesmeAylikAyKeyNormalize(k));
-                }
-            }
-        });
-        // "zaten_tahsil": tam ödenmiş aylar atlanır; kira artışı sonrası kısmi (ör. 1715/2277)
-        // ise sete eklenmez — aksi halde kırmızı hücre yanlışlıkla yeşile döner.
-        alert(msg);
-        if (res.j.panel_yil_onerisi != null && typeof girisTahsilEtSonrasiPanelYil === 'function') {
-            try { girisTahsilEtSonrasiPanelYil(res.j.panel_yil_onerisi); } catch (_ePy2) {}
+        var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
+        if (typeof sozlesmeAylikTahsilSonrasiSenkron === 'function') {
+            sozlesmeAylikTahsilSonrasiSenkron(satirlar, o, a);
         }
-        var donOner = res.j.ekstre_donem_onerisi;
-        if (donOner && donOner.bas && donOner.bit) {
-            if (confirm('Ekstre dönemini ' + donOner.bas + ' – ' + donOner.bit + ' yapıp yenilemek ister misiniz?')) {
-                if (typeof girisEkstreDonemOnerisiniUygula === 'function') {
-                    girisEkstreDonemOnerisiniUygula(donOner);
-                }
-            }
-        }
-        sozlesmeAylikSecimiTemizle();
-        if (typeof girisTahsilatPanelOlusturulanSenkron === 'function') girisTahsilatPanelOlusturulanSenkron(o);
         var ekstreYenileFn = function () {
             if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
         };
-        if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
-            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
-        } else if (window.__sozlesmelerAylikSonCacheObj && Array.isArray(window.__sozlesmelerAylikSonCacheObj.aylar) && window.__sozlesmelerAylikSonCacheObj.aylar.length) {
-            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
-        }
-        // Tamamı "zaten tahsil" ise (oluşturulan 0), mevcut yeşil set yeterli;
-        // zorla yeniden çekim bazı ortamlarda ay setini eksik döndürüp kırmızıya düşürebiliyor.
-        if (o.length > 0 || a.some(function (row) { return row && row.neden === 'zaten_tahsil'; })) {
-            sozlesmelerAylikHizliYukle(true).then(function(ok) {
-                sozlesmelerAylikHizliYukleBasarisizsaYedekCiz(ok);
+        function tahsilGridYenileVeBitir() {
+            if (typeof sozlesmelerAylikHizliYukle === 'function') {
+                sozlesmelerAylikHizliYukle(true).then(function (ok) {
+                    if (typeof sozlesmelerAylikHizliYukleBasarisizsaYedekCiz === 'function') {
+                        sozlesmelerAylikHizliYukleBasarisizsaYedekCiz(ok);
+                    }
+                    try {
+                        if (typeof sozlesmeAylikTahsilSonrasiSenkron === 'function') {
+                            sozlesmeAylikTahsilSonrasiSenkron(satirlar, o, a);
+                        }
+                    } catch (_eReSyn) {}
+                    ekstreYenileFn();
+                });
+            } else {
                 ekstreYenileFn();
-            });
-        } else if (typeof sozlesmelerReelDonemTutarlariUygula === 'function') {
-            // Sunucuda zaten tahsil olan aylar için, yeni set ile görseli anında yeşile çek.
-            try { sozlesmelerReelDonemTutarlariUygula(true); } catch (_eRepaint0) {}
-            try { sozlesmelerAylikNormGridKartTutarlariniYenile(); } catch (_eRepaint1) {}
-            try { sozlesmelerAylikTahsilSetiniGorseleZorla(); } catch (_eTs) {}
-            if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') {
-                try { sozlesmelerAylikSecilebilirlikYenile(); } catch (_eSel) {}
             }
-            ekstreYenileFn();
+        }
+        function tahsilUiMesajVeTemizle() {
+            alert(msg);
+            sozlesmeAylikSecimiTemizle();
+            tahsilGridYenileVeBitir();
+        }
+        if (typeof girisTahsilatYilAyPanelDbKaydet === 'function') {
+            girisTahsilatYilAyPanelDbKaydet(function (okPanel) {
+                if (!okPanel) {
+                    tahsilUiMesajVeTemizle();
+                    return;
+                }
+                if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+                    girisTahsilatYilAyPanelDbYukle(mid, function () {
+                        try {
+                            var yilAcikPan = window.__tahsilatSatirYilAcik || {};
+                            Object.keys(yilAcikPan).forEach(function (yk) {
+                                if (!yilAcikPan[yk]) return;
+                                var yn = parseInt(yk, 10);
+                                if (isNaN(yn)) return;
+                                if (typeof girisTahsilatYilAyPanelGuncelle === 'function') {
+                                    girisTahsilatYilAyPanelGuncelle(yn, { sunucuPanelYuklendi: true });
+                                }
+                            });
+                        } catch (_ePanTahYen) {}
+                        tahsilUiMesajVeTemizle();
+                    }, { zorlaUygula: true, ttlMs: 0, persistMs: 0 });
+                } else {
+                    tahsilUiMesajVeTemizle();
+                }
+            }, { satirlar: satirlar });
         } else {
-            ekstreYenileFn();
+            tahsilUiMesajVeTemizle();
         }
         if (typeof selectedId !== 'undefined' && selectedId && typeof cariKartYukle === 'function') {
             try { cariKartYukle(selectedId); } catch (e3) {}
@@ -33893,8 +33851,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     var sozTahsilTutar = document.getElementById('sozlesme_tahsilat_tutar');
     if (sozTahsilTutar) {
-        sozTahsilTutar.addEventListener('input', function () { tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar'); });
-        sozTahsilTutar.addEventListener('change', function () { tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar'); });
+        sozTahsilTutar.addEventListener('input', function () {
+            tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar');
+            if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('sozlesme_tahsilat_tutar');
+        });
+        sozTahsilTutar.addEventListener('change', function () {
+            tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar');
+            if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('sozlesme_tahsilat_tutar');
+        });
+    }
+    var girisTahsilTutar = document.getElementById('giris_tahsilat_tutar');
+    if (girisTahsilTutar && !girisTahsilTutar.__fazlaOdemeBound) {
+        girisTahsilTutar.__fazlaOdemeBound = true;
+        girisTahsilTutar.addEventListener('input', function () {
+            if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('giris_tahsilat_tutar');
+        });
+        girisTahsilTutar.addEventListener('change', function () {
+            if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('giris_tahsilat_tutar');
+        });
     }
     ['sozlesmeler-reel-tutar', 'sozlesmeler-reel-hibrit-toplam', 'sozlesmeler-reel-hibrit-net', 'sozlesmeler-reel-hibrit-banka', 'sozlesmeler-reel-tutar-tip']
         .forEach(function(id){
@@ -36425,6 +36399,74 @@ function girisTahsilatMakbuzKaydet() {
     .finally(() => { window.__girisTahsilKaydetInFlight = false; });
 }
 
+function tahsilatFazlaOdemeUyariEl(prefix) {
+    var id = (prefix || 'sozlesme') + '_tahsilat_fazla_odeme_uyari';
+    var el = document.getElementById(id);
+    if (el) return el;
+    var tutarId = (prefix || 'sozlesme') + '_tahsilat_tutar';
+    var tutarEl = document.getElementById(tutarId);
+    if (!tutarEl || !tutarEl.parentNode) return null;
+    el = document.createElement('div');
+    el.id = id;
+    el.setAttribute('data-fazla-odeme-uyari', '1');
+    el.style.cssText = 'display:none;margin-top:6px;color:#a35b00;font-size:12px;font-weight:600;';
+    tutarEl.parentNode.appendChild(el);
+    return el;
+}
+
+function tahsilatFazlaOdemeUyariMetni(fazlaTl) {
+    var n = Number(fazlaTl);
+    if (!isFinite(n) || n <= 0.05) return '';
+    var s = n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return 'Fazla ödeme: ' + s + ' TL ileri aylara/alacağa yazılacak';
+}
+
+function tahsilatFazlaOdemeUyariGoster(prefix, fazlaTl) {
+    var el = tahsilatFazlaOdemeUyariEl(prefix);
+    if (!el) return;
+    var metin = tahsilatFazlaOdemeUyariMetni(fazlaTl);
+    if (!metin) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.textContent = metin;
+    el.style.display = 'block';
+}
+
+function tahsilatAcikBorcToplamHesapla() {
+    var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var sum = 0;
+    try {
+        var list = (typeof tahsilatAylikBorcListesiFromGrid === 'function')
+            ? tahsilatAylikBorcListesiFromGrid()
+            : [];
+        (list || []).forEach(function (x) {
+            var k = Number(x && x.kalan);
+            if (isFinite(k) && k > tol) sum += k;
+        });
+    } catch (_eSum) {}
+    return Math.round(sum * 100) / 100;
+}
+
+function tahsilatFazlaOdemeUyariGuncelle(kaynakInputId) {
+    var inp = document.getElementById(kaynakInputId || 'sozlesme_tahsilat_tutar');
+    var prefix = (kaynakInputId && String(kaynakInputId).indexOf('giris_') === 0) ? 'giris' : 'sozlesme';
+    var tutar = 0;
+    try {
+        tutar = (typeof parseFlexibleAmount === 'function')
+            ? parseFlexibleAmount(inp && inp.value)
+            : parseFloat(String((inp && inp.value) || '').replace(/\./g, '').replace(',', '.'));
+    } catch (_eT) { tutar = 0; }
+    if (!isFinite(tutar) || tutar <= 0) {
+        tahsilatFazlaOdemeUyariGoster(prefix, 0);
+        return;
+    }
+    var acik = tahsilatAcikBorcToplamHesapla();
+    var fazla = (acik > 0) ? Math.round((tutar - acik) * 100) / 100 : 0;
+    tahsilatFazlaOdemeUyariGoster(prefix, fazla);
+}
+
 function girisTahsilatOnizle() {
     const payload = girisTahsilatFormPayload();
     if (!payload.musteri_id && !payload.musteri_adi) {
@@ -36435,17 +36477,33 @@ function girisTahsilatOnizle() {
         alert('Geçerli bir tutar giriniz.');
         return;
     }
+    try { tahsilatFazlaOdemeUyariGuncelle('giris_tahsilat_tutar'); } catch (_eUy) {}
+    var metaPayload = Object.assign({}, payload, { meta_only: 1 });
     fetch(API_TAHSILAT_ONIZLE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.blob())
-    .then(blob => {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
-    })
-    .catch(() => alert('Önizleme alınamadı.'));
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(metaPayload)
+    }).then(function (r) { return r.json().catch(function () { return null; }); })
+    .then(function (meta) {
+        if (meta && meta.ok && Number(meta.fazla_odeme_tl) > 0.05) {
+            tahsilatFazlaOdemeUyariGoster('giris', meta.fazla_odeme_tl);
+            if (meta.fazla_odeme_uyari) {
+                try { console.info(meta.fazla_odeme_uyari); } catch (_eC) {}
+            }
+        }
+    }).catch(function () {}).finally(function () {
+        fetch(API_TAHSILAT_ONIZLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(function (r) { return r.blob(); })
+        .then(function (blob) {
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener');
+        })
+        .catch(function () { alert('Önizleme alınamadı.'); });
+    });
 }
 
 /** Müşteriye verilecek makbuz PDF’i (önizleme; kayıt oluşturmaz). */
@@ -36943,17 +37001,30 @@ function sozlesmeTahsilatOnizle() {
         alert('Geçerli bir tutar giriniz.');
         return;
     }
+    try { tahsilatFazlaOdemeUyariGuncelle('sozlesme_tahsilat_tutar'); } catch (_eUy2) {}
+    var metaPayload = Object.assign({}, payload, { meta_only: 1 });
     fetch(API_TAHSILAT_ONIZLE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.blob())
-    .then(blob => {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
-    })
-    .catch(() => alert('Önizleme alınamadı.'));
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(metaPayload)
+    }).then(function (r) { return r.json().catch(function () { return null; }); })
+    .then(function (meta) {
+        if (meta && meta.ok && Number(meta.fazla_odeme_tl) > 0.05) {
+            tahsilatFazlaOdemeUyariGoster('sozlesme', meta.fazla_odeme_tl);
+        }
+    }).catch(function () {}).finally(function () {
+        fetch(API_TAHSILAT_ONIZLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(function (r) { return r.blob(); })
+        .then(function (blob) {
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener');
+        })
+        .catch(function () { alert('Önizleme alınamadı.'); });
+    });
 }
 
 function sozlesmeTahsilatMakbuzOlustur() {

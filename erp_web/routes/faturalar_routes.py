@@ -11864,9 +11864,13 @@ def tahsilat_pdf(tahsilat_id):
 @bp.route('/tahsilat-makbuz-onizle', methods=['POST'])
 @faturalar_gerekli
 def tahsilat_makbuz_onizle():
-    """Form verileriyle tahsilat makbuzu PDF önizlemesi (kaydetmeden)."""
+    """Form verileriyle tahsilat makbuzu PDF önizlemesi (kaydetmeden).
+
+    meta_only=1 veya Accept: application/json → kayıt yok; fazla ödeme bilgi alanları.
+    Davranış değişmez (yalnız uyarı/meta); tahsilat-ekle engellenmez.
+    """
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         musteri_id = data.get('musteri_id')
         musteri_adi = (data.get('musteri_adi') or '').strip()
         if not musteri_adi and musteri_id:
@@ -11888,6 +11892,59 @@ def tahsilat_makbuz_onizle():
         cek_detay_raw = data.get('cek_detay')
         cek_list = cek_detay_raw if isinstance(cek_detay_raw, list) else []
         havale_banka = (data.get('havale_banka') or '').strip()[:200]
+
+        # Fazla ödeme bilgi meta (FIFO açık ay borcu toplamı).
+        fazla_odeme_tl = 0.0
+        acik_borc_toplam = 0.0
+        dagitilacak = 0.0
+        try:
+            mid_i = int(musteri_id or 0)
+        except (TypeError, ValueError):
+            mid_i = 0
+        if mid_i > 0 and tutar > 0:
+            try:
+                _isos, pay_items = _auto_allocate_oldest_unpaid_months(
+                    mid_i, tutar, odeme_tarihi=tahsilat_tarihi
+                )
+                dagitilacak = round(
+                    sum(float(p or 0) for _iso, p in (pay_items or [])), 2
+                )
+                fazla_odeme_tl = round(max(float(tutar) - dagitilacak, 0.0), 2)
+                # Açık borç toplamı: aynı FIFO ile çok büyük tutar dağıtımı
+                _isos2, pay_all = _auto_allocate_oldest_unpaid_months(
+                    mid_i, 1e12, odeme_tarihi=tahsilat_tarihi
+                )
+                acik_borc_toplam = round(
+                    sum(float(p or 0) for _iso, p in (pay_all or [])), 2
+                )
+                if acik_borc_toplam > 0:
+                    fazla_odeme_tl = round(max(float(tutar) - acik_borc_toplam, 0.0), 2)
+                    dagitilacak = round(min(float(tutar), acik_borc_toplam), 2)
+            except Exception:
+                fazla_odeme_tl = 0.0
+
+        want_meta = bool(
+            data.get("meta_only") in (True, 1, "1", "true", "True")
+            or "application/json" in (request.headers.get("Accept") or "").lower()
+        )
+        if want_meta:
+            uyari = ""
+            if fazla_odeme_tl > 0.05:
+                uyari = (
+                    "Fazla ödeme: %s TL ileri aylara/alacağa yazılacak"
+                    % _fmt_tl_tr(fazla_odeme_tl)
+                )
+            return jsonify({
+                "ok": True,
+                "meta_only": 1,
+                "tutar": round(float(tutar or 0), 2),
+                "acik_borc_toplam": acik_borc_toplam,
+                "dagitilacak": dagitilacak,
+                "fazla_odeme_tl": fazla_odeme_tl,
+                "fazla_odeme_uyari": uyari,
+                "boolean": int(fazla_odeme_tl > 0.05),
+            })
+
         fake_row = {
             "makbuz_no": _tahsilat_icin_makbuz_no_sec(data.get("makbuz_no")),
             "tutar": tutar,
@@ -11904,12 +11961,15 @@ def tahsilat_makbuz_onizle():
             "SELECT banka_adi, hesap_adi, iban FROM banka_hesaplar WHERE COALESCE(is_active::int, 1) = 1 AND (iban IS NOT NULL AND iban != '') ORDER BY banka_adi"
         )
         pdf_bytes = build_makbuz_pdf(fake_row, musteri_adi, None, banka_hesaplar=banka_hesaplar)
-        return Response(pdf_bytes, mimetype="application/pdf", headers={
+        headers = {
             "Content-Disposition": "inline; filename=Tahsilat_Onizleme.pdf",
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
-        })
+            "X-Fazla-Odeme-Tl": str(fazla_odeme_tl),
+            "X-Acik-Borc-Toplam": str(acik_borc_toplam),
+        }
+        return Response(pdf_bytes, mimetype="application/pdf", headers=headers)
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
