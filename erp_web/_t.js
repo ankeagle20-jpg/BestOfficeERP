@@ -21391,6 +21391,10 @@ function selectMusteri(id) {
     window.__musteriReelDonemDbKayitli = false;
     girisHistoryMaybeClearFaturaRaporListFlag();
     selectedId = id;
+    try {
+        if (typeof girisDemirbasYukle === 'function') girisDemirbasYukle(id);
+    } catch (_eDemSel) {}
+
     window.__girisKartFormKirli = false;
     (function () {
         var form = document.getElementById('musteri-form');
@@ -29176,10 +29180,12 @@ async function kiraBildirgesiWhatsApp() {
 
 
 /* === Demirbaşlar (DEMIRBAS_TABLOSU) === */
+var GIRIS_DEMIRBAS_API = '/giris/api';
 var __girisDemirbasKatalog = [];
 var __girisDemirbasDiger = 'Diğer (elle yaz)';
 var __girisDemirbasAktif = false;
 var __girisDemirbasTabloVar = false;
+var __girisDemirbasYukleState = { mid: '', seq: 0, inflight: false, done: false };
 
 function girisDemirbasApi(path, opts) {
     opts = opts || {};
@@ -29190,7 +29196,13 @@ function girisDemirbasApi(path, opts) {
         credentials: 'same-origin',
         headers: headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined
-    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); });
+    }).then(function (r) {
+        return r.text().then(function (txt) {
+            var j = null;
+            try { j = txt ? JSON.parse(txt) : null; } catch (_eJ) { j = null; }
+            return { status: r.status, ok: !!r.ok, json: j };
+        });
+    });
 }
 
 function girisDemirbasSectionGoster(goster) {
@@ -29301,9 +29313,9 @@ function girisDemirbasEsyaDegisti(tr) {
     if (locked && prevKey === ad) return;
     var midEl = document.getElementById('musteri-id');
     var mid = midEl ? midEl.value : '';
-    girisDemirbasApi('/api/demirbas-seri-no', { method: 'POST', body: { esya: ad, mid: mid || null } })
+    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-seri-no', { method: 'POST', body: { esya: ad, mid: mid || null } })
         .then(function (res) {
-            if (!res.json || !res.json.ok || !seri) return;
+            if (!res.ok || !res.json || !res.json.ok || !seri) return;
             seri.value = res.json.seri_no || '';
             seri.setAttribute('data-esya-key', ad);
             seri.setAttribute('data-locked', '0');
@@ -29336,13 +29348,29 @@ function girisDemirbasOkuSatirlar() {
 }
 
 function girisDemirbasYukle(mid) {
-    girisDemirbasMesaj('');
+    mid = (mid == null || mid === '') ? '' : String(mid);
     if (!mid) {
         girisDemirbasSectionGoster(false);
+        girisDemirbasMesaj('');
+        __girisDemirbasYukleState = { mid: '', seq: 0, inflight: false, done: false };
         return;
     }
-    girisDemirbasApi('/api/demirbas-katalog?mid=' + encodeURIComponent(mid))
+    var st = __girisDemirbasYukleState;
+    if (st.mid === mid && (st.inflight || st.done)) return;
+    var seq = (st.seq || 0) + 1;
+    __girisDemirbasYukleState = { mid: mid, seq: seq, inflight: true, done: false };
+    girisDemirbasMesaj('');
+    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-katalog?mid=' + encodeURIComponent(mid))
         .then(function (res) {
+            if (__girisDemirbasYukleState.seq !== seq) return null;
+            if (!res.ok) {
+                __girisDemirbasAktif = true;
+                girisDemirbasSectionGoster(true);
+                girisDemirbasMesaj('Demirbaş listesi yüklenemedi (' + String(res.status) + ')');
+                __girisDemirbasYukleState.inflight = false;
+                __girisDemirbasYukleState.done = true;
+                return null;
+            }
             var j = res.json || {};
             __girisDemirbasAktif = !!j.aktif;
             __girisDemirbasTabloVar = !!j.tablo_var;
@@ -29350,6 +29378,9 @@ function girisDemirbasYukle(mid) {
             if (j.diger) __girisDemirbasDiger = j.diger;
             if (!__girisDemirbasAktif) {
                 girisDemirbasSectionGoster(false);
+                girisDemirbasMesaj('');
+                __girisDemirbasYukleState.inflight = false;
+                __girisDemirbasYukleState.done = true;
                 return null;
             }
             girisDemirbasSectionGoster(true);
@@ -29357,18 +29388,37 @@ function girisDemirbasYukle(mid) {
                 girisDemirbasMesaj(j.mesaj || 'Demirbaş tablosu henüz oluşturulmamış.');
                 var tb0 = document.getElementById('giris_demirbas_tbody');
                 if (tb0) tb0.innerHTML = '';
+                __girisDemirbasYukleState.inflight = false;
+                __girisDemirbasYukleState.done = true;
                 return null;
             }
-            return girisDemirbasApi('/api/musteri/' + encodeURIComponent(mid) + '/demirbas');
+            return girisDemirbasApi(GIRIS_DEMIRBAS_API + '/musteri/' + encodeURIComponent(mid) + '/demirbas');
         })
         .then(function (res) {
-            if (!res) return;
+            if (__girisDemirbasYukleState.seq !== seq) return;
+            if (res == null) return;
+            if (!res.ok) {
+                girisDemirbasSectionGoster(true);
+                girisDemirbasMesaj('Demirbaş listesi yüklenemedi (' + String(res.status) + ')');
+                __girisDemirbasYukleState.inflight = false;
+                __girisDemirbasYukleState.done = true;
+                return;
+            }
             var tb = document.getElementById('giris_demirbas_tbody');
             if (tb) tb.innerHTML = '';
             var rows = (res.json && res.json.rows) || [];
             rows.forEach(function (r) { girisDemirbasSatirEkle(r); });
+            girisDemirbasMesaj('');
+            __girisDemirbasYukleState.inflight = false;
+            __girisDemirbasYukleState.done = true;
         })
-        .catch(function () { girisDemirbasSectionGoster(false); });
+        .catch(function () {
+            if (__girisDemirbasYukleState.seq !== seq) return;
+            girisDemirbasSectionGoster(true);
+            girisDemirbasMesaj('Demirbaş listesi yüklenemedi');
+            __girisDemirbasYukleState.inflight = false;
+            __girisDemirbasYukleState.done = true;
+        });
 }
 
 function girisDemirbasKaydet(mid) {
@@ -29377,9 +29427,9 @@ function girisDemirbasKaydet(mid) {
         return Promise.resolve({ ok: false, mesaj: 'Demirbaş tablosu yok' });
     }
     var rows = girisDemirbasOkuSatirlar();
-    return girisDemirbasApi('/api/musteri/' + encodeURIComponent(mid) + '/demirbas', {
+    return girisDemirbasApi(GIRIS_DEMIRBAS_API + '/musteri/' + encodeURIComponent(mid) + '/demirbas', {
         method: 'PUT',
         body: { rows: rows }
-    }).then(function (res) { return res.json || { ok: false }; });
+    }).then(function (res) { return (res && res.json) || { ok: false }; });
 }
 
