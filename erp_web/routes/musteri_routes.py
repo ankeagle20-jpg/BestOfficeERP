@@ -3350,6 +3350,12 @@ def api_kyc_sozlesme():
             sozlesme_tarihi=kyc.get("sozlesme_tarihi"),
             hizmet_turu=hizmet_turu,
         )
+        try:
+            from routes.giris_routes import _demirbas_rows_for_mid
+
+            ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(musteri_id))
+        except Exception:
+            ctx["demirbas_rows"] = []
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out_dir = os.path.join(base_dir, "uploads", "sozlesmeler")
         os.makedirs(out_dir, exist_ok=True)

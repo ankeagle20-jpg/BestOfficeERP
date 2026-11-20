@@ -8254,6 +8254,209 @@ def api_senaryo_01():
     )
 
 
+def _demirbas_rows_for_mid(mid: int) -> list:
+    """Tablo yoksa []. PII yok — yalnızca demirbaş alanları."""
+    try:
+        from db import musteri_demirbas_table_exists
+        from demirbas import demirbas_tablosu_aktif
+    except Exception:
+        return []
+    if not demirbas_tablosu_aktif(mid):
+        return []
+    if not musteri_demirbas_table_exists():
+        return []
+    try:
+        rows = fetch_all(
+            """
+            SELECT sira, esya, marka_model, seri_no, adet_durum, mulkiyet, kapsam
+            FROM musteri_demirbas
+            WHERE musteri_id = %s
+            ORDER BY
+                CASE WHEN kapsam = 'ortak_alan' THEN 1 ELSE 0 END,
+                sira ASC,
+                id ASC
+            """,
+            (mid,),
+        ) or []
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@bp.route("/api/demirbas-katalog", methods=["GET"])
+@giris_gerekli
+def api_demirbas_katalog():
+    """Katalog + bayrak durumu (mid opsiyonel). Tablo DDL çalıştırmaz."""
+    from demirbas import (
+        DEMIRBAS_DIGER,
+        demirbas_katalog_fe,
+        demirbas_tablosu_aktif,
+    )
+    from db import musteri_demirbas_table_exists
+
+    mid = request.args.get("mid")
+    aktif = demirbas_tablosu_aktif(mid)
+    tablo_var = False
+    try:
+        tablo_var = bool(musteri_demirbas_table_exists())
+    except Exception:
+        tablo_var = False
+    return jsonify(
+        {
+            "ok": True,
+            "aktif": aktif,
+            "tablo_var": tablo_var,
+            "diger": DEMIRBAS_DIGER,
+            "katalog": demirbas_katalog_fe() if aktif else [],
+            "mesaj": (
+                None
+                if (not aktif or tablo_var)
+                else "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir."
+            ),
+        }
+    )
+
+
+@bp.route("/api/demirbas-seri-no", methods=["POST"])
+@giris_gerekli
+def api_demirbas_seri_no():
+    """Eşya adından benzersiz seri no (BE tek fonksiyon)."""
+    from demirbas import demirbas_seri_no_uret_benzersiz, demirbas_tablosu_aktif
+    from db import musteri_demirbas_table_exists
+
+    data = request.get_json(silent=True) or {}
+    esya = str(data.get("esya") or "").strip()
+    mid = data.get("mid")
+    if not esya:
+        return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
+    if mid is not None and not demirbas_tablosu_aktif(mid):
+        return jsonify({"ok": False, "mesaj": "demirbas kapali"}), 403
+
+    def _exists(seri: str) -> bool:
+        if not musteri_demirbas_table_exists():
+            return False
+        row = fetch_one(
+            "SELECT 1 AS x FROM musteri_demirbas WHERE seri_no = %s LIMIT 1",
+            (seri,),
+        )
+        return bool(row)
+
+    try:
+        seri = demirbas_seri_no_uret_benzersiz(esya, exists_fn=_exists)
+    except RuntimeError:
+        return jsonify({"ok": False, "mesaj": "seri no uretilemedi"}), 509
+    return jsonify({"ok": True, "seri_no": seri})
+
+
+@bp.route("/api/musteri/<int:mid>/demirbas", methods=["GET", "PUT"])
+@giris_gerekli
+def api_musteri_demirbas(mid: int):
+    """Demirbaş listesi oku / toplu kaydet. Bayrak kapalı → 404 görünmez."""
+    from demirbas import (
+        demirbas_kapsam_for_esya,
+        demirbas_seri_no_gecerli,
+        demirbas_seri_no_uret_benzersiz,
+        demirbas_tablosu_aktif,
+    )
+    from db import musteri_demirbas_table_exists
+
+    if not demirbas_tablosu_aktif(mid):
+        return jsonify({"ok": False, "mesaj": "demirbas kapali"}), 404
+    if not musteri_demirbas_table_exists():
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir.",
+                "tablo_var": False,
+            }
+        ), 503
+
+    if request.method == "GET":
+        rows = _demirbas_rows_for_mid(mid)
+        return jsonify({"ok": True, "rows": rows, "tablo_var": True})
+
+    # PUT — mevcut satırları değiştir (mid bazlı replace)
+    data = request.get_json(silent=True) or {}
+    items = data.get("rows")
+    if not isinstance(items, list):
+        return jsonify({"ok": False, "mesaj": "rows liste olmali"}), 400
+
+    cleaned = []
+    seen_seri: set[str] = set()
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        esya = str(it.get("esya") or "").strip()
+        if not esya:
+            continue
+        marka = str(it.get("marka_model") or "").strip()
+        adet = str(it.get("adet_durum") or "").strip()
+        mul_raw = str(it.get("mulkiyet") or "OFISBIR").strip().casefold()
+        mul = "MUSTERI" if ("musteri" in mul_raw or "müşteri" in mul_raw) else "OFISBIR"
+        kapsam = str(it.get("kapsam") or "").strip() or demirbas_kapsam_for_esya(esya)
+        if kapsam not in ("oda_ici", "ortak_alan"):
+            kapsam = demirbas_kapsam_for_esya(esya)
+        seri = str(it.get("seri_no") or "").strip()
+        cleaned.append(
+            {
+                "sira": len(cleaned) + 1,
+                "esya": esya,
+                "marka_model": marka,
+                "seri_no": seri,
+                "adet_durum": adet,
+                "mulkiyet": mul,
+                "kapsam": kapsam,
+            }
+        )
+
+    try:
+        # Önce bu mid'in satırlarını sil; sonra benzersizlik diğer mid + batch içi
+        execute("DELETE FROM musteri_demirbas WHERE musteri_id = %s", (mid,))
+
+        def _exists(seri: str) -> bool:
+            if seri in seen_seri:
+                return True
+            row = fetch_one(
+                "SELECT 1 AS x FROM musteri_demirbas WHERE seri_no = %s LIMIT 1",
+                (seri,),
+            )
+            return bool(row)
+
+        for r in cleaned:
+            seri = r["seri_no"]
+            if (not demirbas_seri_no_gecerli(seri)) or _exists(seri):
+                try:
+                    seri = demirbas_seri_no_uret_benzersiz(r["esya"], exists_fn=_exists)
+                except RuntimeError:
+                    return jsonify({"ok": False, "mesaj": "seri no uretilemedi"}), 509
+                r["seri_no"] = seri
+            seen_seri.add(seri)
+
+        for r in cleaned:
+            execute(
+                """
+                INSERT INTO musteri_demirbas
+                    (musteri_id, sira, esya, marka_model, seri_no, adet_durum, mulkiyet, kapsam)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    mid,
+                    r["sira"],
+                    r["esya"],
+                    r["marka_model"],
+                    r["seri_no"],
+                    r["adet_durum"],
+                    r["mulkiyet"],
+                    r["kapsam"],
+                ),
+            )
+    except Exception as e:
+        logging.getLogger(__name__).exception("demirbas kaydet")
+        return jsonify({"ok": False, "mesaj": "kayit basarisiz"}), 500
+
+    return jsonify({"ok": True, "n": len(cleaned), "rows": cleaned})
+
+
 @bp.route("/api/grup2-etiketleri", methods=["GET", "POST", "PUT", "DELETE"])
 @giris_gerekli
 def api_grup2_etiketleri():
@@ -9617,6 +9820,10 @@ def sozlesme_olustur(mid):
                 sozlesme_tarihi=None,
                 hizmet_turu=tur_raw or None,
             )
+            try:
+                ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(mid))
+            except Exception:
+                ctx["demirbas_rows"] = []
             filename = f"Sozlesme_{sozlesme_no}_{str(musteri.get('name') or 'Musteri').replace(' ', '_')}.docx"
             filepath = os.path.join("uploads", "sozlesmeler", filename)
             os.makedirs(os.path.dirname(filepath), exist_ok=True)

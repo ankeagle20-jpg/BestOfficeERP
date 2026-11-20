@@ -485,6 +485,78 @@ def _fill_signature_table(table, ctx: dict) -> None:
             _set_run_text_preserve(cells[3].paragraphs[0], ctx["yetkili_ad"])
 
 
+def _ek2_clone_row(table, template_row) -> None:
+    from copy import deepcopy
+
+    table._tbl.append(deepcopy(template_row._tr))
+
+
+def _ek2_set_row(row, vals: list[str]) -> None:
+    for i, val in enumerate(vals):
+        if i >= len(row.cells):
+            break
+        _set_cell_text(row.cells[i], val)
+
+
+def _fill_table_ek2(table, ctx: dict) -> None:
+    """Ek-2 demirbaş envanteri. Satır yoksa şablondaki boş satırlar (en az 5 veri) kalır."""
+    if len(table.columns) < 6 or len(table.rows) < 2:
+        return
+    raw_rows = list(ctx.get("demirbas_rows") or [])
+    if not raw_rows:
+        # Boş: en az 5 veri satırı olsun (şablon 4 ise 1 ekle)
+        while len(table.rows) < 6:  # header + 5
+            _ek2_clone_row(table, table.rows[1])
+            r = table.rows[-1]
+            _ek2_set_row(
+                r,
+                [str(len(table.rows) - 1), "", "", "", "", "OFİSBİR / Müşteri"],
+            )
+        return
+
+    from demirbas import demirbas_satirlari_ek2_sirali
+
+    ordered = demirbas_satirlari_ek2_sirali(raw_rows)
+    oda = [r for r in ordered if (r.get("kapsam") or "oda_ici") != "ortak_alan"]
+    ortak = [r for r in ordered if (r.get("kapsam") or "") == "ortak_alan"]
+
+    display: list[dict] = []
+    for r in oda:
+        display.append({"kind": "item", "row": r})
+    if ortak:
+        display.append({"kind": "header", "title": "Ortak alan"})
+        for r in ortak:
+            display.append({"kind": "item", "row": r})
+
+    tmpl = table.rows[1]
+    # Mevcut veri satırlarını temizle (header kalsın)
+    while len(table.rows) > 1:
+        table.rows[1]._tr.getparent().remove(table.rows[1]._tr)
+
+    sira_n = 0
+    for ent in display:
+        _ek2_clone_row(table, tmpl)
+        row = table.rows[-1]
+        if ent["kind"] == "header":
+            _ek2_set_row(row, ["", ent["title"], "", "", "", ""])
+            continue
+        sira_n += 1
+        r = ent["row"]
+        mul = str(r.get("mulkiyet") or "OFISBIR").upper()
+        mul_txt = "OFİSBİR" if mul in ("OFISBIR", "OFİSBİR") else "Müşteri"
+        _ek2_set_row(
+            row,
+            [
+                str(sira_n),
+                str(r.get("esya") or ""),
+                str(r.get("marka_model") or ""),
+                str(r.get("seri_no") or ""),
+                str(r.get("adet_durum") or ""),
+                mul_txt,
+            ],
+        )
+
+
 def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> bytes:
     """Şablonu doldurup DOCX baytları döndürür. DB yazmaz."""
     from docx import Document
@@ -507,6 +579,8 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
             _fill_signature_table(table, ctx)
         elif ti == 1:
             _fill_table_ek1(table, ctx)
+        elif ti == 2:
+            _fill_table_ek2(table, ctx)
         else:
             for row in table.rows:
                 for cell in row.cells:

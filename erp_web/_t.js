@@ -21566,6 +21566,11 @@ function selectMusteri(id) {
                 var arr = Array.isArray(m.grup2_secimleri) ? m.grup2_secimleri.slice() : [];
                 if (!arr.length && m.bizim_hesap) arr = ['bizim_hesap'];
                 if (typeof girisGrup2SeciliYaz === 'function') girisGrup2SeciliYaz(arr);
+    try {
+        var _midD = (typeof m !== 'undefined' && m && m.id) ? m.id : (document.getElementById('musteri-id') && document.getElementById('musteri-id').value);
+        if (_midD && typeof girisDemirbasYukle === 'function') girisDemirbasYukle(_midD);
+    } catch (_eD) {}
+
                 if (typeof girisGrup2EtiketleriYukle === 'function') {
                     girisGrup2EtiketleriYukle(function () {
                         if (typeof girisGrup2BtnLabelGuncelle === 'function') girisGrup2BtnLabelGuncelle();
@@ -23206,6 +23211,11 @@ async function kaydet(event) {
                 }
             } catch (eTahSync) {}
             musteriKaydetDurumGoster('success');
+            try {
+                var _midDem = document.getElementById('musteri-id') && document.getElementById('musteri-id').value;
+                if (_midDem && typeof girisDemirbasKaydet === 'function') girisDemirbasKaydet(_midDem);
+            } catch (_eDem) {}
+
             if (typeof girisAramaAlanlariKartSnapshotKaydet === 'function') girisAramaAlanlariKartSnapshotKaydet();
         } else {
             var errMsg = result.mesaj || 'Kayıt başarısız.';
@@ -29163,3 +29173,213 @@ async function kiraBildirgesiWhatsApp() {
         'Kira bildirgemiz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
     bestOfficeWhatsAppWebAc(num, metin);
 }
+
+
+/* === Demirbaşlar (DEMIRBAS_TABLOSU) === */
+var __girisDemirbasKatalog = [];
+var __girisDemirbasDiger = 'Diğer (elle yaz)';
+var __girisDemirbasAktif = false;
+var __girisDemirbasTabloVar = false;
+
+function girisDemirbasApi(path, opts) {
+    opts = opts || {};
+    var headers = opts.headers || {};
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    return fetch(path, {
+        method: opts.method || 'GET',
+        credentials: 'same-origin',
+        headers: headers,
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); });
+}
+
+function girisDemirbasSectionGoster(goster) {
+    var sec = document.getElementById('giris_demirbas_section');
+    if (!sec) return;
+    sec.style.display = goster ? '' : 'none';
+}
+
+function girisDemirbasMesaj(txt) {
+    var el = document.getElementById('giris_demirbas_mesaj');
+    if (!el) return;
+    if (!txt) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = '';
+    el.textContent = String(txt);
+}
+
+function girisDemirbasOptgroupsHtml(selectedEsya, digerAcik) {
+    var byGrup = {};
+    (__girisDemirbasKatalog || []).forEach(function (it) {
+        var g = it.grup || 'Diğer';
+        if (!byGrup[g]) byGrup[g] = [];
+        byGrup[g].push(it);
+    });
+    var html = '<option value="">— seçin —</option>';
+    Object.keys(byGrup).forEach(function (g) {
+        html += '<optgroup label="' + g.replace(/"/g, '&quot;') + '">';
+        byGrup[g].forEach(function (it) {
+            var sel = (selectedEsya === it.esya && !digerAcik) ? ' selected' : '';
+            html += '<option value="' + String(it.esya).replace(/"/g, '&quot;') + '" data-kapsam="' + it.kapsam + '"' + sel + '>' + it.esya + '</option>';
+        });
+        html += '</optgroup>';
+    });
+    var digSel = digerAcik ? ' selected' : '';
+    html += '<option value="__DIGER__"' + digSel + '>' + (__girisDemirbasDiger || 'Diğer (elle yaz)') + '</option>';
+    return html;
+}
+
+function girisDemirbasSiraYenile() {
+    var tb = document.getElementById('giris_demirbas_tbody');
+    if (!tb) return;
+    Array.prototype.forEach.call(tb.querySelectorAll('tr'), function (tr, i) {
+        var s = tr.querySelector('.dem-sira');
+        if (s) s.textContent = String(i + 1);
+    });
+}
+
+function girisDemirbasSatirEkle(pre) {
+    pre = pre || {};
+    var tb = document.getElementById('giris_demirbas_tbody');
+    if (!tb) return;
+    var tr = document.createElement('tr');
+    var esya = pre.esya || '';
+    var isDiger = !!(pre.elle || (esya && !(__girisDemirbasKatalog || []).some(function (x) { return x.esya === esya; }) && esya));
+    var katalogEsya = isDiger ? '' : esya;
+    var elleVal = isDiger ? esya : '';
+    tr.innerHTML =
+        '<td class="dem-sira" style="padding:4px 6px;"></td>' +
+        '<td style="padding:4px 6px;min-width:160px;">' +
+        '<select class="dem-esya-sel" style="width:100%;">' + girisDemirbasOptgroupsHtml(katalogEsya, isDiger) + '</select>' +
+        '<input type="text" class="dem-esya-elle" placeholder="Eşya adı" style="width:100%;margin-top:4px;' + (isDiger ? '' : 'display:none;') + '" value="' + String(elleVal).replace(/"/g, '&quot;') + '">' +
+        '<input type="hidden" class="dem-kapsam" value="' + String(pre.kapsam || 'oda_ici').replace(/"/g, '&quot;') + '">' +
+        '</td>' +
+        '<td style="padding:4px 6px;"><input type="text" class="dem-marka" style="width:100%;" value="' + String(pre.marka_model || '').replace(/"/g, '&quot;') + '"></td>' +
+        '<td style="padding:4px 6px;"><input type="text" class="dem-seri" readonly style="width:100%;background:#263238;" value="' + String(pre.seri_no || '').replace(/"/g, '&quot;') + '" data-locked="' + (pre.seri_no ? '1' : '0') + '" data-esya-key="' + String(esya).replace(/"/g, '&quot;') + '"></td>' +
+        '<td style="padding:4px 6px;"><input type="text" class="dem-adet" style="width:100%;" value="' + String(pre.adet_durum || '').replace(/"/g, '&quot;') + '"></td>' +
+        '<td style="padding:4px 6px;"><select class="dem-mulkiyet"><option value="OFISBIR"' + ((String(pre.mulkiyet || 'OFISBIR').toUpperCase().indexOf('MUST') >= 0) ? '' : ' selected') + '>OFİSBİR</option><option value="MUSTERI"' + ((String(pre.mulkiyet || '').toUpperCase().indexOf('MUST') >= 0) ? ' selected' : '') + '>Müşteri</option></select></td>' +
+        '<td style="padding:4px 6px;"><button type="button" class="auto-btn dem-sil" title="Sil" onclick="girisDemirbasSatirSil(this); return false;">×</button></td>';
+    tb.appendChild(tr);
+    girisDemirbasSiraYenile();
+    var sel = tr.querySelector('.dem-esya-sel');
+    var elle = tr.querySelector('.dem-esya-elle');
+    if (sel) sel.addEventListener('change', function () { girisDemirbasEsyaDegisti(tr); });
+    if (elle) elle.addEventListener('change', function () { girisDemirbasEsyaDegisti(tr); });
+    if (elle) elle.addEventListener('blur', function () { girisDemirbasEsyaDegisti(tr); });
+}
+
+function girisDemirbasSatirSil(btn) {
+    var tr = btn && btn.closest ? btn.closest('tr') : null;
+    if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+    girisDemirbasSiraYenile();
+}
+
+function girisDemirbasEsyaAdi(tr) {
+    var sel = tr.querySelector('.dem-esya-sel');
+    var elle = tr.querySelector('.dem-esya-elle');
+    if (sel && sel.value === '__DIGER__') return (elle && elle.value || '').trim();
+    return (sel && sel.value || '').trim();
+}
+
+function girisDemirbasEsyaDegisti(tr) {
+    var sel = tr.querySelector('.dem-esya-sel');
+    var elle = tr.querySelector('.dem-esya-elle');
+    var kap = tr.querySelector('.dem-kapsam');
+    var seri = tr.querySelector('.dem-seri');
+    if (!sel) return;
+    if (sel.value === '__DIGER__') {
+        if (elle) elle.style.display = '';
+        if (kap) kap.value = 'oda_ici';
+    } else {
+        if (elle) { elle.style.display = 'none'; elle.value = ''; }
+        var opt = sel.options[sel.selectedIndex];
+        if (kap && opt) kap.value = opt.getAttribute('data-kapsam') || 'oda_ici';
+    }
+    var ad = girisDemirbasEsyaAdi(tr);
+    if (!ad) return;
+    var prevKey = (seri && seri.getAttribute('data-esya-key')) || '';
+    var locked = seri && seri.getAttribute('data-locked') === '1' && seri.value;
+    if (locked && prevKey === ad) return;
+    var midEl = document.getElementById('musteri-id');
+    var mid = midEl ? midEl.value : '';
+    girisDemirbasApi('/api/demirbas-seri-no', { method: 'POST', body: { esya: ad, mid: mid || null } })
+        .then(function (res) {
+            if (!res.json || !res.json.ok || !seri) return;
+            seri.value = res.json.seri_no || '';
+            seri.setAttribute('data-esya-key', ad);
+            seri.setAttribute('data-locked', '0');
+        })
+        .catch(function () {});
+}
+
+function girisDemirbasOkuSatirlar() {
+    var tb = document.getElementById('giris_demirbas_tbody');
+    if (!tb) return [];
+    var out = [];
+    Array.prototype.forEach.call(tb.querySelectorAll('tr'), function (tr) {
+        var esya = girisDemirbasEsyaAdi(tr);
+        if (!esya) return;
+        var kap = tr.querySelector('.dem-kapsam');
+        var marka = tr.querySelector('.dem-marka');
+        var seri = tr.querySelector('.dem-seri');
+        var adet = tr.querySelector('.dem-adet');
+        var mul = tr.querySelector('.dem-mulkiyet');
+        out.push({
+            esya: esya,
+            marka_model: marka ? marka.value : '',
+            seri_no: seri ? seri.value : '',
+            adet_durum: adet ? adet.value : '',
+            mulkiyet: mul ? mul.value : 'OFISBIR',
+            kapsam: kap ? kap.value : 'oda_ici'
+        });
+    });
+    return out;
+}
+
+function girisDemirbasYukle(mid) {
+    girisDemirbasMesaj('');
+    if (!mid) {
+        girisDemirbasSectionGoster(false);
+        return;
+    }
+    girisDemirbasApi('/api/demirbas-katalog?mid=' + encodeURIComponent(mid))
+        .then(function (res) {
+            var j = res.json || {};
+            __girisDemirbasAktif = !!j.aktif;
+            __girisDemirbasTabloVar = !!j.tablo_var;
+            __girisDemirbasKatalog = Array.isArray(j.katalog) ? j.katalog : [];
+            if (j.diger) __girisDemirbasDiger = j.diger;
+            if (!__girisDemirbasAktif) {
+                girisDemirbasSectionGoster(false);
+                return null;
+            }
+            girisDemirbasSectionGoster(true);
+            if (!__girisDemirbasTabloVar) {
+                girisDemirbasMesaj(j.mesaj || 'Demirbaş tablosu henüz oluşturulmamış.');
+                var tb0 = document.getElementById('giris_demirbas_tbody');
+                if (tb0) tb0.innerHTML = '';
+                return null;
+            }
+            return girisDemirbasApi('/api/musteri/' + encodeURIComponent(mid) + '/demirbas');
+        })
+        .then(function (res) {
+            if (!res) return;
+            var tb = document.getElementById('giris_demirbas_tbody');
+            if (tb) tb.innerHTML = '';
+            var rows = (res.json && res.json.rows) || [];
+            rows.forEach(function (r) { girisDemirbasSatirEkle(r); });
+        })
+        .catch(function () { girisDemirbasSectionGoster(false); });
+}
+
+function girisDemirbasKaydet(mid) {
+    if (!__girisDemirbasAktif || !mid) return Promise.resolve({ ok: true, skipped: true });
+    if (!__girisDemirbasTabloVar) {
+        return Promise.resolve({ ok: false, mesaj: 'Demirbaş tablosu yok' });
+    }
+    var rows = girisDemirbasOkuSatirlar();
+    return girisDemirbasApi('/api/musteri/' + encodeURIComponent(mid) + '/demirbas', {
+        method: 'PUT',
+        body: { rows: rows }
+    }).then(function (res) { return res.json || { ok: false }; });
+}
+

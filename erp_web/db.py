@@ -1572,6 +1572,70 @@ def ensure_musteri_yetkililer_table():
         print(f"musteri_yetkililer: {e}")
 
 
+def musteri_demirbas_table_exists() -> bool:
+    """search_path şemasında musteri_demirbas var mı (SELECT only)."""
+    try:
+        row = fetch_one(
+            """
+            SELECT 1 AS x
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = 'musteri_demirbas'
+            LIMIT 1
+            """
+        )
+        return bool(row)
+    except Exception:
+        return False
+
+
+def ensure_musteri_demirbas_table():
+    """musteri_demirbas — müşteri kartı demirbaş satırları.
+
+    Multi-tenant: kiracı search_path (ayrı tenant_id kolonu yok; proje deseni).
+    seri_no UNIQUE şema içinde global.
+    init_schema'dan ÇAĞRILMAZ — prod DDL ayrı onayla scripts/ensure_musteri_demirbas.py.
+    """
+    def _do():
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_demirbas (
+                id              SERIAL PRIMARY KEY,
+                musteri_id      INTEGER NOT NULL
+                    REFERENCES customers(id) ON DELETE CASCADE,
+                sira            INTEGER NOT NULL DEFAULT 1,
+                esya            TEXT NOT NULL DEFAULT '',
+                marka_model     TEXT NOT NULL DEFAULT '',
+                seri_no         TEXT NOT NULL,
+                adet_durum      TEXT NOT NULL DEFAULT '',
+                mulkiyet        TEXT NOT NULL DEFAULT 'OFISBIR',
+                kapsam          TEXT NOT NULL DEFAULT 'oda_ici',
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_musteri_demirbas_seri_no UNIQUE (seri_no),
+                CONSTRAINT ck_musteri_demirbas_mulkiyet
+                    CHECK (mulkiyet IN ('OFISBIR', 'MUSTERI')),
+                CONSTRAINT ck_musteri_demirbas_kapsam
+                    CHECK (kapsam IN ('oda_ici', 'ortak_alan'))
+            )
+            """
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_id "
+            "ON musteri_demirbas (musteri_id)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_sira "
+            "ON musteri_demirbas (musteri_id, sira)"
+        )
+
+    try:
+        _run_ensure_ddl_once("musteri_demirbas", _do)
+    except Exception as e:
+        print(f"musteri_demirbas: {e}")
+        raise
+
+
 def ensure_musteri_yetkili_alan_degerleri_table():
     """Yetkili kişi başına çoklu alan değerleri (musteri_yetkili_alan_degerleri).
 
