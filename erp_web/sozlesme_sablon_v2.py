@@ -187,6 +187,42 @@ def build_fill_ctx(
 
     ht = _s(hizmet_turu) or _s(k.get("hizmet_turu")) or "Sanal Ofis"
 
+    # Oda seçimi: hazir_ofis_oda_no (KYC/customers) veya hizmet_turu «hazır ofis»
+    oda_no = k.get("hazir_ofis_oda_no")
+    if oda_no in (None, "", 0, "0"):
+        oda_no = m.get("hazir_ofis_oda_no")
+    try:
+        oda_no_i = int(oda_no) if oda_no not in (None, "") else 0
+    except (TypeError, ValueError):
+        oda_no_i = 0
+    ht_l = ht.casefold()
+    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"), ("ü", "u"), ("ö", "o"), ("ç", "c")):
+        ht_l = ht_l.replace(a, b)
+    hazir_ofis = ("hazir" in ht_l and "ofis" in ht_l)
+    oda_secili = bool(oda_no_i > 0 or hazir_ofis)
+    oda_metin = ""
+    if oda_secili:
+        if oda_no_i > 0:
+            oda_metin = f"Oda No: {oda_no_i}"
+        else:
+            oda_metin = ht
+
+    # Belge ödeme günü metni: sözleşme başlangıç günü (ERP odeme_gunu / 1-5 mantığına dokunulmaz)
+    odeme_gun = None
+    try:
+        if hasattr(bas, "day"):
+            odeme_gun = int(bas.day)
+        else:
+            odeme_gun = datetime.strptime(str(bas)[:10], "%Y-%m-%d").date().day
+    except Exception:
+        odeme_gun = None
+    if odeme_gun and 1 <= odeme_gun <= 31:
+        odeme_gunu_metin = (
+            f"Her ayın {odeme_gun}. günü (ay o güne sahip değilse ayın son günü)"
+        )
+    else:
+        odeme_gunu_metin = BLANK
+
     firma_vd = _s(firma.get("vergi_dairesi"))
     firma_vn = _s(firma.get("vergi_no"))
     firma_vd_vn = " / ".join([x for x in (firma_vd, firma_vn) if x]) or BLANK
@@ -213,6 +249,10 @@ def build_fill_ctx(
         "yillik_kdv_dahil": _tl_fmt(yillik_f * 1.20) if yillik_f > 0 else BLANK,
         "vergi_dairesi": vergi_dairesi or BLANK,
         "nusha": "2",
+        "oda_secili": oda_secili,
+        "oda_metin": oda_metin,
+        "odeme_gunu_metin": odeme_gunu_metin,
+        "odeme_gun": odeme_gun,
     }
 
 
@@ -294,45 +334,93 @@ def _set_run_text_preserve(paragraph, new_text: str) -> None:
         r.text = ""
 
 
+def _tr_fold(s: str) -> str:
+    """Türkçe karakterleri ASCII'ye yaklaştırıp casefold (İ/I güvenli)."""
+    t = (s or "").replace("İ", "i").replace("I", "i").replace("ı", "i")
+    for a, b in (("ş", "s"), ("ğ", "g"), ("ü", "u"), ("ö", "o"), ("ç", "c"),
+                 ("Ş", "s"), ("Ğ", "g"), ("Ü", "u"), ("Ö", "o"), ("Ç", "c")):
+        t = t.replace(a, b)
+    return t.casefold()
+
+
+def _delete_table_row(table, row_idx: int) -> None:
+    row = table.rows[row_idx]
+    row._tr.getparent().remove(row._tr)
+
+
+def _set_cell_text(cell, val: str) -> None:
+    for p in cell.paragraphs:
+        _set_run_text_preserve(p, val)
+        break
+    else:
+        cell.text = val
+
+
 def _fill_table_ek1(table, ctx: dict) -> None:
-    """Ek-1 (2 sütun Alan/Değer) satırlarını doldur."""
+    """Ek-1 (2 sütun Alan/Değer) satırlarını doldur; oda yoksa satırı sil."""
     if len(table.columns) < 2:
         return
     mapping = {
-        "müşteri ünvanı": f"{ctx['musteri_unvan']} / {ctx['musteri_tc_vergi']}",
-        "sözleşme başlangıç": f"{ctx['baslangic']} – {ctx['bitis']}",
-        "seçilen hizmetler": ctx["hizmet_turu"],
-        "aylık bedel": f"{ctx['aylik_tl']} TL + KDV" if ctx["aylik_tl"] != BLANK else BLANK,
-        "aylık toplam": f"{ctx['aylik_kdv_dahil']} TL" if ctx["aylik_kdv_dahil"] != BLANK else BLANK,
-        "yıllık dönem": f"{ctx['yillik_kdv_dahil']} TL" if ctx["yillik_kdv_dahil"] != BLANK else BLANK,
+        "musteri unvani": f"{ctx['musteri_unvan']} / {ctx['musteri_tc_vergi']}",
+        "sozlesme baslangic": f"{ctx['baslangic']} – {ctx['bitis']}",
+        "secilen hizmetler": ctx["hizmet_turu"],
+        "aylik bedel": f"{ctx['aylik_tl']} TL + KDV" if ctx["aylik_tl"] != BLANK else BLANK,
+        "aylik toplam": f"{ctx['aylik_kdv_dahil']} TL" if ctx["aylik_kdv_dahil"] != BLANK else BLANK,
+        "yillik donem": f"{ctx['yillik_kdv_dahil']} TL" if ctx["yillik_kdv_dahil"] != BLANK else BLANK,
+        "odeme gunu": ctx.get("odeme_gunu_metin") or BLANK,
         "kep ve e-posta": ctx["musteri_email"],
     }
+    # Sabit metinli satırlar (şablonda yazılı; üzerine yazma)
+    skip_fill = (
+        "kullanim gun",
+        "fesih bildirim",
+        "gecikme faizi",
+    )
+    oda_secili = bool(ctx.get("oda_secili"))
+    oda_metin = ctx.get("oda_metin") or ""
+    # Önce oda satırını sil (yoksa), sonra doldur — index kayması için sondan
+    oda_del = []
+    for i, row in enumerate(table.rows):
+        if len(row.cells) < 2:
+            continue
+        lab = _tr_fold(row.cells[0].text or "")
+        if "oda / alan" in lab or lab.startswith("oda / alan") or "oda / alan" in lab:
+            if not oda_secili:
+                oda_del.append(i)
+    for i in reversed(oda_del):
+        _delete_table_row(table, i)
+
     for row in table.rows:
         cells = row.cells
         if len(cells) < 2:
             continue
-        label = (cells[0].text or "").strip().lower()
+        label_raw = (cells[0].text or "").strip()
+        label = _tr_fold(label_raw)
         if not label or label == "alan":
+            continue
+        if any(s in label for s in skip_fill):
             continue
         val_cell = cells[1]
         cur = (val_cell.text or "").strip()
-        # Ödeme günü / faiz gibi zaten [ ] içeren satırlar: boş bırak veya BLANK
+
+        if "oda / alan" in label:
+            if oda_secili:
+                _set_cell_text(val_cell, oda_metin or BLANK)
+            continue
+
+        matched = False
         for key, val in mapping.items():
             if key in label:
-                # hücre metnini yaz
-                for p in val_cell.paragraphs:
-                    _set_run_text_preserve(p, val)
-                    break
-                else:
-                    val_cell.text = val
+                _set_cell_text(val_cell, val)
+                matched = True
                 break
-        else:
-            # [ ] içeren değer hücrelerini boş çizgiye çevir
-            if "[ ]" in cur or "[% ]" in cur:
-                new_cur = cur.replace("[ ]", BLANK)
-                for p in val_cell.paragraphs:
-                    if p.text:
-                        _set_run_text_preserve(p, _fill_paragraph_text(p.text, ctx))
+        if matched:
+            continue
+        # [ ] içeren değer hücrelerini boş çizgiye çevir
+        if "[ ]" in cur or "[% ]" in cur:
+            for p in val_cell.paragraphs:
+                if p.text:
+                    _set_run_text_preserve(p, _fill_paragraph_text(p.text, ctx))
 
 
 def _fill_signature_table(table, ctx: dict) -> None:

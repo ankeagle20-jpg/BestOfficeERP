@@ -180,10 +180,101 @@ def test_module_exists():
     check("module_render", "def render_sozlesme_docx_v2" in src)
 
 
+def _ek1_rows(doc) -> list[tuple[str, str]]:
+    """TABLE1 Ek-1 → [(alan, deger), ...]"""
+    if len(doc.tables) < 2:
+        return []
+    out = []
+    for row in doc.tables[1].rows:
+        if len(row.cells) < 2:
+            continue
+        out.append(((row.cells[0].text or "").strip(), (row.cells[1].text or "").strip()))
+    return out
+
+
+def _ek1_blob(rows: list[tuple[str, str]]) -> str:
+    return "\n".join(f"{a}|{b}" for a, b in rows).casefold()
+
+
+def test_ek1_senaryolar():
+    """Oda aç/kapa; ödeme günü 15/31/3; sabit satırlar; silinen 4 satır yok."""
+    from sozlesme_sablon_v2 import build_fill_ctx, render_sozlesme_docx_v2
+    from docx import Document
+    from io import BytesIO
+
+    # --- oda KAPALI (Sanal Ofis, oda_no yok) ---
+    ctx0 = build_fill_ctx(
+        musteri={"name": "ODA YOK AS", "tax_number": "1", "guncel_kira_bedeli": 500.0},
+        kyc={"hizmet_turu": "Sanal Ofis", "aylik_kira": 500.0},
+        sozlesme_tarihi="2026-03-15",
+        hizmet_turu="Sanal Ofis",
+    )
+    check("oda0_secili_false", ctx0.get("oda_secili") is False)
+    check("odeme_gun_15", ctx0.get("odeme_gun") == 15, str(ctx0.get("odeme_gun")))
+    check("odeme_metin_15", "15." in (ctx0.get("odeme_gunu_metin") or ""), str(ctx0.get("odeme_gunu_metin")))
+    doc0 = Document(BytesIO(render_sozlesme_docx_v2(ctx0)))
+    rows0 = _ek1_rows(doc0)
+    blob0 = _ek1_blob(rows0)
+    check("oda0_satir_yok", "oda / alan" not in blob0, blob0[:300])
+    check("silinen_yillik_artis_yok", "yıllık artış" not in blob0 and "yillik artis" not in blob0)
+    check("silinen_indirimli_yok", "indirimli" not in blob0)
+    check("silinen_kurulum_yok", "kurulum" not in blob0)
+    check("silinen_depozito_yok", "depozito" not in blob0)
+    check("sabit_kullanim", "hafta içi 09:00" in blob0 or "hafta ici 09:00" in blob0)
+    check("sabit_fesih", "30 gün" in blob0 or "30 gun" in blob0)
+    check("sabit_gecikme", "tcmb avans" in blob0)
+    check("odeme_hucre_15", "15." in blob0 and ("ödeme" in blob0 or "odeme" in blob0))
+
+    # --- oda AÇIK (hazir_ofis_oda_no) ---
+    ctx1 = build_fill_ctx(
+        musteri={
+            "name": "ODA VAR AS",
+            "tax_number": "2",
+            "guncel_kira_bedeli": 800.0,
+            "hazir_ofis_oda_no": 12,
+        },
+        kyc={"hizmet_turu": "Hazır Ofis", "aylik_kira": 800.0, "hazir_ofis_oda_no": 12},
+        sozlesme_tarihi="2026-01-31",
+        hizmet_turu="Hazır Ofis",
+    )
+    check("oda1_secili", ctx1.get("oda_secili") is True)
+    check("oda1_metin", "12" in (ctx1.get("oda_metin") or ""), str(ctx1.get("oda_metin")))
+    check("odeme_gun_31", ctx1.get("odeme_gun") == 31, str(ctx1.get("odeme_gun")))
+    doc1 = Document(BytesIO(render_sozlesme_docx_v2(ctx1)))
+    rows1 = _ek1_rows(doc1)
+    blob1 = _ek1_blob(rows1)
+    check("oda1_satir_var", "oda / alan" in blob1)
+    check("oda1_deger", "12" in blob1)
+    check("odeme_hucre_31", "31." in blob1)
+
+    # --- gün 3 ---
+    ctx3 = build_fill_ctx(
+        musteri={"name": "GUN3", "tax_number": "3", "guncel_kira_bedeli": 100.0},
+        kyc={"hizmet_turu": "Sanal Ofis"},
+        sozlesme_tarihi="2026-05-03",
+    )
+    check("odeme_gun_3", ctx3.get("odeme_gun") == 3, str(ctx3.get("odeme_gun")))
+    check("odeme_metin_3", "3." in (ctx3.get("odeme_gunu_metin") or ""))
+    doc3 = Document(BytesIO(render_sozlesme_docx_v2(ctx3)))
+    blob3 = _ek1_blob(_ek1_rows(doc3))
+    check("odeme_hucre_3", "3." in blob3)
+
+    # Şablon dosyasında da silinen satırlar yok
+    from sozlesme_sablon_v2 import sozlesme_sablon_v2_path
+
+    sablon = Document(str(sozlesme_sablon_v2_path()))
+    sblob = _ek1_blob(_ek1_rows(sablon))
+    check("sablon_indirimli_yok", "indirimli" not in sblob)
+    check("sablon_kurulum_yok", "kurulum" not in sblob)
+    check("sablon_depozito_yok", "depozito" not in sblob)
+    check("sablon_yillik_artis_yok", "yıllık artış" not in sblob and "yillik artis" not in sblob)
+
+
 def main() -> int:
     test_karar_matris()
     test_sablon_file()
     test_fill_and_ekler()
+    test_ek1_senaryolar()
     test_routes_wire()
     test_mid867_preview_liste()
     test_module_exists()
