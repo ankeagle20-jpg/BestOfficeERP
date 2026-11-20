@@ -315,12 +315,11 @@ def _fill_paragraph_text(text: str, ctx: dict) -> str:
         return text
     t = text
 
-    # Avukat / uyarı notları olduğu gibi
-    # Sıralı anlamlı doldurmalar
-    if "Hizmet Sağlayıcı:" in t or "OFİSBİR OFİS VE DANIŞMANLIK" in t:
-        t = _replace_first(t, "Adres: [ ]", f"Adres: {ctx['firma_adres']}")
-        t = _replace_first(t, "Vergi Dairesi / Vergi No: [ ]", f"Vergi Dairesi / Vergi No: {ctx['firma_vd_vn']}")
-        t = _replace_first(t, "MERSİS No: [ ]", f"MERSİS No: {ctx['firma_mersis']}")
+    # Hizmet Sağlayıcı (adres/VD/VN/MERSİS): şablonda sabit — firma_profil ile EZME
+    if "Hizmet Sağlayıcı:" in t or (
+        "OFİSBİR OFİS VE DANIŞMANLIK" in t and "Adres:" in t
+    ):
+        return t
 
     if t.strip().startswith("Müşteri:") or "Müşteri: [" in t:
         t = t.replace("[ad-soyad / ticaret unvanı]", ctx["musteri_unvan"], 1)
@@ -423,6 +422,7 @@ def _fill_table_ek1(table, ctx: dict) -> None:
         "kullanim gun",
         "fesih bildirim",
         "gecikme faizi",
+        "iban",  # şablondaki sabit banka satırı — dokunma
     )
     oda_secili = bool(ctx.get("oda_secili"))
     oda_metin = ctx.get("oda_metin") or ""

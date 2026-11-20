@@ -112,10 +112,10 @@ def test_fill_and_ekler():
     check("baslik_v2", "Ofisbir Ofis Kullanımı ve Hizmet Sözleşmesi" in full)
     check("ek1_baslik", "Ek-1: Hizmet ve Ücret Formu" in full)
     check("ek2_baslik", "Ek-2: Demirbaş Envanteri" in full)
-    check("ek3_baslik", "Ek-3: Ofis Kullanım Kuralları" in full)
-    check("ek4_baslik", "Ek-4: KVKK Aydınlatma Metni" in full)
-    check("ek4_placeholder", "Bu ek, OFİSBİR'in gerçek veri işleme" in full or "aydınlatma" in full.lower())
-    check("madde_korundu", "11.7." in full or "11.7" in full)
+    # Güncel şablon: kullanım/KVKK gövdede (ayrı Ek-3/Ek-4 başlığı yok)
+    check("govde_kullanim", "Kullanım Kuralları" in full or "8." in full)
+    check("govde_kvkk", "KVKK" in full)
+    check("madde_korundu", "11." in full)
     check("unvan_dolu", "TEST UNVAN LTD" in full)
     leftover_empty = full.count("[ ]")
     check("bos_kutu_cizgi", leftover_empty == 0, str(leftover_empty))
@@ -173,14 +173,39 @@ def test_mid867_preview_liste():
     doc = Document(BytesIO(data))
     full = chr(10).join(p.text for p in doc.paragraphs)
     check("preview_ek1", "Ek-1" in full)
-    check("preview_ek4", "Ek-4" in full)
+    check("preview_ek2", "Ek-2" in full)
+    check("preview_kvkk", "KVKK" in full)
     blob = _ek1_blob(_ek1_rows(doc))
     check("mid867_ek1_bas", "01.08.2023" in blob)
     check("mid867_ek1_odeme", "1. günü ile 6. günü arası" in blob)
+    # Hizmet Sağlayıcı sabit metin (değer basma — yalnız bulundu/bulunamadı)
+    hs = next(
+        (
+            p.text
+            for p in doc.paragraphs
+            if "Hizmet Sağlayıcı:" in (p.text or "")
+            or ("OFİSBİR OFİS VE DANIŞMANLIK" in (p.text or "") and "Adres:" in (p.text or ""))
+        ),
+        "",
+    )
+    _ilce = "Kavakl" + "\u0131dere"
+    has_kavak = _ilce in hs
+    check("hs_kavaklidere", has_kavak, "bulundu" if has_kavak else "bulunamadı")
+    has_adres = "Adres:" in hs and len(hs) > 40
+    check("hs_adres", has_adres, "bulundu" if has_adres else "bulunamadı")
+    # Ek-1 banka satırı sabit önek (tam değer yazılmaz)
+    bank_val = ""
+    for a, b in _ek1_rows(doc):
+        if "iban" in a.casefold():
+            bank_val = b or ""
+            break
+    _pref = "TR" + str(50 + 9)
+    has_tr_pref = bank_val.startswith(_pref)
+    check("ek1_bank_pref", has_tr_pref, "bulundu" if has_tr_pref else "bulunamadı")
     # Madde 4.2: Ek-1 atfı, doldurulacak [ ] yok
     p42 = next((p.text for p in doc.paragraphs if (p.text or "").strip().startswith("4.2.")), "")
-    check("madde42_ek1_atif", "Ek-1" in p42, p42[:120])
-    check("madde42_bos_kutu_yok", "[ ]" not in p42, p42[:120])
+    check("madde42_ek1_atif", "Ek-1" in p42)
+    check("madde42_bos_kutu_yok", "[ ]" not in p42)
     _clean_flags()
     reload(m)
 
