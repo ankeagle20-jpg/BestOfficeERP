@@ -9590,8 +9590,43 @@ def sozlesme_olustur(mid):
             sayac = 600
 
         sozlesme_no = f"{prefix}{tarih_kod}-{sayac}"
-        
-        # Word belgesi oluştur
+
+        # v2 şablon (bayrak); varsayılan 0 = aşağıdaki eski üretim
+        try:
+            from sozlesme_sablon_v2 import (
+                sozlesme_sablon_v2_aktif,
+                build_fill_ctx,
+                save_sozlesme_docx_v2,
+            )
+        except Exception:
+            sozlesme_sablon_v2_aktif = None  # type: ignore
+        if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif():
+            kyc_row = None
+            try:
+                kyc_row = fetch_one(
+                    "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+                    (mid,),
+                )
+            except Exception:
+                kyc_row = None
+            ctx = build_fill_ctx(
+                musteri=musteri,
+                kyc=kyc_row,
+                sozlesme_no=sozlesme_no,
+                sozlesme_tarihi=today.date() if hasattr(today, "date") else today,
+                hizmet_turu=tur_raw or None,
+            )
+            filename = f"Sozlesme_{sozlesme_no}_{str(musteri.get('name') or 'Musteri').replace(' ', '_')}.docx"
+            filepath = os.path.join("uploads", "sozlesmeler", filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            save_sozlesme_docx_v2(ctx, filepath)
+            execute(
+                "INSERT INTO sozlesmeler (musteri_id, sozlesme_no, hizmet_turu) VALUES (%s,%s,%s) ON CONFLICT (sozlesme_no) DO NOTHING",
+                (mid, sozlesme_no, tur_raw or None),
+            )
+            return send_file(filepath, as_attachment=True, download_name=filename)
+
+        # Word belgesi oluştur (eski şablon — bayrak kapalı)
         from docx import Document  # lazy: boot RSS — yalnızca sözleşme .docx
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 

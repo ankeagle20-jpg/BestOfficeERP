@@ -3331,6 +3331,33 @@ def api_kyc_sozlesme():
     def tl_fmt(v):
         return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
+    # v2 şablon (bayrak); varsayılan 0 = aşağıdaki eski üretim
+    try:
+        from sozlesme_sablon_v2 import (
+            sozlesme_sablon_v2_aktif,
+            build_fill_ctx,
+            save_sozlesme_docx_v2,
+        )
+    except Exception:
+        sozlesme_sablon_v2_aktif = None  # type: ignore
+    if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif():
+        cust = fetch_one("SELECT * FROM customers WHERE id = %s", (musteri_id,)) or {}
+        ctx = build_fill_ctx(
+            musteri=cust,
+            kyc=kyc,
+            sozlesme_no=soz_no,
+            sozlesme_tarihi=soz_tarih,
+            hizmet_turu=hizmet_turu,
+        )
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out_dir = os.path.join(base_dir, "uploads", "sozlesmeler")
+        os.makedirs(out_dir, exist_ok=True)
+        safe_unvan = (unvan or "Musteri").replace("/", "-").replace("\\", "-").strip()
+        filename = f"Sozlesme_{soz_no}_{safe_unvan[:40].replace(' ', '_')}.docx"
+        filepath = os.path.join(out_dir, filename)
+        save_sozlesme_docx_v2(ctx, filepath)
+        return send_file(filepath, as_attachment=True, download_name=filename)
+
     from docx import Document  # lazy: boot RSS — yalnızca sözleşme .docx üretiminde
 
     doc = Document()
