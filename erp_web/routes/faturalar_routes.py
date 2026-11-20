@@ -676,6 +676,136 @@ def _aciklama_with_aylik_pay_tokens(aciklama_text, pay_items):
     return text
 
 
+def _makbuz_ay_adi_tr(iso) -> str:
+    """YYYY-MM-DD → «Mart 2026»."""
+    try:
+        dd = datetime.strptime(str(iso)[:10], "%Y-%m-%d").date()
+        return f"{_TAHSIL_AYLAR_TR[dd.month - 1]} {dd.year}"
+    except Exception:
+        return str(iso or "")[:10]
+
+
+def _makbuz_ay_sonraki_mi(iso_a, iso_b) -> bool:
+    """iso_b, iso_a'nın bir sonraki ayı mı (gün=01 varsayımı)."""
+    try:
+        a = datetime.strptime(str(iso_a)[:10], "%Y-%m-%d").date().replace(day=1)
+        b = datetime.strptime(str(iso_b)[:10], "%Y-%m-%d").date().replace(day=1)
+        if a.month == 12:
+            nxt = date(a.year + 1, 1, 1)
+        else:
+            nxt = date(a.year, a.month + 1, 1)
+        return nxt == b
+    except Exception:
+        return False
+
+
+def _makbuz_ay_odeme_metni(pay_items, *, fazla_tl: float = 0.0, kalan_map=None, tol: float = 0.05) -> str:
+    """FIFO dağılımından Türkçe okunabilir makbuz açıklama önerisi.
+
+    Art arda tam aylar: «Aralık 2026 – Şubat 2027 kira bedeli tahsilatı (3 ay)»
+    Kesintili: «Mart 2026, Mayıs 2026 kira bedeli tahsilatı»
+    Kısmi: «Mart 2026 (kısmi: 12.000,00 TL)»
+    Fazla: «Fazla: X TL ileri ödeme»
+    İşaret/FIFO hesaplamasına dokunmaz; yalnız düz metin üretir.
+    """
+    tol_n = float(tol) if tol is not None else 0.05
+    kalan_m = kalan_map if isinstance(kalan_map, dict) else {}
+    ann = []
+    for row in pay_items or []:
+        iso = None
+        tut = 0.0
+        kalan_hint = None
+        if isinstance(row, dict):
+            iso = str(row.get("iso") or row.get("ay_iso") or "")[:10]
+            try:
+                tut = round(float(row.get("tutar") or row.get("pay") or 0), 2)
+            except (TypeError, ValueError):
+                tut = 0.0
+            if row.get("kalan") is not None:
+                try:
+                    kalan_hint = round(float(row.get("kalan")), 2)
+                except (TypeError, ValueError):
+                    kalan_hint = None
+            if row.get("kismi") is not None:
+                kismi_force = bool(row.get("kismi"))
+            else:
+                kismi_force = None
+        else:
+            try:
+                iso = str(row[0])[:10]
+                tut = round(float(row[1] or 0), 2)
+            except Exception:
+                continue
+            kismi_force = None
+            if len(row) >= 3:
+                try:
+                    kalan_hint = round(float(row[2]), 2)
+                except (TypeError, ValueError):
+                    kalan_hint = None
+        if not iso or tut <= 0:
+            continue
+        kalan = kalan_hint
+        if kalan is None:
+            for key in (iso, iso[:7], iso[:10]):
+                if key in kalan_m:
+                    try:
+                        kalan = round(float(kalan_m[key]), 2)
+                    except (TypeError, ValueError):
+                        kalan = None
+                    break
+        if kismi_force is not None:
+            kismi = kismi_force
+        elif kalan is not None:
+            kismi = tut + tol_n < kalan
+        else:
+            kismi = False
+        ann.append((iso, tut, kismi))
+    parts: list[str] = []
+    i = 0
+    n = len(ann)
+    while i < n:
+        iso, tut, kismi = ann[i]
+        if kismi:
+            parts.append(f"{_makbuz_ay_adi_tr(iso)} (kısmi: {_fmt_tl_tr(tut)} TL)")
+            i += 1
+            continue
+        j = i
+        while (
+            j + 1 < n
+            and not ann[j + 1][2]
+            and _makbuz_ay_sonraki_mi(ann[j][0], ann[j + 1][0])
+        ):
+            j += 1
+        if j > i:
+            cnt = j - i + 1
+            parts.append(
+                f"{_makbuz_ay_adi_tr(ann[i][0])} – {_makbuz_ay_adi_tr(ann[j][0])} "
+                f"kira bedeli tahsilatı ({cnt} ay)"
+            )
+            i = j + 1
+            continue
+        names = [_makbuz_ay_adi_tr(iso)]
+        i += 1
+        while i < n and not ann[i][2]:
+            if i + 1 < n and not ann[i + 1][2] and _makbuz_ay_sonraki_mi(
+                ann[i][0], ann[i + 1][0]
+            ):
+                break
+            names.append(_makbuz_ay_adi_tr(ann[i][0]))
+            i += 1
+        if len(names) == 1:
+            parts.append(f"{names[0]} kira bedeli tahsilatı")
+        else:
+            parts.append(f"{', '.join(names)} kira bedeli tahsilatı")
+    try:
+        fazla_n = round(float(fazla_tl or 0), 2)
+    except (TypeError, ValueError):
+        fazla_n = 0.0
+    if fazla_n > tol_n:
+        parts.append(f"Fazla: {_fmt_tl_tr(fazla_n)} TL ileri ödeme")
+    return "; ".join(parts)
+
+
 def yeniden_hesapla_makbuz_dagitim_aciklama(
     musteri_id: int,
     *,

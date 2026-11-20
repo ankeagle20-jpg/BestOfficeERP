@@ -13416,10 +13416,16 @@ function tahsilatMakbuzTutarlariniGridSeciminden(opts) {
     if (gt && (!saygiDokundu || !tahsilatTutarDokunduMu('giris_tahsilat'))) {
         gt.value = s;
         if (!saygiDokundu) tahsilatTutarDokunduIsaretle('giris_tahsilat');
+        if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') {
+            try { tahsilMakbuzAciklamaOneriGuncelle('giris_tahsilat'); } catch (_eAcG) {}
+        }
     }
     if (st && (!saygiDokundu || !tahsilatTutarDokunduMu('sozlesme_tahsilat'))) {
         st.value = s;
         if (!saygiDokundu) tahsilatTutarDokunduIsaretle('sozlesme_tahsilat');
+        if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') {
+            try { tahsilMakbuzAciklamaOneriGuncelle('sozlesme_tahsilat'); } catch (_eAcS) {}
+        }
     }
 }
 
@@ -13484,6 +13490,10 @@ function tahsilatMakbuzTutarlariniGuncelle(yilMap, tufeListe) {
     } else {
         applyOne('giris_tahsilat_tarih', 'giris_tahsilat_tutar', 'giris_tahsilat');
         applyOne('sozlesme_tahsilat_tarih', 'sozlesme_tahsilat_tutar', 'sozlesme_tahsilat');
+    }
+    if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') {
+        try { tahsilMakbuzAciklamaOneriGuncelle('giris_tahsilat'); } catch (_eAcUg) {}
+        try { tahsilMakbuzAciklamaOneriGuncelle('sozlesme_tahsilat'); } catch (_eAcUs) {}
     }
 }
 
@@ -23724,6 +23734,18 @@ document.addEventListener('DOMContentLoaded', () => {
         bindTutarDokundu('giris_tahsilat_tutar', 'giris_tahsilat');
         bindTutarDokundu('sozlesme_tahsilat_tutar', 'sozlesme_tahsilat');
     })();
+    (function tahsilatAciklamaKullaniciDokunduDinle() {
+        function bindAciklamaDokundu(elId, prefix) {
+            var el = document.getElementById(elId);
+            if (!el || el.__aciklamaDokunduBound) return;
+            el.__aciklamaDokunduBound = true;
+            var mark = function () { tahsilatAciklamaDokunduIsaretle(prefix); };
+            el.addEventListener('input', mark);
+            el.addEventListener('change', mark);
+        }
+        bindAciklamaDokundu('giris_tahsilat_aciklama', 'giris_tahsilat');
+        bindAciklamaDokundu('sozlesme_tahsilat_aciklama', 'sozlesme_tahsilat');
+    })();
 
     // Cari ekstre: ilk açılışta sözleşme başı → cari ay (tarih alanları boşsa)
     if (typeof girisCariEkstreVarsayilanTarihleriYaz === 'function') {
@@ -23767,10 +23789,12 @@ document.addEventListener('DOMContentLoaded', () => {
         sozTahsilTutar.addEventListener('input', function () {
             tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar');
             if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('sozlesme_tahsilat_tutar');
+            if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') tahsilMakbuzAciklamaOneriGuncelle('sozlesme_tahsilat');
         });
         sozTahsilTutar.addEventListener('change', function () {
             tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar');
             if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('sozlesme_tahsilat_tutar');
+            if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') tahsilMakbuzAciklamaOneriGuncelle('sozlesme_tahsilat');
         });
     }
     var girisTahsilTutar = document.getElementById('giris_tahsilat_tutar');
@@ -23778,9 +23802,11 @@ document.addEventListener('DOMContentLoaded', () => {
         girisTahsilTutar.__fazlaOdemeBound = true;
         girisTahsilTutar.addEventListener('input', function () {
             if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('giris_tahsilat_tutar');
+            if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') tahsilMakbuzAciklamaOneriGuncelle('giris_tahsilat');
         });
         girisTahsilTutar.addEventListener('change', function () {
             if (typeof tahsilatFazlaOdemeUyariGuncelle === 'function') tahsilatFazlaOdemeUyariGuncelle('giris_tahsilat_tutar');
+            if (typeof tahsilMakbuzAciklamaOneriGuncelle === 'function') tahsilMakbuzAciklamaOneriGuncelle('giris_tahsilat');
         });
     }
     ['sozlesmeler-reel-tutar', 'sozlesmeler-reel-hibrit-toplam', 'sozlesmeler-reel-hibrit-net', 'sozlesmeler-reel-hibrit-banka', 'sozlesmeler-reel-tutar-tip']
@@ -24258,6 +24284,182 @@ function tahsilAciklamaKaydetBirlestir(gorunen, ham) {
     if (!g) return markers;
     return g + ' ' + markers;
 }
+
+/** Elle yazılan açıklamanın otomatik öneriyle ezilmemesi (tutar dokundu deseni). */
+window.__girisTahsilatAciklamaDokundu = window.__girisTahsilatAciklamaDokundu || false;
+window.__sozlesmeTahsilatAciklamaDokundu = window.__sozlesmeTahsilatAciklamaDokundu || false;
+
+function tahsilatAciklamaDokunduMu(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') return !!window.__girisTahsilatAciklamaDokundu;
+        if (prefix === 'sozlesme_tahsilat') return !!window.__sozlesmeTahsilatAciklamaDokundu;
+    } catch (_eAcDokMu) {}
+    return false;
+}
+function tahsilatAciklamaDokunduIsaretle(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') window.__girisTahsilatAciklamaDokundu = true;
+        else if (prefix === 'sozlesme_tahsilat') window.__sozlesmeTahsilatAciklamaDokundu = true;
+    } catch (_eAcDokIs) {}
+}
+function tahsilatAciklamaDokunduSifirla(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') window.__girisTahsilatAciklamaDokundu = false;
+        else if (prefix === 'sozlesme_tahsilat') window.__sozlesmeTahsilatAciklamaDokundu = false;
+    } catch (_eAcDokSf) {}
+}
+
+function tahsilMakbuzAyAdiFromIso(iso) {
+    var s = String(iso || '').slice(0, 10);
+    var m = s.match(/^(\d{4})-(\d{2})/);
+    if (!m) return s;
+    var y = parseInt(m[1], 10);
+    var mo = parseInt(m[2], 10) - 1;
+    if (mo < 0 || mo > 11) return s;
+    return TAHSIL_RAPOR_AYLAR_TR[mo] + ' ' + y;
+}
+function tahsilMakbuzAySonrakiMi(isoA, isoB) {
+    var a = String(isoA || '').slice(0, 10).split('-');
+    if (a.length < 2) return false;
+    var y = parseInt(a[0], 10);
+    var mo = parseInt(a[1], 10);
+    if (!y || !mo) return false;
+    mo += 1;
+    if (mo > 12) { mo = 1; y += 1; }
+    var next = y + '-' + String(mo).padStart(2, '0') + '-01';
+    return next === String(isoB || '').slice(0, 10);
+}
+function tahsilMakbuzFmtTlTr(n) {
+    var v = Number(n);
+    if (!isFinite(v)) v = 0;
+    if (typeof formatNumberTR === 'function') return formatNumberTR(v);
+    return v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+/** FIFO: tutar → açık aylara dağıt; kısmi + fazla hesapla. */
+function tahsilMakbuzFifoAyKalemleri(tutar, borcList) {
+    var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var left = Math.round(Number(tutar || 0) * 100) / 100;
+    var items = [];
+    var list = (borcList || []).slice().sort(function (a, b) {
+        return String(a && a.iso || '').localeCompare(String(b && b.iso || ''));
+    });
+    for (var i = 0; i < list.length; i++) {
+        if (!(left > tol)) break;
+        var kalan = Math.round(Number(list[i] && list[i].kalan) * 100) / 100;
+        if (!(kalan > tol)) continue;
+        var pay = Math.round(Math.min(left, kalan) * 100) / 100;
+        if (!(pay > 0)) continue;
+        items.push({
+            iso: String(list[i].iso || '').slice(0, 10),
+            tutar: pay,
+            kalan: kalan,
+            kismi: (pay + tol) < kalan
+        });
+        left = Math.round((left - pay) * 100) / 100;
+    }
+    return { items: items, fazla: (left > tol) ? left : 0 };
+}
+/**
+ * FIFO kalemlerinden Türkçe makbuz açıklama önerisi.
+ * Art arda: «Aralık 2026 – Şubat 2027 kira bedeli tahsilatı (3 ay)»
+ * Kesintili: «Mart 2026, Mayıs 2026 kira bedeli tahsilatı»
+ * Kısmi / fazla ayrı.
+ */
+function tahsilMakbuzAyOdemeMetni(items, fazlaTl) {
+    var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var ann = [];
+    (items || []).forEach(function (it) {
+        if (!it) return;
+        var iso = String(it.iso || '').slice(0, 10);
+        var tut = Math.round(Number(it.tutar || 0) * 100) / 100;
+        if (!iso || !(tut > 0)) return;
+        var kismi = !!it.kismi;
+        if (it.kismi == null && it.kalan != null) {
+            var kalan = Math.round(Number(it.kalan) * 100) / 100;
+            kismi = isFinite(kalan) && (tut + tol) < kalan;
+        }
+        ann.push({ iso: iso, tutar: tut, kismi: kismi });
+    });
+    var parts = [];
+    var i = 0;
+    while (i < ann.length) {
+        if (ann[i].kismi) {
+            parts.push(tahsilMakbuzAyAdiFromIso(ann[i].iso) + ' (kısmi: ' + tahsilMakbuzFmtTlTr(ann[i].tutar) + ' TL)');
+            i += 1;
+            continue;
+        }
+        var j = i;
+        while (
+            j + 1 < ann.length
+            && !ann[j + 1].kismi
+            && tahsilMakbuzAySonrakiMi(ann[j].iso, ann[j + 1].iso)
+        ) {
+            j += 1;
+        }
+        if (j > i) {
+            var cnt = j - i + 1;
+            parts.push(
+                tahsilMakbuzAyAdiFromIso(ann[i].iso) + ' – ' + tahsilMakbuzAyAdiFromIso(ann[j].iso)
+                + ' kira bedeli tahsilatı (' + cnt + ' ay)'
+            );
+            i = j + 1;
+            continue;
+        }
+        var names = [tahsilMakbuzAyAdiFromIso(ann[i].iso)];
+        i += 1;
+        while (i < ann.length && !ann[i].kismi) {
+            if (
+                i + 1 < ann.length
+                && !ann[i + 1].kismi
+                && tahsilMakbuzAySonrakiMi(ann[i].iso, ann[i + 1].iso)
+            ) {
+                break;
+            }
+            names.push(tahsilMakbuzAyAdiFromIso(ann[i].iso));
+            i += 1;
+        }
+        if (names.length === 1) {
+            parts.push(names[0] + ' kira bedeli tahsilatı');
+        } else {
+            parts.push(names.join(', ') + ' kira bedeli tahsilatı');
+        }
+    }
+    var fazla = Math.round(Number(fazlaTl || 0) * 100) / 100;
+    if (fazla > tol) {
+        parts.push('Fazla: ' + tahsilMakbuzFmtTlTr(fazla) + ' TL ileri ödeme');
+    }
+    return parts.join('; ');
+}
+/** Yeni makbuz: tutar/FIFO değişince açıklama önerisini doldur (elle dokunulmadıysa). */
+function tahsilMakbuzAciklamaOneriGuncelle(prefix) {
+    var p = prefix || 'giris_tahsilat';
+    if (window.__tahsilMakbuzDuzenleId) return;
+    if (tahsilatAciklamaDokunduMu(p)) return;
+    var acEl = document.getElementById(p + '_aciklama');
+    var tutEl = document.getElementById(p + '_tutar');
+    if (!acEl) return;
+    var tutar = 0;
+    try {
+        tutar = (typeof parseFlexibleAmount === 'function')
+            ? parseFlexibleAmount(tutEl && tutEl.value)
+            : ((typeof parseNumberTR === 'function')
+                ? parseNumberTR((tutEl && tutEl.value) || '')
+                : parseFloat(String((tutEl && tutEl.value) || '').replace(/\./g, '').replace(',', '.')));
+    } catch (_eTutAc) { tutar = 0; }
+    if (!isFinite(tutar) || tutar <= 0) {
+        acEl.value = '';
+        return;
+    }
+    var borc = [];
+    try {
+        borc = (typeof tahsilatAylikBorcListesiFromGrid === 'function')
+            ? tahsilatAylikBorcListesiFromGrid()
+            : [];
+    } catch (_eBorcAc) { borc = []; }
+    var fifo = tahsilMakbuzFifoAyKalemleri(tutar, borc);
+    acEl.value = tahsilMakbuzAyOdemeMetni(fifo.items, fifo.fazla) || '';
+}
+
 function tahsilRaporAciklamaHucreMetni(aciklama) {
     if (/\|AYLIK_(TAH|PAY)\|/.test(String(aciklama || ''))) {
         var oku = tahsilAciklamaOkunabilirMetin(aciklama);
@@ -24371,6 +24573,8 @@ function tahsilMakbuzFormuRaporSatirdanDoldur(prefix, row) {
     var hamAc = String(row.aciklama || '');
     window.__tahsilMakbuzAciklamaHam = hamAc;
     if (acEl) acEl.value = tahsilAciklamaOkunabilirMetin(hamAc);
+    // Düzenle: otomatik öneri ezmesin (kullanıcı/mevcut metin korunur).
+    tahsilatAciklamaDokunduIsaretle(prefix);
     var tedEl = document.getElementById(prefix + '_tahsil_eden');
     var ted = String(row.tahsil_eden || '').trim();
     if (tedEl && ted) {
@@ -26182,7 +26386,10 @@ function girisTahsilatYazdir() {
 }
 
 function girisTahsilatIptal() {
+    try { tahsilatMakbuzGoruntuleSifirla('giris_tahsilat'); } catch (_eMgI) {}
+    if (window.tahsilatWaPasif) tahsilatWaPasif('giris');
     tahsilatTutarDokunduSifirla('giris_tahsilat');
+    tahsilatAciklamaDokunduSifirla('giris_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('giris_tahsilat');
     document.getElementById('giris_tahsilat_musteri_id').value = '';
     document.getElementById('giris_tahsilat_musteri_phone').value = '';
@@ -26459,6 +26666,7 @@ function sozlesmeTahsilatKaydet() {
 
 function sozlesmeTahsilatKayitSonrasiTemizlik() {
     tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
+    tahsilatAciklamaDokunduSifirla('sozlesme_tahsilat');
     tahsilatKismiOnizlemeSifirla();
     document.getElementById('sozlesme_tahsilat_tutar').value = '';
     document.getElementById('sozlesme_tahsilat_aciklama').value = '';
@@ -26542,7 +26750,10 @@ function sozlesmeTahsilatYazdir() {
 }
 
 function sozlesmeTahsilatIptal() {
+    try { tahsilatMakbuzGoruntuleSifirla('sozlesme_tahsilat'); } catch (_eMgS) {}
+    if (window.tahsilatWaPasif) tahsilatWaPasif('sozlesme');
     tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
+    tahsilatAciklamaDokunduSifirla('sozlesme_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('sozlesme_tahsilat');
     document.getElementById('sozlesme_tahsilat_musteri_id').value = '';
     document.getElementById('sozlesme_tahsilat_musteri_phone').value = '';
