@@ -3342,11 +3342,12 @@ def api_kyc_sozlesme():
         sozlesme_sablon_v2_aktif = None  # type: ignore
     if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif(musteri_id):
         cust = fetch_one("SELECT * FROM customers WHERE id = %s", (musteri_id,)) or {}
+        # Belge başlangıç: kart/KYC; soz_tarih yalnızca numara üretimi için (bugün yedek)
         ctx = build_fill_ctx(
             musteri=cust,
             kyc=kyc,
             sozlesme_no=soz_no,
-            sozlesme_tarihi=soz_tarih,
+            sozlesme_tarihi=kyc.get("sozlesme_tarihi"),
             hizmet_turu=hizmet_turu,
         )
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

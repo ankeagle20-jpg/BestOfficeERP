@@ -9609,11 +9609,12 @@ def sozlesme_olustur(mid):
                 )
             except Exception:
                 kyc_row = None
+            # Belge başlangıç: kart/KYC (rent_start_date / sozlesme_tarihi); bugün basılmaz
             ctx = build_fill_ctx(
                 musteri=musteri,
                 kyc=kyc_row,
                 sozlesme_no=sozlesme_no,
-                sozlesme_tarihi=today.date() if hasattr(today, "date") else today,
+                sozlesme_tarihi=None,
                 hizmet_turu=tur_raw or None,
             )
             filename = f"Sozlesme_{sozlesme_no}_{str(musteri.get('name') or 'Musteri').replace(' ', '_')}.docx"

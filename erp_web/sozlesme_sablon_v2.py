@@ -100,6 +100,68 @@ def _fmt_date(v: Any) -> str:
         return s[:10]
 
 
+def _parse_date(v: Any) -> date | None:
+    """Kart/KYC tarihini date'e çevir; boş/geçersiz → None (bugün uydurma)."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    for fmt, n in (("%Y-%m-%d", 10), ("%d.%m.%Y", 10), ("%d/%m/%Y", 10)):
+        try:
+            return datetime.strptime(s[:n], fmt).date()
+        except Exception:
+            continue
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _anniversary_on(year: int, bas: date) -> date:
+    import calendar
+
+    last = calendar.monthrange(year, bas.month)[1]
+    return date(year, bas.month, min(bas.day, last))
+
+
+def _guncel_donem_bitis(bas: date, bugun: date | None = None) -> date | None:
+    """Başlangıç yıldönümüne göre içinde bulunulan 1 yıllık dönemin bitiş tarihi."""
+    if not bas:
+        return None
+    bugun = bugun or date.today()
+    a_this = _anniversary_on(bugun.year, bas)
+    if bugun < a_this:
+        return a_this
+    return _anniversary_on(bugun.year + 1, bas)
+
+
+def odeme_gunu_metni_from_day(d: int | None) -> str:
+    """Belge ödeme günü metni (ERP tahsilat gününe dokunmaz)."""
+    if d is None:
+        return BLANK
+    try:
+        d_i = int(d)
+    except (TypeError, ValueError):
+        return BLANK
+    if d_i < 1 or d_i > 31:
+        return BLANK
+    if d_i == 31:
+        return "Her ayın son günü"
+    end = d_i + 5
+    if end > 31:
+        return (
+            f"Her ayın {d_i}. günü ile ayın son günü arası (en geç ayın son günü)"
+        )
+    return (
+        f"Her ayın {d_i}. günü ile {end}. günü arası (en geç {end}. gün)"
+    )
+
+
 def _s(v: Any) -> str:
     return str(v or "").strip()
 
@@ -168,22 +230,16 @@ def build_fill_ctx(
     if yillik_f <= 0 and aylik_f > 0:
         yillik_f = aylik_f * 12
 
-    bas = sozlesme_tarihi or k.get("sozlesme_tarihi") or m.get("rent_start_date")
-    if not bas:
-        bas = date.today()
-    # bitiş: KYC sozlesme_bitis varsa onu kullan
-    bit_raw = k.get("sozlesme_bitis")
-    bas_s = _fmt_date(bas)
-    bit_s = _fmt_date(bit_raw) if bit_raw else ""
-    if not bit_s:
-        try:
-            if hasattr(bas, "year") and hasattr(bas, "month"):
-                bit_s = _fmt_date(date(int(bas.year) + 1, int(bas.month), int(getattr(bas, "day", 1) or 1)))
-            else:
-                d0 = datetime.strptime(str(bas)[:10], "%Y-%m-%d").date()
-                bit_s = _fmt_date(date(d0.year + 1, d0.month, d0.day))
-        except Exception:
-            bit_s = ""
+    # Başlangıç: kart rent_start_date → KYC sozlesme_tarihi → (opsiyonel) çağıran; bugün YOK
+    bas = _parse_date(m.get("rent_start_date"))
+    if bas is None:
+        bas = _parse_date(k.get("sozlesme_tarihi"))
+    if bas is None:
+        bas = _parse_date(sozlesme_tarihi)
+    bas_s = _fmt_date(bas) if bas else ""
+    # Güncel dönem bitiş: başlangıç yıldönümü (kart tarihi yoksa boş)
+    bit_d = _guncel_donem_bitis(bas) if bas else None
+    bit_s = _fmt_date(bit_d) if bit_d else ""
 
     ht = _s(hizmet_turu) or _s(k.get("hizmet_turu")) or "Sanal Ofis"
 
@@ -207,21 +263,9 @@ def build_fill_ctx(
         else:
             oda_metin = ht
 
-    # Belge ödeme günü metni: sözleşme başlangıç günü (ERP odeme_gunu / 1-5 mantığına dokunulmaz)
-    odeme_gun = None
-    try:
-        if hasattr(bas, "day"):
-            odeme_gun = int(bas.day)
-        else:
-            odeme_gun = datetime.strptime(str(bas)[:10], "%Y-%m-%d").date().day
-    except Exception:
-        odeme_gun = None
-    if odeme_gun and 1 <= odeme_gun <= 31:
-        odeme_gunu_metin = (
-            f"Her ayın {odeme_gun}. günü (ay o güne sahip değilse ayın son günü)"
-        )
-    else:
-        odeme_gunu_metin = BLANK
+    # Belge ödeme günü: başlangıç günü d … d+5 (ERP odeme_gunu değişmez)
+    odeme_gun = int(bas.day) if bas else None
+    odeme_gunu_metin = odeme_gunu_metni_from_day(odeme_gun)
 
     firma_vd = _s(firma.get("vergi_dairesi"))
     firma_vn = _s(firma.get("vergi_no"))
@@ -243,6 +287,9 @@ def build_fill_ctx(
         "hizmet_turu": ht,
         "baslangic": bas_s or BLANK,
         "bitis": bit_s or BLANK,
+        "baslangic_bitis": (
+            f"{bas_s or BLANK} / {bit_s or BLANK}"
+        ),
         "aylik_tl": _tl_fmt(aylik_f) or BLANK,
         "yillik_tl": _tl_fmt(yillik_f) or BLANK,
         "aylik_kdv_dahil": _tl_fmt(aylik_f * 1.20) if aylik_f > 0 else BLANK,
@@ -362,7 +409,8 @@ def _fill_table_ek1(table, ctx: dict) -> None:
         return
     mapping = {
         "musteri unvani": f"{ctx['musteri_unvan']} / {ctx['musteri_tc_vergi']}",
-        "sozlesme baslangic": f"{ctx['baslangic']} – {ctx['bitis']}",
+        "sozlesme baslangic": ctx.get("baslangic_bitis")
+        or f"{ctx['baslangic']} / {ctx['bitis']}",
         "secilen hizmetler": ctx["hizmet_turu"],
         "aylik bedel": f"{ctx['aylik_tl']} TL + KDV" if ctx["aylik_tl"] != BLANK else BLANK,
         "aylik toplam": f"{ctx['aylik_kdv_dahil']} TL" if ctx["aylik_kdv_dahil"] != BLANK else BLANK,

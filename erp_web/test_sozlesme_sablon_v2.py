@@ -134,11 +134,14 @@ def test_routes_wire():
 
 
 def test_mid867_preview_liste():
-    """mid=867: bayrak0+liste ile yeni; DB INSERT yok."""
+    """mid=867: SOZLESME_SABLON_V2=1; başlangıç 01.08.2023; ödeme 1–6; DB INSERT yok."""
     _clean_flags()
     os.environ.pop("ALLOW_PROD_WRITE", None)
     from db import fetch_one
     import sozlesme_sablon_v2 as m
+    from docx import Document
+    from io import BytesIO
+    from datetime import date as _date
 
     reload(m)
     mid = 867
@@ -151,24 +154,33 @@ def test_mid867_preview_liste():
     check("mid867_kyc", kyc is not None)
     check("preview_flag0_liste_bos", m.sozlesme_sablon_v2_aktif(mid) is False)
 
-    os.environ["SOZLESME_SABLON_V2_MIDLER"] = "867"
+    os.environ["SOZLESME_SABLON_V2"] = "1"
     reload(m)
-    check("preview_liste867", m.sozlesme_sablon_v2_aktif(mid) is True)
+    check("preview_flag1", m.sozlesme_sablon_v2_aktif(mid) is True)
 
     ctx = m.build_fill_ctx(musteri=cust or {}, kyc=kyc or {}, sozlesme_no="TEST-867-V2")
+    check("mid867_bas_01082023", ctx.get("baslangic") == "01.08.2023", str(ctx.get("baslangic")))
+    check("mid867_odeme_1_6", "1. günü ile 6. günü arası" in (ctx.get("odeme_gunu_metin") or ""), str(ctx.get("odeme_gunu_metin")))
+    check("mid867_bugun_basilmaz", ctx.get("baslangic") != _date.today().strftime("%d.%m.%Y"))
+
     out_dir = ROOT / "uploads" / "sozlesmeler_test"
     out_dir.mkdir(parents=True, exist_ok=True)
     data = m.render_sozlesme_docx_v2(ctx)
     path = out_dir / "preview_mid867_v2.docx"
     path.write_bytes(data)
     check("preview_file", path.is_file() and path.stat().st_size > 1000, str(path.stat().st_size if path.is_file() else 0))
-    from docx import Document
-    from io import BytesIO
 
     doc = Document(BytesIO(data))
     full = chr(10).join(p.text for p in doc.paragraphs)
     check("preview_ek1", "Ek-1" in full)
     check("preview_ek4", "Ek-4" in full)
+    blob = _ek1_blob(_ek1_rows(doc))
+    check("mid867_ek1_bas", "01.08.2023" in blob)
+    check("mid867_ek1_odeme", "1. günü ile 6. günü arası" in blob)
+    # Madde 4.2: Ek-1 atfı, doldurulacak [ ] yok
+    p42 = next((p.text for p in doc.paragraphs if (p.text or "").strip().startswith("4.2.")), "")
+    check("madde42_ek1_atif", "Ek-1" in p42, p42[:120])
+    check("madde42_bos_kutu_yok", "[ ]" not in p42, p42[:120])
     _clean_flags()
     reload(m)
 
@@ -197,12 +209,18 @@ def _ek1_blob(rows: list[tuple[str, str]]) -> str:
 
 
 def test_ek1_senaryolar():
-    """Oda aç/kapa; ödeme günü 15/31/3; sabit satırlar; silinen 4 satır yok."""
-    from sozlesme_sablon_v2 import build_fill_ctx, render_sozlesme_docx_v2
+    """Oda aç/kapa; ödeme 15/28/29/31; sabit satırlar; silinen 4 satır yok."""
+    from sozlesme_sablon_v2 import (
+        build_fill_ctx,
+        render_sozlesme_docx_v2,
+        odeme_gunu_metni_from_day,
+        sozlesme_sablon_v2_path,
+    )
     from docx import Document
     from io import BytesIO
+    from datetime import date as _date
 
-    # --- oda KAPALI (Sanal Ofis, oda_no yok) ---
+    # --- oda KAPALI + gün 15 ---
     ctx0 = build_fill_ctx(
         musteri={"name": "ODA YOK AS", "tax_number": "1", "guncel_kira_bedeli": 500.0},
         kyc={"hizmet_turu": "Sanal Ofis", "aylik_kira": 500.0},
@@ -211,7 +229,8 @@ def test_ek1_senaryolar():
     )
     check("oda0_secili_false", ctx0.get("oda_secili") is False)
     check("odeme_gun_15", ctx0.get("odeme_gun") == 15, str(ctx0.get("odeme_gun")))
-    check("odeme_metin_15", "15." in (ctx0.get("odeme_gunu_metin") or ""), str(ctx0.get("odeme_gunu_metin")))
+    m15 = ctx0.get("odeme_gunu_metin") or ""
+    check("odeme_metin_15", "15. günü ile 20. günü arası" in m15 and "en geç 20. gün" in m15, m15)
     doc0 = Document(BytesIO(render_sozlesme_docx_v2(ctx0)))
     rows0 = _ek1_rows(doc0)
     blob0 = _ek1_blob(rows0)
@@ -223,9 +242,10 @@ def test_ek1_senaryolar():
     check("sabit_kullanim", "hafta içi 09:00" in blob0 or "hafta ici 09:00" in blob0)
     check("sabit_fesih", "30 gün" in blob0 or "30 gun" in blob0)
     check("sabit_gecikme", "tcmb avans" in blob0)
-    check("odeme_hucre_15", "15." in blob0 and ("ödeme" in blob0 or "odeme" in blob0))
+    check("odeme_hucre_15", "15. günü ile 20. günü arası" in blob0)
+    check("bas_label", "güncel dönem bitiş" in blob0 or "guncel donem bitis" in blob0)
 
-    # --- oda AÇIK (hazir_ofis_oda_no) ---
+    # --- oda AÇIK + gün 31 (ay sonu) ---
     ctx1 = build_fill_ctx(
         musteri={
             "name": "ODA VAR AS",
@@ -240,34 +260,40 @@ def test_ek1_senaryolar():
     check("oda1_secili", ctx1.get("oda_secili") is True)
     check("oda1_metin", "12" in (ctx1.get("oda_metin") or ""), str(ctx1.get("oda_metin")))
     check("odeme_gun_31", ctx1.get("odeme_gun") == 31, str(ctx1.get("odeme_gun")))
+    check("odeme_metin_31", (ctx1.get("odeme_gunu_metin") or "") == "Her ayın son günü", str(ctx1.get("odeme_gunu_metin")))
     doc1 = Document(BytesIO(render_sozlesme_docx_v2(ctx1)))
     rows1 = _ek1_rows(doc1)
     blob1 = _ek1_blob(rows1)
     check("oda1_satir_var", "oda / alan" in blob1)
     check("oda1_deger", "12" in blob1)
-    check("odeme_hucre_31", "31." in blob1)
+    check("odeme_hucre_31", "son günü" in blob1 or "son gunu" in blob1)
 
-    # --- gün 3 ---
-    ctx3 = build_fill_ctx(
-        musteri={"name": "GUN3", "tax_number": "3", "guncel_kira_bedeli": 100.0},
-        kyc={"hizmet_turu": "Sanal Ofis"},
-        sozlesme_tarihi="2026-05-03",
-    )
-    check("odeme_gun_3", ctx3.get("odeme_gun") == 3, str(ctx3.get("odeme_gun")))
-    check("odeme_metin_3", "3." in (ctx3.get("odeme_gunu_metin") or ""))
-    doc3 = Document(BytesIO(render_sozlesme_docx_v2(ctx3)))
-    blob3 = _ek1_blob(_ek1_rows(doc3))
-    check("odeme_hucre_3", "3." in blob3)
+    # --- ay sonu taşması: 28, 29 ---
+    m28 = odeme_gunu_metni_from_day(28)
+    m29 = odeme_gunu_metni_from_day(29)
+    check("odeme_28_son", "28. günü ile ayın son günü arası" in m28, m28)
+    check("odeme_29_son", "29. günü ile ayın son günü arası" in m29, m29)
+    check("odeme_31_son", odeme_gunu_metni_from_day(31) == "Her ayın son günü")
+
+    # --- tarih yok → bugün basılmaz ---
+    from sozlesme_sablon_v2 import BLANK as _BLANK
+
+    ctx_bos = build_fill_ctx(musteri={"name": "BOS"}, kyc={}, sozlesme_tarihi=None)
+    check("bos_bas_blank", ctx_bos.get("baslangic") == _BLANK, str(ctx_bos.get("baslangic")))
+    check("bos_bugun_yok", ctx_bos.get("baslangic") != _date.today().strftime("%d.%m.%Y"))
 
     # Şablon dosyasında da silinen satırlar yok
-    from sozlesme_sablon_v2 import sozlesme_sablon_v2_path
-
     sablon = Document(str(sozlesme_sablon_v2_path()))
     sblob = _ek1_blob(_ek1_rows(sablon))
     check("sablon_indirimli_yok", "indirimli" not in sblob)
     check("sablon_kurulum_yok", "kurulum" not in sblob)
     check("sablon_depozito_yok", "depozito" not in sblob)
     check("sablon_yillik_artis_yok", "yıllık artış" not in sblob and "yillik artis" not in sblob)
+    check("sablon_label_guncel", "güncel dönem bitiş" in sblob)
+    # Madde 4.2 şablonda [ ] yok
+    p42s = next((p.text for p in sablon.paragraphs if (p.text or "").strip().startswith("4.2.")), "")
+    check("sablon_42_ek1", "Ek-1" in p42s)
+    check("sablon_42_bos_yok", "[ ]" not in p42s)
 
 
 def main() -> int:
