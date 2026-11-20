@@ -3340,7 +3340,7 @@ def api_kyc_sozlesme():
         )
     except Exception:
         sozlesme_sablon_v2_aktif = None  # type: ignore
-    if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif():
+    if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif(musteri_id):
         cust = fetch_one("SELECT * FROM customers WHERE id = %s", (musteri_id,)) or {}
         ctx = build_fill_ctx(
             musteri=cust,

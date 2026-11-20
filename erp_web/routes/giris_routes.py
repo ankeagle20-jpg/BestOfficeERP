@@ -9600,7 +9600,7 @@ def sozlesme_olustur(mid):
             )
         except Exception:
             sozlesme_sablon_v2_aktif = None  # type: ignore
-        if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif():
+        if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif(mid):
             kyc_row = None
             try:
                 kyc_row = fetch_one(

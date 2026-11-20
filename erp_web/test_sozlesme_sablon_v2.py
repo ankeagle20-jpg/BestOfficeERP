@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""SOZLESME_SABLON_V2: yeni Ofisbir DOCX şablonu (varsayılan kapalı).
+"""SOZLESME_SABLON_V2 + SOZLESME_SABLON_V2_MIDLER.
 
-Temiz ortam. Prod yazma yok. mid=867 önizleme yerel dosyaya (DB INSERT yok).
+Temiz ortam. Prod yazma yok. mid=867 onizleme yerel (DB INSERT yok).
 """
 from __future__ import annotations
 
 import os
 import sys
+from importlib import reload
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -17,6 +18,7 @@ for k in list(os.environ):
     if k.startswith(("KAPANIS_", "ODA_", "REEL_TUFE_", "TAHSILAT_")):
         os.environ.pop(k, None)
 os.environ.pop("SOZLESME_SABLON_V2", None)
+os.environ.pop("SOZLESME_SABLON_V2_MIDLER", None)
 
 FAILS: list[str] = []
 
@@ -27,21 +29,45 @@ def check(name: str, ok: bool, ek: str = "") -> None:
         FAILS.append(name)
 
 
-def test_flag_default_off():
+def _clean_flags() -> None:
     os.environ.pop("SOZLESME_SABLON_V2", None)
-    from sozlesme_sablon_v2 import sozlesme_sablon_v2_aktif
-
-    check("flag_default_off", sozlesme_sablon_v2_aktif() is False)
+    os.environ.pop("SOZLESME_SABLON_V2_MIDLER", None)
 
 
-def test_flag_on():
-    os.environ["SOZLESME_SABLON_V2"] = "1"
-    from importlib import reload
+def test_karar_matris():
+    """bayrak0+liste bos=eski; liste 867+mid867=yeni; baska mid=eski; bayrak1=herkes."""
     import sozlesme_sablon_v2 as m
 
+    _clean_flags()
     reload(m)
-    check("flag_on", m.sozlesme_sablon_v2_aktif() is True)
-    os.environ.pop("SOZLESME_SABLON_V2", None)
+    check("flag0_liste_bos_mid_yok", m.sozlesme_sablon_v2_aktif() is False)
+    check("flag0_liste_bos_mid867", m.sozlesme_sablon_v2_aktif(867) is False)
+
+    os.environ["SOZLESME_SABLON_V2"] = "0"
+    os.environ["SOZLESME_SABLON_V2_MIDLER"] = "867"
+    reload(m)
+    check("flag0_liste867_mid867", m.sozlesme_sablon_v2_aktif(867) is True)
+    check("flag0_liste867_mid_baska", m.sozlesme_sablon_v2_aktif(1) is False)
+    check("flag0_liste867_mid_yok", m.sozlesme_sablon_v2_aktif() is False)
+
+    os.environ["SOZLESME_SABLON_V2"] = "1"
+    os.environ.pop("SOZLESME_SABLON_V2_MIDLER", None)
+    reload(m)
+    check("flag1_herkes_mid_yok", m.sozlesme_sablon_v2_aktif() is True)
+    check("flag1_herkes_mid867", m.sozlesme_sablon_v2_aktif(867) is True)
+    check("flag1_herkes_mid1", m.sozlesme_sablon_v2_aktif(1) is True)
+
+    # bosluk / gecersiz
+    os.environ["SOZLESME_SABLON_V2"] = "0"
+    os.environ["SOZLESME_SABLON_V2_MIDLER"] = " 867 , abc , , 0 , -3 , 42 "
+    reload(m)
+    mids = m.sozlesme_sablon_v2_midler()
+    check("midler_set", mids == {867, 42}, str(sorted(mids)))
+    check("midler_dayanik_867", m.sozlesme_sablon_v2_aktif(867) is True)
+    check("midler_dayanik_42", m.sozlesme_sablon_v2_aktif(42) is True)
+    check("midler_dayanik_abc_yok", m.sozlesme_sablon_v2_aktif(99) is False)
+
+    _clean_flags()
     reload(m)
 
 
@@ -91,7 +117,6 @@ def test_fill_and_ekler():
     check("ek4_placeholder", "Bu ek, OFİSBİR'in gerçek veri işleme" in full or "aydınlatma" in full.lower())
     check("madde_korundu", "11.7." in full or "11.7" in full)
     check("unvan_dolu", "TEST UNVAN LTD" in full)
-    # doldurulmayan boş [ ] kalmamalı (sabit [30]/[15] hariç olabilir)
     leftover_empty = full.count("[ ]")
     check("bos_kutu_cizgi", leftover_empty == 0, str(leftover_empty))
     check("tables_3", len(doc.tables) >= 3, str(len(doc.tables)))
@@ -101,27 +126,21 @@ def test_routes_wire():
     giris = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
     must = (ROOT / "routes" / "musteri_routes.py").read_text(encoding="utf-8")
     check("giris_import", "sozlesme_sablon_v2_aktif" in giris)
-    check("giris_branch", "sozlesme_sablon_v2_aktif()" in giris)
+    check("giris_branch_mid", "sozlesme_sablon_v2_aktif(mid)" in giris)
     check("kyc_import", "sozlesme_sablon_v2_aktif" in must)
-    check("kyc_branch", "sozlesme_sablon_v2_aktif()" in must)
-    # eski basliklar duruyor
+    check("kyc_branch_mid", "sozlesme_sablon_v2_aktif(musteri_id)" in must)
     check("eski_giris_baslik", "OFİSBİR HİZMET SÖZLEŞMESİ" in giris)
     check("eski_kyc_baslik", "HAZIR OFİS / SANAL OFİS" in must)
 
 
-def test_mid867_preview_both_flags():
-    """mid=867: SELECT + yerel DOCX; DB INSERT yok. Her iki bayrak yolu çalışır."""
+def test_mid867_preview_liste():
+    """mid=867: bayrak0+liste ile yeni; DB INSERT yok."""
+    _clean_flags()
     os.environ.pop("ALLOW_PROD_WRITE", None)
-    os.environ.pop("SOZLESME_SABLON_V2", None)
     from db import fetch_one
-    from sozlesme_sablon_v2 import (
-        build_fill_ctx,
-        render_sozlesme_docx_v2,
-        sozlesme_sablon_v2_aktif,
-    )
-    from docx import Document
-    from io import BytesIO
+    import sozlesme_sablon_v2 as m
 
+    reload(m)
     mid = 867
     cust = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
     check("mid867_var", cust is not None and int(cust.get("id") or 0) == mid)
@@ -130,48 +149,44 @@ def test_mid867_preview_both_flags():
         (mid,),
     )
     check("mid867_kyc", kyc is not None)
+    check("preview_flag0_liste_bos", m.sozlesme_sablon_v2_aktif(mid) is False)
 
-    # Bayrak 0: v2 aktif değil (eski yol ayrı; burada v2 üretimi yine çağrılabilir ama flag off)
-    check("preview_flag0", sozlesme_sablon_v2_aktif() is False)
+    os.environ["SOZLESME_SABLON_V2_MIDLER"] = "867"
+    reload(m)
+    check("preview_liste867", m.sozlesme_sablon_v2_aktif(mid) is True)
 
-    ctx = build_fill_ctx(musteri=cust or {}, kyc=kyc or {}, sozlesme_no="TEST-867-V2")
+    ctx = m.build_fill_ctx(musteri=cust or {}, kyc=kyc or {}, sozlesme_no="TEST-867-V2")
     out_dir = ROOT / "uploads" / "sozlesmeler_test"
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Bayrak 1 simülasyonu: doğrudan v2 render
-    os.environ["SOZLESME_SABLON_V2"] = "1"
-    from importlib import reload
-    import sozlesme_sablon_v2 as m
-
-    reload(m)
-    check("preview_flag1", m.sozlesme_sablon_v2_aktif() is True)
     data = m.render_sozlesme_docx_v2(ctx)
     path = out_dir / "preview_mid867_v2.docx"
     path.write_bytes(data)
     check("preview_file", path.is_file() and path.stat().st_size > 1000, str(path.stat().st_size if path.is_file() else 0))
+    from docx import Document
+    from io import BytesIO
+
     doc = Document(BytesIO(data))
     full = chr(10).join(p.text for p in doc.paragraphs)
     check("preview_ek1", "Ek-1" in full)
     check("preview_ek4", "Ek-4" in full)
-    # PII yok çıktıda: yalnızca mid/boolean/size
-    check("preview_no_db_write_note", True)  # render DB'ye yazmaz
-    os.environ.pop("SOZLESME_SABLON_V2", None)
+    _clean_flags()
     reload(m)
 
 
-def test_literal_bs_n():
+def test_module_exists():
     src = (ROOT / "sozlesme_sablon_v2.py").read_text(encoding="utf-8")
-    # urun JS yok; modul varligi
-    check("module_exists", "def render_sozlesme_docx_v2" in src)
+    check("module_aktif_mid", "def sozlesme_sablon_v2_aktif(mid" in src)
+    check("module_midler", "def sozlesme_sablon_v2_midler" in src)
+    check("module_render", "def render_sozlesme_docx_v2" in src)
 
 
 def main() -> int:
-    test_flag_default_off()
-    test_flag_on()
+    test_karar_matris()
     test_sablon_file()
     test_fill_and_ekler()
     test_routes_wire()
-    test_mid867_preview_both_flags()
-    test_literal_bs_n()
+    test_mid867_preview_liste()
+    test_module_exists()
     print("---")
     if FAILS:
         print("FAILS", len(FAILS), FAILS)

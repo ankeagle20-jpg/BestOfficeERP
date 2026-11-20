@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """Ofisbir sözleşme şablonu v2 (DOCX).
 
-Bayrak: SOZLESME_SABLON_V2 (varsayılan kapalı / 0).
-Eski üretim yolları (giris.sozlesme_olustur / api_kyc_sozlesme) bayrak 0 iken değişmez.
-Prod'da bayrağı açmayın; bu modül yalnızca yerel/önizleme için doldurma yapar.
+Bayrak: SOZLESME_SABLON_V2 (varsayılan kapalı / 0) → herkese v2.
+Liste: SOZLESME_SABLON_V2_MIDLER (virgüllü mid; boş/tanımsız = kimse).
+Karar: bayrak=1 → v2; değilse mid listede ise v2; aksi halde eski şablon.
+Prod'da bayrak/listeyi açmayın.
 """
 from __future__ import annotations
 
@@ -29,9 +30,43 @@ _KEEP_LITERAL = {
 }
 
 
-def sozlesme_sablon_v2_aktif() -> bool:
+def sozlesme_sablon_v2_global_acik() -> bool:
     raw = str(os.environ.get("SOZLESME_SABLON_V2") or "0").strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def sozlesme_sablon_v2_midler() -> set[int]:
+    """SOZLESME_SABLON_V2_MIDLER → geçerli mid kümesi; boşluk/geçersiz atlanır."""
+    raw = os.environ.get("SOZLESME_SABLON_V2_MIDLER")
+    if raw is None:
+        return set()
+    out: set[int] = set()
+    for part in str(raw).split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        try:
+            mid = int(tok)
+        except (TypeError, ValueError):
+            continue
+        if mid > 0:
+            out.add(mid)
+    return out
+
+
+def sozlesme_sablon_v2_aktif(mid=None) -> bool:
+    """Tek karar noktası: global bayrak veya mid listesi."""
+    if sozlesme_sablon_v2_global_acik():
+        return True
+    if mid is None or mid == "":
+        return False
+    try:
+        mid_i = int(mid)
+    except (TypeError, ValueError):
+        return False
+    if mid_i <= 0:
+        return False
+    return mid_i in sozlesme_sablon_v2_midler()
 
 
 def sozlesme_sablon_v2_path() -> Path:
