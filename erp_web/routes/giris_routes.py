@@ -8693,46 +8693,85 @@ def api_demirbas_urun_geri_getir():
 @bp.route("/api/demirbas-markalar", methods=["GET", "POST"])
 @giris_gerekli
 def api_demirbas_markalar():
-    """Marka listesi oku / kalıcı ekle (demirbas_markalar). Taban: yalnız Muhtelif."""
+    """Marka listesi oku / kalıcı ekle veya çıkar (demirbas_markalar). Taban: Muhtelif."""
     from demirbas import (
         DEMIRBAS_MARKA_LISTESI_TABAN,
         DEMIRBAS_MARKA_VARSAYILAN,
         DEMIRBAS_PREF_MARKA,
+        demirbas_marka_adi_temizle,
         demirbas_marka_listesi_birlesik,
-        demirbas_marka_normalize,
         demirbas_tr_casefold,
     )
 
     if request.method == "GET":
-        birlesik = demirbas_marka_listesi_birlesik(_demirbas_marka_kayitli())
+        kayitli = _demirbas_marka_kayitli()
+        birlesik = demirbas_marka_listesi_birlesik(kayitli)
         return jsonify(
             {
                 "ok": True,
                 "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
                 "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
                 "markalar": birlesik,
+                "markalar_ozel": [
+                    t
+                    for t in kayitli
+                    if str(t or "").strip()
+                    and demirbas_tr_casefold(str(t)) != "muhtelif"
+                ],
             }
         )
 
     data = request.get_json(silent=True) or {}
     kayitli = list(_demirbas_marka_kayitli())
+
+    # Çıkar (Muhtelif çıkarılamaz; satır metinleri etkilenmez)
+    if data.get("cikar") in (True, 1, "1", "true", "True") or str(
+        data.get("islem") or ""
+    ).strip().casefold() in ("cikar", "sil"):
+        ad = demirbas_marka_adi_temizle(data.get("marka") or data.get("ad"))
+        if not ad:
+            return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
+        if not _demirbas_ui_pref_set(
+            DEMIRBAS_PREF_MARKA, {"markalar": kayitli}, removed=[ad]
+        ):
+            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        kayitli2 = _demirbas_marka_kayitli()
+        birlesik = demirbas_marka_listesi_birlesik(kayitli2)
+        return jsonify(
+            {
+                "ok": True,
+                "islem": "cikar",
+                "markalar": birlesik,
+                "markalar_ozel": [
+                    t
+                    for t in kayitli2
+                    if str(t or "").strip()
+                    and demirbas_tr_casefold(str(t)) != "muhtelif"
+                ],
+                "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+                "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+            }
+        )
+
     eklenecek: list[str] = []
     if isinstance(data.get("markalar"), list):
         eklenecek.extend(str(x) for x in data.get("markalar"))
     if data.get("marka") is not None:
         eklenecek.append(str(data.get("marka")))
+    if not eklenecek:
+        return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
+    eklenen: list[str] = []
     for ham in eklenecek:
-        # İlk kelime (FE ile aynı)
-        marka = demirbas_marka_normalize((ham or "").strip().split()[0] if str(ham).strip() else "")
+        marka = demirbas_marka_adi_temizle(ham)
         if not marka:
             continue
         k = demirbas_tr_casefold(marka)
         if any(demirbas_tr_casefold(x) == k for x in kayitli):
-            continue
-        if k == "muhtelif":
-            continue
+            return jsonify({"ok": False, "mesaj": "Bu marka zaten listede"}), 409
         kayitli.append(marka)
-    # Kayıtta taban dışı kullanıcı markaları (Muhtelif tekrar yazılmaz)
+        eklenen.append(marka)
+    if not eklenen:
+        return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
     kayit_yazi = []
     seen = set()
     for m in kayitli:
@@ -8750,7 +8789,9 @@ def api_demirbas_markalar():
     return jsonify(
         {
             "ok": True,
+            "islem": "ekle",
             "markalar": birlesik,
+            "markalar_ozel": kayit_yazi,
             "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
             "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
         }

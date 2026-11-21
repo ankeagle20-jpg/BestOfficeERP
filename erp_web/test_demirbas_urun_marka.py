@@ -98,6 +98,17 @@ def test_marka_taban():
     check("kayit_koru", "Samsung" in bir and "HP" in bir, str(bir))
     check("muhtelif_tek", bir.count("Muhtelif") == 1, str(bir))
     check("fold_marka", d.demirbas_tr_casefold("Arçelik") == d.demirbas_tr_casefold("ARÇELİK"))
+    check("marka_adi_ok", d.demirbas_marka_adi_temizle("  Acer Nitro  ") == "Acer Nitro")
+    check("marka_adi_kisa", d.demirbas_marka_adi_temizle("A") is None)
+    check("marka_adi_muh", d.demirbas_marka_adi_temizle("Muhtelif") is None)
+    # marka çıkar birleşim
+    mk = d.demirbas_pref_merge_json(
+        d.DEMIRBAS_PREF_MARKA,
+        {"markalar": ["Acer", "HP"]},
+        {"markalar": ["Acer", "HP"]},
+        removed=["Acer"],
+    )
+    check("marka_cikar", mk["markalar"] == ["HP"], str(mk))
 
 
 def test_eski_satir_metin():
@@ -122,12 +133,16 @@ def test_module_wire_urun():
     check("api_geri", "/api/demirbas-urun-geri-getir" in src)
     check("api_marka", "/api/demirbas-markalar" in src)
     tjs = (ROOT / "_t.js").read_text(encoding="utf-8")
-    check("fe_yeni", "__YENI__" in tjs and "demirbas-urun" in tjs)
+    check("fe_yeni", "girisDemirbasYeniPanelGoster" in tjs and "demirbas-urun" in tjs)
+    check("fe_yeni_opt_yok", "__YENI__" not in tjs)
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     check("fe_duzenle", "girisDemirbasDuzenlePanelAcKapa" in tjs and "Listeyi düzenle" in html)
+    check("fe_satir", "+ Satır ekle" in html and "Yeni Marka Ekle" in html and "Yeni Demirbaş Ekle" in html)
     dem_block = tjs[tjs.find("/* === Demirbaşlar") :]
     check("fe_marka_api", "demirbas-markalar" in dem_block)
     check("fe_marka_ui_tercih_yok", "/faturalar/api/ui-tercih" not in dem_block)
+    check("fe_auto_marka_yok", "girisDemirbasMarkaKaydetListe" not in dem_block)
+    check("marka_adi_fn", "def demirbas_marka_adi_temizle" in (ROOT / "demirbas.py").read_text(encoding="utf-8"))
     db = (ROOT / "db.py").read_text(encoding="utf-8")
     check("firma_pref_ensure", "ensure_firma_ui_preferences_table" in db)
     gr = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")

@@ -444,8 +444,20 @@ def demirbas_marka_normalize(raw) -> str:
     s = str(raw or "").strip()
     if not s:
         return DEMIRBAS_MARKA_VARSAYILAN
-    if s.casefold() == "muhtelif":
+    if demirbas_tr_casefold(s) == "muhtelif":
         return DEMIRBAS_MARKA_VARSAYILAN
+    return s
+
+
+def demirbas_marka_adi_temizle(raw) -> str | None:
+    """Kalıcı marka ekleme: 2–40 karakter, trim, HTML temiz. Muhtelif → None."""
+    s = str(raw or "").strip()
+    s = re.sub(r"<[^>]*>", "", s)
+    s = html.unescape(s).strip()
+    if len(s) < 2 or len(s) > 40:
+        return None
+    if demirbas_tr_casefold(s) == "muhtelif":
+        return None
     return s
 
 

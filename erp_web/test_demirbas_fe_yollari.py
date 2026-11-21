@@ -123,7 +123,11 @@ def test_ayna_ve_sabit():
     check("marka_key", "demirbas_markalar" in b_t and "Muhtelif" in b_t)
     check("marka_taban_sade", "var __girisDemirbasMarkaTaban = ['Muhtelif'];" in b_t)
     check("marka_api_yol", "demirbas-markalar" in b_t)
-    check("urun_yeni", "__YENI__" in b_t and "demirbas-urun" in b_t)
+    check("urun_btn", "girisDemirbasYeniPanelGoster" in b_t and "demirbas-urun" in b_t)
+    check("marka_btn", "girisDemirbasMarkaFormKaydet" in b_t)
+    check("yeni_opt_yok", "__YENI__" not in b_t)
+    check("auto_marka_yok", "girisDemirbasMarkaKaydetListe" not in b_t)
+    check("satir_etiket", "+ Satır ekle" in html)
     check("ui_adet_th", ">Adet</th>" in html and "Adet / Durum" not in html)
     # ayna: path sabitleri aynı
     check("ayna_paths", _extract_fe_paths(b_t) == _extract_fe_paths(b_h), str(_extract_fe_paths(b_h)))
