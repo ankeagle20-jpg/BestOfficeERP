@@ -171,6 +171,11 @@ def test_module_wire():
     check("ensure_fn", "def ensure_musteri_demirbas_table" in db)
     check("ensure_seri_tbl", "musteri_demirbas_seri" in db)
     check("ensure_adet_col", "ADD COLUMN IF NOT EXISTS adet" in db)
+    check(
+        "ensure_seri_uq_name",
+        "uq_musteri_demirbas_seri_seri_no" in db
+        and db.count("CONSTRAINT uq_musteri_demirbas_seri_no ") == 1,
+    )
     check("schema_ready", "def musteri_demirbas_schema_ready" in db)
     check(
         "ensure_not_init",
@@ -185,6 +190,11 @@ def test_module_wire():
     scr = (ROOT / "scripts" / "ensure_musteri_demirbas.py").read_text(encoding="utf-8")
     check("script_seri", "musteri_demirbas_seri" in scr)
     check("script_adet", "ADD COLUMN IF NOT EXISTS adet" in scr)
+    check(
+        "script_seri_uq_name",
+        "uq_musteri_demirbas_seri_seri_no" in scr
+        and scr.count("CONSTRAINT uq_musteri_demirbas_seri_no ") == 1,
+    )
 
 
 def main() -> int:

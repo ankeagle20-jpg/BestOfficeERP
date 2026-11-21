@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS musteri_demirbas_seri (
     sira            INTEGER NOT NULL DEFAULT 1,
     seri_no         TEXT NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_musteri_demirbas_seri_no UNIQUE (seri_no),
+    CONSTRAINT uq_musteri_demirbas_seri_seri_no UNIQUE (seri_no),
     CONSTRAINT uq_musteri_demirbas_seri_parent_sira
         UNIQUE (demirbas_id, sira)
 );
