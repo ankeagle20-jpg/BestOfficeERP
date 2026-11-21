@@ -8,10 +8,24 @@ Prod'da bayrak açmayın; DDL'i ensure_musteri_demirbas_table ile ayrı onayda �
 """
 from __future__ import annotations
 
+import html
 import os
 import re
 import secrets
 from typing import Any
+
+# ui-tercih anahtarları (user_ui_preferences — kullanıcı bazlı; şirket KV yok, DDL yok)
+DEMIRBAS_PREF_URUN_EK = "demirbas_urunler_ek"
+DEMIRBAS_PREF_URUN_GIZLI = "demirbas_urunler_gizli"
+DEMIRBAS_PREF_MARKA = "demirbas_markalar"
+
+DEMIRBAS_GRUP_LISTESI: list[str] = [
+    "Çalışma Alanı",
+    "Depolama",
+    "Teknoloji",
+    "Aydınlatma ve Aksesuar",
+    "Ortak Alan (oda dışı)",
+]
 
 # Katalog: (kapsam, grup_adi, esya_adi)
 # kapsam: oda_ici | ortak_alan
@@ -122,20 +136,139 @@ def demirbas_tablosu_aktif(mid=None) -> bool:
     return mid_i in demirbas_tablosu_midler()
 
 
+def demirbas_tr_casefold(s: str) -> str:
+    """Türkçe uyumlu büyük/küçük harf duyarsız karşılaştırma anahtarı (İ/ı, I/i)."""
+    out: list[str] = []
+    for ch in str(s or ""):
+        if ch == "İ":
+            out.append("i")
+        elif ch == "I":
+            out.append("ı")
+        else:
+            out.append(ch)
+    return "".join(out).casefold()
+
+
+def demirbas_urun_adi_temizle(raw) -> str | None:
+    """2–40 karakter, trim, HTML etiketleri temizlenir. Geçersizse None."""
+    s = str(raw or "").strip()
+    s = re.sub(r"<[^>]*>", "", s)
+    s = html.unescape(s).strip()
+    if len(s) < 2 or len(s) > 40:
+        return None
+    return s
+
+
+def demirbas_grup_kapsam(grup: str) -> str:
+    g = str(grup or "").strip()
+    if g == "Ortak Alan (oda dışı)" or demirbas_tr_casefold(g).startswith("ortak alan"):
+        return "ortak_alan"
+    return "oda_ici"
+
+
 def demirbas_katalog_fe() -> list[dict[str, str]]:
-    """FE dropdown: grup + esya + kapsam."""
+    """FE dropdown: grup + esya + kapsam (yalnız hazır; birleşik için demirbas_katalog_birlesik)."""
     return [
-        {"kapsam": k, "grup": g, "esya": e}
+        {"kapsam": k, "grup": g, "esya": e, "kaynak": "hazir"}
         for (k, g, e) in DEMIRBAS_KATALOG
     ]
 
 
-def demirbas_kapsam_for_esya(esya: str) -> str:
+def demirbas_katalog_birlesik(
+    *,
+    ek: list | None = None,
+    gizli: list | None = None,
+) -> list[dict[str, str]]:
+    """hazır − gizlenenler + özel eklenenler. Her öğede kaynak=hazir|ozel."""
+    gizli_keys = {
+        demirbas_tr_casefold(str(x or "").strip())
+        for x in (gizli or [])
+        if str(x or "").strip()
+    }
+    hazir_keys = {demirbas_tr_casefold(e) for (_k, _g, e) in DEMIRBAS_KATALOG}
+    out: list[dict[str, str]] = []
+    for k, g, e in DEMIRBAS_KATALOG:
+        if demirbas_tr_casefold(e) in gizli_keys:
+            continue
+        out.append({"kapsam": k, "grup": g, "esya": e, "kaynak": "hazir"})
+    for it in ek or []:
+        if not isinstance(it, dict):
+            continue
+        ad = demirbas_urun_adi_temizle(it.get("esya") or it.get("ad"))
+        if not ad:
+            continue
+        key = demirbas_tr_casefold(ad)
+        if key in hazir_keys:
+            # hazır (görünür veya gizli) ile çakışan özel kayıt yok sayılır
+            continue
+        if any(demirbas_tr_casefold(x["esya"]) == key for x in out):
+            continue
+        grup = str(it.get("grup") or "").strip()
+        if grup not in DEMIRBAS_GRUP_LISTESI:
+            grup = DEMIRBAS_GRUP_LISTESI[0]
+        kapsam = str(it.get("kapsam") or "").strip() or demirbas_grup_kapsam(grup)
+        if kapsam not in ("oda_ici", "ortak_alan"):
+            kapsam = demirbas_grup_kapsam(grup)
+        out.append({"kapsam": kapsam, "grup": grup, "esya": ad, "kaynak": "ozel"})
+    return out
+
+
+def demirbas_kapsam_for_esya(esya: str, *, ek: list | None = None) -> str:
     e = (esya or "").strip()
+    key = demirbas_tr_casefold(e)
     for k, _g, ad in DEMIRBAS_KATALOG:
-        if ad == e:
+        if demirbas_tr_casefold(ad) == key:
             return k
+    for it in ek or []:
+        if not isinstance(it, dict):
+            continue
+        ad = str(it.get("esya") or it.get("ad") or "").strip()
+        if demirbas_tr_casefold(ad) != key:
+            continue
+        grup = str(it.get("grup") or "").strip()
+        kapsam = str(it.get("kapsam") or "").strip()
+        if kapsam in ("oda_ici", "ortak_alan"):
+            return kapsam
+        return demirbas_grup_kapsam(grup)
     return "oda_ici"
+
+
+def demirbas_gizli_normalize(raw) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in raw or []:
+        s = str(x or "").strip()
+        if not s:
+            continue
+        k = demirbas_tr_casefold(s)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(s)
+    return out
+
+
+def demirbas_ek_normalize(raw) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for it in raw or []:
+        if not isinstance(it, dict):
+            continue
+        ad = demirbas_urun_adi_temizle(it.get("esya") or it.get("ad"))
+        if not ad:
+            continue
+        k = demirbas_tr_casefold(ad)
+        if k in seen:
+            continue
+        seen.add(k)
+        grup = str(it.get("grup") or "").strip()
+        if grup not in DEMIRBAS_GRUP_LISTESI:
+            grup = DEMIRBAS_GRUP_LISTESI[0]
+        kapsam = str(it.get("kapsam") or "").strip() or demirbas_grup_kapsam(grup)
+        if kapsam not in ("oda_ici", "ortak_alan"):
+            kapsam = demirbas_grup_kapsam(grup)
+        out.append({"esya": ad, "grup": grup, "kapsam": kapsam})
+    return out
 
 
 def demirbas_seri_oneki(esya_adi: str) -> str:
@@ -206,21 +339,23 @@ def demirbas_satirlari_ek2_sirali(rows: list[dict[str, Any]]) -> list[dict[str, 
 DEMIRBAS_MARKA_VARSAYILAN = "Muhtelif"
 DEMIRBAS_MARKA_LISTESI_TABAN = [
     "Muhtelif",
-    "Samsung",
-    "LG",
-    "HP",
-    "Dell",
-    "Lenovo",
-    "Asus",
-    "Apple",
-    "Philips",
-    "Arçelik",
-    "Vestel",
-    "Brother",
-    "Canon",
-    "Epson",
-    "Logitech",
 ]
+
+
+def demirbas_marka_listesi_birlesik(kayitli: list | None = None) -> list[str]:
+    """Varsayılan taban + kayıtlı markalar (TR casefold tekil)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in list(DEMIRBAS_MARKA_LISTESI_TABAN) + list(kayitli or []):
+        t = str(m or "").strip()
+        if not t:
+            continue
+        k = demirbas_tr_casefold(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(DEMIRBAS_MARKA_VARSAYILAN if k == "muhtelif" else t)
+    return out or [DEMIRBAS_MARKA_VARSAYILAN]
 
 
 def demirbas_adet_normalize(raw, *, default: int = 1) -> int:

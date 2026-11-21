@@ -165,8 +165,14 @@ def test_module_wire():
     src = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
     check("api_katalog", "/api/demirbas-katalog" in src)
     check("api_seri", "/api/demirbas-seri-no" in src)
+    check("api_urun", "/api/demirbas-urun" in src and "/api/demirbas-urun-cikar" in src)
+    check("api_markalar", "/api/demirbas-markalar" in src)
     check("api_mid", "/demirbas" in src and "api_musteri_demirbas" in src)
     check("api_sema", "sema_hazir" in src)
+    import demirbas as d
+
+    reload(d)
+    check("marka_taban_muhtelif", d.DEMIRBAS_MARKA_LISTESI_TABAN == ["Muhtelif"])
     db = (ROOT / "db.py").read_text(encoding="utf-8")
     check("ensure_fn", "def ensure_musteri_demirbas_table" in db)
     check("ensure_seri_tbl", "musteri_demirbas_seri" in db)

@@ -59,10 +59,19 @@ def _extract_fe_paths(block: str) -> list[str]:
     prefix = m.group(1).rstrip("/")
     paths: list[str] = []
     # bilinen uçlar (parçalı concat dahil)
-    if "GIRIS_DEMIRBAS_API + '/demirbas-katalog" in block:
-        paths.append(f"{prefix}/demirbas-katalog")
-    if "GIRIS_DEMIRBAS_API + '/demirbas-seri-no" in block:
-        paths.append(f"{prefix}/demirbas-seri-no")
+    known = (
+        "/demirbas-katalog",
+        "/demirbas-seri-no",
+        "/demirbas-urun",
+        "/demirbas-urun-cikar",
+        "/demirbas-urun-geri-getir",
+        "/demirbas-markalar",
+    )
+    for lit in known:
+        if f"GIRIS_DEMIRBAS_API + '{lit}" in block or f'GIRIS_DEMIRBAS_API + "{lit}' in block:
+            p = f"{prefix}{lit}"
+            if p not in paths:
+                paths.append(p)
     if re.search(
         r"GIRIS_DEMIRBAS_API\s*\+\s*'/musteri/'\s*\+\s*encodeURIComponent\(mid\)\s*\+\s*'/demirbas'",
         block,
@@ -71,7 +80,9 @@ def _extract_fe_paths(block: str) -> list[str]:
     # beklenmeyen başka GIRIS_DEMIRBAS_API + '...' sabitleri
     for lit in re.findall(r"GIRIS_DEMIRBAS_API\s*\+\s*'([^']+)'", block):
         base = lit.split("?")[0]
-        if base in ("/demirbas-katalog", "/demirbas-seri-no", "/musteri/", "/demirbas"):
+        if base in known or base in ("/musteri/", "/demirbas"):
+            continue
+        if base.startswith("/musteri/"):
             continue
         p = prefix + base
         if p not in paths:
@@ -110,6 +121,9 @@ def test_ayna_ve_sabit():
     check("sema_mesaj", "Demirbaş tablosu güncellenmeli" in b_t)
     check("adet_fn", "girisDemirbasAdetDegisti" in b_t and "girisDemirbasAdetNormalize" in b_t)
     check("marka_key", "demirbas_markalar" in b_t and "Muhtelif" in b_t)
+    check("marka_taban_sade", "var __girisDemirbasMarkaTaban = ['Muhtelif'];" in b_t)
+    check("marka_api_yol", "demirbas-markalar" in b_t)
+    check("urun_yeni", "__YENI__" in b_t and "demirbas-urun" in b_t)
     check("ui_adet_th", ">Adet</th>" in html and "Adet / Durum" not in html)
     # ayna: path sabitleri aynı
     check("ayna_paths", _extract_fe_paths(b_t) == _extract_fe_paths(b_h), str(_extract_fe_paths(b_h)))
@@ -122,6 +136,10 @@ def test_fe_paths_url_map():
     expect = {
         "/giris/api/demirbas-katalog",
         "/giris/api/demirbas-seri-no",
+        "/giris/api/demirbas-urun",
+        "/giris/api/demirbas-urun-cikar",
+        "/giris/api/demirbas-urun-geri-getir",
+        "/giris/api/demirbas-markalar",
         f"/giris/api/musteri/{MID}/demirbas",
     }
     check("fe_path_beklenen", expect.issubset(set(paths)), str(paths))
@@ -130,6 +148,10 @@ def test_fe_paths_url_map():
     method_hints = {
         "/giris/api/demirbas-katalog": ("GET",),
         "/giris/api/demirbas-seri-no": ("POST",),
+        "/giris/api/demirbas-urun": ("POST",),
+        "/giris/api/demirbas-urun-cikar": ("POST",),
+        "/giris/api/demirbas-urun-geri-getir": ("POST",),
+        "/giris/api/demirbas-markalar": ("GET", "POST"),
         f"/giris/api/musteri/{MID}/demirbas": ("GET", "PUT"),
     }
     for p in paths:
@@ -192,8 +214,13 @@ def test_hata_yollari_node():
     # bağımlı yardımcılar (hata yolu testi için stub)
     slim += "\nfunction girisDemirbasSatirEkle(){}\n"
     slim += "\nfunction girisDemirbasMarkaListeYukle(){ return Promise.resolve(); }\n"
+    slim += "\nfunction girisDemirbasMarkaListeHtml(){}\n"
+    slim += "\nfunction girisDemirbasDuzenlePanelDoldur(){}\n"
     slim += "\nvar __girisDemirbasMarkaVarsayilan = 'Muhtelif';\n"
+    slim += "\nvar __girisDemirbasMarkalar = ['Muhtelif'];\n"
     slim += "\nvar __girisDemirbasMarkaTaban = ['Muhtelif'];\n"
+    slim += "\nvar __girisDemirbasGizli = [];\n"
+    slim += "\nvar __girisDemirbasGruplar = [];\n"
 
     js = r"""
 const fs = require('fs');

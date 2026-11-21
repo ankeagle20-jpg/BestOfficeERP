@@ -8348,15 +8348,94 @@ def _demirbas_rows_for_mid(mid: int) -> list:
         return []
 
 
+def _demirbas_ui_pref_get(pref_key: str) -> dict:
+    """user_ui_preferences oku (kullanıcı bazlı). Hata/yok → {}."""
+    try:
+        from db import ensure_user_ui_preferences_table, fetch_one
+
+        ensure_user_ui_preferences_table()
+        uid = getattr(current_user, "id", None)
+        if uid is None:
+            return {}
+        row = fetch_one(
+            "SELECT pref_json FROM user_ui_preferences WHERE user_id = %s AND pref_key = %s",
+            (uid, pref_key),
+        )
+        if not row or row.get("pref_json") is None:
+            return {}
+        prefs = row.get("pref_json")
+        if isinstance(prefs, str):
+            try:
+                prefs = json.loads(prefs)
+            except Exception:
+                prefs = {}
+        return prefs if isinstance(prefs, dict) else {}
+    except Exception:
+        return {}
+
+
+def _demirbas_ui_pref_set(pref_key: str, prefs: dict) -> bool:
+    try:
+        from db import ensure_user_ui_preferences_table, execute
+
+        ensure_user_ui_preferences_table()
+        uid = getattr(current_user, "id", None)
+        if uid is None:
+            return False
+        if not isinstance(prefs, dict):
+            return False
+        raw = json.dumps(prefs, ensure_ascii=False)
+        if len(raw) > 32000:
+            return False
+        execute(
+            """
+            INSERT INTO user_ui_preferences (user_id, pref_key, pref_json, updated_at)
+            VALUES (%s, %s, %s::jsonb, NOW())
+            ON CONFLICT (user_id, pref_key) DO UPDATE SET
+                pref_json = EXCLUDED.pref_json,
+                updated_at = NOW()
+            """,
+            (uid, pref_key, raw),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _demirbas_urun_ek_gizli():
+    from demirbas import (
+        DEMIRBAS_PREF_URUN_EK,
+        DEMIRBAS_PREF_URUN_GIZLI,
+        demirbas_ek_normalize,
+        demirbas_gizli_normalize,
+    )
+
+    ek = demirbas_ek_normalize((_demirbas_ui_pref_get(DEMIRBAS_PREF_URUN_EK) or {}).get("urunler"))
+    gizli = demirbas_gizli_normalize(
+        (_demirbas_ui_pref_get(DEMIRBAS_PREF_URUN_GIZLI) or {}).get("gizli")
+    )
+    return ek, gizli
+
+
+def _demirbas_marka_kayitli() -> list:
+    from demirbas import DEMIRBAS_PREF_MARKA
+
+    prefs = _demirbas_ui_pref_get(DEMIRBAS_PREF_MARKA) or {}
+    arr = prefs.get("markalar")
+    return list(arr) if isinstance(arr, list) else []
+
+
 @bp.route("/api/demirbas-katalog", methods=["GET"])
 @giris_gerekli
 def api_demirbas_katalog():
-    """Katalog + bayrak durumu (mid opsiyonel). Tablo DDL çalıştırmaz."""
+    """Birleşik katalog + bayrak (mid opsiyonel). Tablo DDL çalıştırmaz."""
     from demirbas import (
         DEMIRBAS_DIGER,
+        DEMIRBAS_GRUP_LISTESI,
         DEMIRBAS_MARKA_LISTESI_TABAN,
         DEMIRBAS_MARKA_VARSAYILAN,
-        demirbas_katalog_fe,
+        demirbas_katalog_birlesik,
+        demirbas_marka_listesi_birlesik,
         demirbas_tablosu_aktif,
     )
     from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
@@ -8376,6 +8455,11 @@ def api_demirbas_katalog():
         mesaj = "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir."
     elif aktif and tablo_var and not sema_hazir:
         mesaj = "Demirbaş tablosu güncellenmeli"
+    ek, gizli = ([], [])
+    if aktif:
+        ek, gizli = _demirbas_urun_ek_gizli()
+    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli) if aktif else []
+    markalar = demirbas_marka_listesi_birlesik(_demirbas_marka_kayitli() if aktif else [])
     return jsonify(
         {
             "ok": True,
@@ -8384,9 +8468,209 @@ def api_demirbas_katalog():
             "sema_hazir": sema_hazir,
             "diger": DEMIRBAS_DIGER,
             "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
-            "marka_listesi": list(DEMIRBAS_MARKA_LISTESI_TABAN),
-            "katalog": demirbas_katalog_fe() if aktif else [],
+            "marka_listesi": markalar,
+            "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+            "gruplar": list(DEMIRBAS_GRUP_LISTESI),
+            "katalog": katalog,
+            "gizli": gizli if aktif else [],
             "mesaj": mesaj,
+        }
+    )
+
+
+@bp.route("/api/demirbas-urun", methods=["POST"])
+@giris_gerekli
+def api_demirbas_urun_ekle():
+    """Kalıcı özel ürün ekle (demirbas_urunler_ek)."""
+    from demirbas import (
+        DEMIRBAS_GRUP_LISTESI,
+        DEMIRBAS_KATALOG,
+        DEMIRBAS_PREF_URUN_EK,
+        demirbas_ek_normalize,
+        demirbas_grup_kapsam,
+        demirbas_katalog_birlesik,
+        demirbas_tr_casefold,
+        demirbas_urun_adi_temizle,
+    )
+
+    data = request.get_json(silent=True) or {}
+    ad = demirbas_urun_adi_temizle(data.get("esya") or data.get("ad"))
+    if not ad:
+        return jsonify({"ok": False, "mesaj": "Ürün adı 2–40 karakter olmalı"}), 400
+    grup = str(data.get("grup") or "").strip()
+    if grup not in DEMIRBAS_GRUP_LISTESI:
+        return jsonify({"ok": False, "mesaj": "Geçersiz grup"}), 400
+    key = demirbas_tr_casefold(ad)
+    ek, gizli = _demirbas_urun_ek_gizli()
+    gizli_keys = {demirbas_tr_casefold(x) for x in gizli}
+    hazir_map = {demirbas_tr_casefold(e): e for (_k, _g, e) in DEMIRBAS_KATALOG}
+    if key in hazir_map:
+        if key in gizli_keys:
+            return jsonify(
+                {
+                    "ok": False,
+                    "kod": "geri_getir",
+                    "mesaj": "Bu ürün gizlenmiş. 'Gizlenenleri geri getir' ile açın.",
+                    "esya": hazir_map[key],
+                }
+            ), 409
+        return jsonify({"ok": False, "mesaj": "Bu ürün zaten listede"}), 409
+    if any(demirbas_tr_casefold(x.get("esya") or "") == key for x in ek):
+        return jsonify({"ok": False, "mesaj": "Bu ürün zaten listede"}), 409
+    kapsam = demirbas_grup_kapsam(grup)
+    ek = demirbas_ek_normalize(ek + [{"esya": ad, "grup": grup, "kapsam": kapsam}])
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek}):
+        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
+    return jsonify(
+        {
+            "ok": True,
+            "esya": ad,
+            "grup": grup,
+            "kapsam": kapsam,
+            "kaynak": "ozel",
+            "katalog": katalog,
+            "gizli": gizli,
+        }
+    )
+
+
+@bp.route("/api/demirbas-urun-cikar", methods=["POST"])
+@giris_gerekli
+def api_demirbas_urun_cikar():
+    """Hazır ürünü gizle veya özel ürünü sil. Kayıtlı demirbaş satırlarına dokunmaz."""
+    from demirbas import (
+        DEMIRBAS_KATALOG,
+        DEMIRBAS_PREF_URUN_EK,
+        DEMIRBAS_PREF_URUN_GIZLI,
+        demirbas_ek_normalize,
+        demirbas_gizli_normalize,
+        demirbas_katalog_birlesik,
+        demirbas_tr_casefold,
+        demirbas_urun_adi_temizle,
+    )
+
+    data = request.get_json(silent=True) or {}
+    ad = demirbas_urun_adi_temizle(data.get("esya") or data.get("ad"))
+    if not ad:
+        return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
+    key = demirbas_tr_casefold(ad)
+    ek, gizli = _demirbas_urun_ek_gizli()
+    hazir_map = {demirbas_tr_casefold(e): e for (_k, _g, e) in DEMIRBAS_KATALOG}
+    if key in hazir_map:
+        canon = hazir_map[key]
+        gizli = demirbas_gizli_normalize(gizli + [canon])
+        if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli}):
+            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
+        return jsonify(
+            {"ok": True, "islem": "gizle", "esya": canon, "katalog": katalog, "gizli": gizli}
+        )
+    yeni_ek = [x for x in ek if demirbas_tr_casefold(x.get("esya") or "") != key]
+    if len(yeni_ek) == len(ek):
+        return jsonify({"ok": False, "mesaj": "Ürün bulunamadı"}), 404
+    ek = demirbas_ek_normalize(yeni_ek)
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek}):
+        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
+    return jsonify(
+        {"ok": True, "islem": "sil", "esya": ad, "katalog": katalog, "gizli": gizli}
+    )
+
+
+@bp.route("/api/demirbas-urun-geri-getir", methods=["POST"])
+@giris_gerekli
+def api_demirbas_urun_geri_getir():
+    """Gizlenen hazır ürünü geri getir (tek veya hepsi)."""
+    from demirbas import (
+        DEMIRBAS_PREF_URUN_GIZLI,
+        demirbas_gizli_normalize,
+        demirbas_katalog_birlesik,
+        demirbas_tr_casefold,
+        demirbas_urun_adi_temizle,
+    )
+
+    data = request.get_json(silent=True) or {}
+    ek, gizli = _demirbas_urun_ek_gizli()
+    if data.get("hepsi") in (True, 1, "1", "true", "True"):
+        gizli = []
+    else:
+        ad = demirbas_urun_adi_temizle(data.get("esya") or data.get("ad"))
+        if not ad:
+            return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
+        key = demirbas_tr_casefold(ad)
+        gizli = demirbas_gizli_normalize(
+            [x for x in gizli if demirbas_tr_casefold(x) != key]
+        )
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli}):
+        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
+    return jsonify({"ok": True, "katalog": katalog, "gizli": gizli})
+
+
+@bp.route("/api/demirbas-markalar", methods=["GET", "POST"])
+@giris_gerekli
+def api_demirbas_markalar():
+    """Marka listesi oku / kalıcı ekle (demirbas_markalar). Taban: yalnız Muhtelif."""
+    from demirbas import (
+        DEMIRBAS_MARKA_LISTESI_TABAN,
+        DEMIRBAS_MARKA_VARSAYILAN,
+        DEMIRBAS_PREF_MARKA,
+        demirbas_marka_listesi_birlesik,
+        demirbas_marka_normalize,
+        demirbas_tr_casefold,
+    )
+
+    if request.method == "GET":
+        birlesik = demirbas_marka_listesi_birlesik(_demirbas_marka_kayitli())
+        return jsonify(
+            {
+                "ok": True,
+                "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+                "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+                "markalar": birlesik,
+            }
+        )
+
+    data = request.get_json(silent=True) or {}
+    kayitli = list(_demirbas_marka_kayitli())
+    eklenecek: list[str] = []
+    if isinstance(data.get("markalar"), list):
+        eklenecek.extend(str(x) for x in data.get("markalar"))
+    if data.get("marka") is not None:
+        eklenecek.append(str(data.get("marka")))
+    for ham in eklenecek:
+        # İlk kelime (FE ile aynı)
+        marka = demirbas_marka_normalize((ham or "").strip().split()[0] if str(ham).strip() else "")
+        if not marka:
+            continue
+        k = demirbas_tr_casefold(marka)
+        if any(demirbas_tr_casefold(x) == k for x in kayitli):
+            continue
+        if k == "muhtelif":
+            continue
+        kayitli.append(marka)
+    # Kayıtta taban dışı kullanıcı markaları (Muhtelif tekrar yazılmaz)
+    kayit_yazi = []
+    seen = set()
+    for m in kayitli:
+        t = str(m or "").strip()
+        if not t:
+            continue
+        k = demirbas_tr_casefold(t)
+        if k == "muhtelif" or k in seen:
+            continue
+        seen.add(k)
+        kayit_yazi.append(t)
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_MARKA, {"markalar": kayit_yazi}):
+        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    birlesik = demirbas_marka_listesi_birlesik(kayit_yazi)
+    return jsonify(
+        {
+            "ok": True,
+            "markalar": birlesik,
+            "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+            "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
         }
     )
 
@@ -8471,6 +8755,7 @@ def api_musteri_demirbas(mid: int):
     if not isinstance(items, list):
         return jsonify({"ok": False, "mesaj": "rows liste olmali"}), 400
 
+    ek_urun, _gizli_urun = _demirbas_urun_ek_gizli()
     cleaned = []
     seen_seri: set[str] = set()
     for it in items:
@@ -8486,9 +8771,11 @@ def api_musteri_demirbas(mid: int):
         )
         mul_raw = str(it.get("mulkiyet") or "OFISBIR").strip().casefold()
         mul = "MUSTERI" if ("musteri" in mul_raw or "müşteri" in mul_raw) else "OFISBIR"
-        kapsam = str(it.get("kapsam") or "").strip() or demirbas_kapsam_for_esya(esya)
+        kapsam = str(it.get("kapsam") or "").strip() or demirbas_kapsam_for_esya(
+            esya, ek=ek_urun
+        )
         if kapsam not in ("oda_ici", "ortak_alan"):
-            kapsam = demirbas_kapsam_for_esya(esya)
+            kapsam = demirbas_kapsam_for_esya(esya, ek=ek_urun)
         raw_list = it.get("seri_nolar")
         if not isinstance(raw_list, list):
             sn0 = str(it.get("seri_no") or "").strip()
