@@ -358,6 +358,63 @@ def demirbas_marka_listesi_birlesik(kayitli: list | None = None) -> list[str]:
     return out or [DEMIRBAS_MARKA_VARSAYILAN]
 
 
+def demirbas_pref_merge_json(
+    pref_key: str,
+    disk: dict | None,
+    incoming: dict | None,
+    *,
+    removed: list | None = None,
+) -> dict:
+    """Eşzamanlı yazım: birleşim kümesi + casefold dedupe; removed ile bilinçli çıkarma."""
+    disk = disk if isinstance(disk, dict) else {}
+    incoming = incoming if isinstance(incoming, dict) else {}
+    rem_keys = {
+        demirbas_tr_casefold(str(x or "").strip())
+        for x in (removed or [])
+        if str(x or "").strip()
+    }
+
+    if pref_key == DEMIRBAS_PREF_URUN_EK:
+        merged = demirbas_ek_normalize(
+            list(disk.get("urunler") or []) + list(incoming.get("urunler") or [])
+        )
+        if rem_keys:
+            merged = [
+                x
+                for x in merged
+                if demirbas_tr_casefold(x.get("esya") or "") not in rem_keys
+            ]
+        return {"urunler": merged}
+
+    if pref_key == DEMIRBAS_PREF_URUN_GIZLI:
+        merged = demirbas_gizli_normalize(
+            list(disk.get("gizli") or []) + list(incoming.get("gizli") or [])
+        )
+        if rem_keys:
+            merged = [x for x in merged if demirbas_tr_casefold(x) not in rem_keys]
+        return {"gizli": merged}
+
+    if pref_key == DEMIRBAS_PREF_MARKA:
+        raw = list(disk.get("markalar") or []) + list(incoming.get("markalar") or [])
+        seen: set[str] = set()
+        out: list[str] = []
+        for m in raw:
+            t = str(m or "").strip()
+            if not t:
+                continue
+            k = demirbas_tr_casefold(t)
+            if k == "muhtelif" or k in seen or k in rem_keys:
+                continue
+            seen.add(k)
+            out.append(t)
+        return {"markalar": out}
+
+    # bilinmeyen anahtar: incoming öncelikli
+    out = dict(disk)
+    out.update(incoming)
+    return out
+
+
 def demirbas_adet_normalize(raw, *, default: int = 1) -> int:
     """1..99 tamsayı. Sayısal değilse default."""
     try:

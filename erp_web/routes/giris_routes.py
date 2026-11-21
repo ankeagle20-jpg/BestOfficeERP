@@ -8348,8 +8348,18 @@ def _demirbas_rows_for_mid(mid: int) -> list:
         return []
 
 
-def _demirbas_ui_pref_get(pref_key: str) -> dict:
-    """user_ui_preferences oku (kullanıcı bazlı). Hata/yok → {}."""
+def _demirbas_pref_json_parse(raw) -> dict:
+    prefs = raw
+    if isinstance(prefs, str):
+        try:
+            prefs = json.loads(prefs)
+        except Exception:
+            prefs = {}
+    return prefs if isinstance(prefs, dict) else {}
+
+
+def _demirbas_ui_pref_get_user(pref_key: str) -> dict:
+    """user_ui_preferences (geri dönüş). Hata/yok → {}."""
     try:
         from db import ensure_user_ui_preferences_table, fetch_one
 
@@ -8363,18 +8373,41 @@ def _demirbas_ui_pref_get(pref_key: str) -> dict:
         )
         if not row or row.get("pref_json") is None:
             return {}
-        prefs = row.get("pref_json")
-        if isinstance(prefs, str):
-            try:
-                prefs = json.loads(prefs)
-            except Exception:
-                prefs = {}
-        return prefs if isinstance(prefs, dict) else {}
+        return _demirbas_pref_json_parse(row.get("pref_json"))
     except Exception:
         return {}
 
 
-def _demirbas_ui_pref_set(pref_key: str, prefs: dict) -> bool:
+def _demirbas_ui_pref_get_firma(pref_key: str) -> dict | None:
+    """firma_ui_preferences oku. Tablo yok → None; satır yok → {}."""
+    try:
+        from db import fetch_one, firma_ui_preferences_table_exists
+
+        if not firma_ui_preferences_table_exists():
+            return None
+        row = fetch_one(
+            "SELECT pref_json FROM firma_ui_preferences WHERE pref_key = %s",
+            (pref_key,),
+        )
+        if not row or row.get("pref_json") is None:
+            return {}
+        return _demirbas_pref_json_parse(row.get("pref_json"))
+    except Exception:
+        return None
+
+
+def _demirbas_ui_pref_get(pref_key: str) -> dict:
+    """Önce firma (şirket geneli); yoksa/boşsa kullanıcı geri dönüşü. Tablo yoksa kullanıcı."""
+    firma = _demirbas_ui_pref_get_firma(pref_key)
+    if firma is None:
+        return _demirbas_ui_pref_get_user(pref_key)
+    if firma:
+        return firma
+    # firma satırı yok → kullanıcı kaydını geri dönüş oku (taşıma öncesi)
+    return _demirbas_ui_pref_get_user(pref_key) or {}
+
+
+def _demirbas_ui_pref_set_user(pref_key: str, prefs: dict) -> bool:
     try:
         from db import ensure_user_ui_preferences_table, execute
 
@@ -8400,6 +8433,46 @@ def _demirbas_ui_pref_set(pref_key: str, prefs: dict) -> bool:
         return True
     except Exception:
         return False
+
+
+def _demirbas_ui_pref_set(
+    pref_key: str,
+    prefs: dict,
+    *,
+    removed: list | None = None,
+) -> bool:
+    """Firma varsa: oku→birleştir→yaz. Tablo yoksa kullanıcı bazlı yaz (hata yok)."""
+    from demirbas import demirbas_pref_merge_json
+
+    if not isinstance(prefs, dict):
+        return False
+    try:
+        from db import execute, firma_ui_preferences_table_exists
+
+        if not firma_ui_preferences_table_exists():
+            return _demirbas_ui_pref_set_user(pref_key, prefs)
+
+        disk = _demirbas_ui_pref_get_firma(pref_key)
+        if disk is None:
+            return _demirbas_ui_pref_set_user(pref_key, prefs)
+        merged = demirbas_pref_merge_json(pref_key, disk, prefs, removed=removed)
+        raw = json.dumps(merged, ensure_ascii=False)
+        if len(raw) > 32000:
+            return False
+        execute(
+            """
+            INSERT INTO firma_ui_preferences (pref_key, pref_json, updated_at)
+            VALUES (%s, %s::jsonb, NOW())
+            ON CONFLICT (pref_key) DO UPDATE SET
+                pref_json = EXCLUDED.pref_json,
+                updated_at = NOW()
+            """,
+            (pref_key, raw),
+        )
+        return True
+    except Exception:
+        # tablo yok / geçici hata → kullanıcıya düş
+        return _demirbas_ui_pref_set_user(pref_key, prefs)
 
 
 def _demirbas_urun_ek_gizli():
@@ -8518,9 +8591,10 @@ def api_demirbas_urun_ekle():
     if any(demirbas_tr_casefold(x.get("esya") or "") == key for x in ek):
         return jsonify({"ok": False, "mesaj": "Bu ürün zaten listede"}), 409
     kapsam = demirbas_grup_kapsam(grup)
-    ek = demirbas_ek_normalize(ek + [{"esya": ad, "grup": grup, "kapsam": kapsam}])
-    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek}):
+    ek_in = demirbas_ek_normalize(ek + [{"esya": ad, "grup": grup, "kapsam": kapsam}])
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek_in}):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    ek, gizli = _demirbas_urun_ek_gizli()
     katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
     return jsonify(
         {
@@ -8559,9 +8633,10 @@ def api_demirbas_urun_cikar():
     hazir_map = {demirbas_tr_casefold(e): e for (_k, _g, e) in DEMIRBAS_KATALOG}
     if key in hazir_map:
         canon = hazir_map[key]
-        gizli = demirbas_gizli_normalize(gizli + [canon])
-        if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli}):
+        gizli_in = demirbas_gizli_normalize(gizli + [canon])
+        if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}):
             return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        ek, gizli = _demirbas_urun_ek_gizli()
         katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
         return jsonify(
             {"ok": True, "islem": "gizle", "esya": canon, "katalog": katalog, "gizli": gizli}
@@ -8569,9 +8644,11 @@ def api_demirbas_urun_cikar():
     yeni_ek = [x for x in ek if demirbas_tr_casefold(x.get("esya") or "") != key]
     if len(yeni_ek) == len(ek):
         return jsonify({"ok": False, "mesaj": "Ürün bulunamadı"}), 404
-    ek = demirbas_ek_normalize(yeni_ek)
-    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek}):
+    if not _demirbas_ui_pref_set(
+        DEMIRBAS_PREF_URUN_EK, {"urunler": demirbas_ek_normalize(yeni_ek)}, removed=[ad]
+    ):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    ek, gizli = _demirbas_urun_ek_gizli()
     katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
     return jsonify(
         {"ok": True, "islem": "sil", "esya": ad, "katalog": katalog, "gizli": gizli}
@@ -8593,17 +8670,22 @@ def api_demirbas_urun_geri_getir():
     data = request.get_json(silent=True) or {}
     ek, gizli = _demirbas_urun_ek_gizli()
     if data.get("hepsi") in (True, 1, "1", "true", "True"):
-        gizli = []
+        removed = list(gizli)
+        gizli_in: list = []
     else:
         ad = demirbas_urun_adi_temizle(data.get("esya") or data.get("ad"))
         if not ad:
             return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
         key = demirbas_tr_casefold(ad)
-        gizli = demirbas_gizli_normalize(
+        removed = [ad]
+        gizli_in = demirbas_gizli_normalize(
             [x for x in gizli if demirbas_tr_casefold(x) != key]
         )
-    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli}):
+    if not _demirbas_ui_pref_set(
+        DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}, removed=removed
+    ):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    ek, gizli = _demirbas_urun_ek_gizli()
     katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
     return jsonify({"ok": True, "katalog": katalog, "gizli": gizli})
 

@@ -128,6 +128,10 @@ def test_module_wire_urun():
     dem_block = tjs[tjs.find("/* === Demirbaşlar") :]
     check("fe_marka_api", "demirbas-markalar" in dem_block)
     check("fe_marka_ui_tercih_yok", "/faturalar/api/ui-tercih" not in dem_block)
+    db = (ROOT / "db.py").read_text(encoding="utf-8")
+    check("firma_pref_ensure", "ensure_firma_ui_preferences_table" in db)
+    gr = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
+    check("firma_pref_get", "_demirbas_ui_pref_get_firma" in gr)
 
 
 def main() -> int:

@@ -3166,6 +3166,47 @@ def ensure_user_ui_preferences_table():
         print(f"user_ui_preferences: {e}")
 
 
+def firma_ui_preferences_table_exists() -> bool:
+    """firma_ui_preferences kiracı şemasında var mı (SELECT only)."""
+    try:
+        row = fetch_one(
+            """
+            SELECT 1 AS x
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = 'firma_ui_preferences'
+            LIMIT 1
+            """
+        )
+        return bool(row)
+    except Exception:
+        return False
+
+
+def ensure_firma_ui_preferences_table():
+    """Kiracı geneli UI/prefs KV (pref_key → JSON). init_schema'dan ÇAĞRILMAZ.
+
+    Prod DDL: scripts/ensure_firma_ui_preferences.py --apply (ayrı onay).
+    """
+
+    def _do():
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS firma_ui_preferences (
+                pref_key   TEXT PRIMARY KEY,
+                pref_json  JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+
+    try:
+        _run_ensure_ddl_once("firma_ui_preferences.v1", _do)
+    except Exception as e:
+        print(f"firma_ui_preferences: {e}")
+        raise
+
+
 def ensure_platform_tenants_table():
     """Platform katalogu: yalnız public.tenants.
 
