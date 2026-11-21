@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""musteri_demirbas DDL — varsayılan dry-run. Prod yazma için --apply + ALLOW_PROD_WRITE=1.
+"""musteri_demirbas (+ adet) + musteri_demirbas_seri DDL — varsayılan dry-run.
 
 Kullanım:
   python scripts/ensure_musteri_demirbas.py           # dry-run (DDL yazdırır, çalıştırmaz)
   ALLOW_PROD_WRITE=1 python scripts/ensure_musteri_demirbas.py --apply
 
 Geri alma (ayrı onay):
-  DROP TABLE IF EXISTS musteri_demirbas;
+  DROP TABLE IF EXISTS musteri_demirbas_seri;
+  ALTER TABLE musteri_demirbas DROP COLUMN IF EXISTS adet;
+  -- tam silme (önceki sürüm):
+  -- DROP TABLE IF EXISTS musteri_demirbas;
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ CREATE TABLE IF NOT EXISTS musteri_demirbas (
     marka_model     TEXT NOT NULL DEFAULT '',
     seri_no         TEXT NOT NULL,
     adet_durum      TEXT NOT NULL DEFAULT '',
+    adet            INTEGER NOT NULL DEFAULT 1,
     mulkiyet        TEXT NOT NULL DEFAULT 'OFISBIR',
     kapsam          TEXT NOT NULL DEFAULT 'oda_ici',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -38,10 +42,26 @@ CREATE TABLE IF NOT EXISTS musteri_demirbas (
     CONSTRAINT ck_musteri_demirbas_kapsam
         CHECK (kapsam IN ('oda_ici', 'ortak_alan'))
 );
+ALTER TABLE musteri_demirbas
+    ADD COLUMN IF NOT EXISTS adet INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_id
     ON musteri_demirbas (musteri_id);
 CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_sira
     ON musteri_demirbas (musteri_id, sira);
+
+CREATE TABLE IF NOT EXISTS musteri_demirbas_seri (
+    id              SERIAL PRIMARY KEY,
+    demirbas_id     INTEGER NOT NULL
+        REFERENCES musteri_demirbas(id) ON DELETE CASCADE,
+    sira            INTEGER NOT NULL DEFAULT 1,
+    seri_no         TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_musteri_demirbas_seri_no UNIQUE (seri_no),
+    CONSTRAINT uq_musteri_demirbas_seri_parent_sira
+        UNIQUE (demirbas_id, sira)
+);
+CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_seri_demirbas_id
+    ON musteri_demirbas_seri (demirbas_id);
 """
 
 
@@ -58,10 +78,19 @@ def main() -> int:
     if str(os.environ.get("ALLOW_PROD_WRITE") or "").strip() != "1":
         print("RED ALLOW_PROD_WRITE!=1")
         return 2
-    from db import ensure_musteri_demirbas_table, musteri_demirbas_table_exists
+    from db import (
+        ensure_musteri_demirbas_table,
+        musteri_demirbas_schema_ready,
+        musteri_demirbas_table_exists,
+    )
 
     ensure_musteri_demirbas_table()
-    print("apply_ok", musteri_demirbas_table_exists())
+    print(
+        "apply_ok",
+        musteri_demirbas_table_exists(),
+        "sema_hazir",
+        musteri_demirbas_schema_ready(),
+    )
     return 0
 
 

@@ -35,10 +35,20 @@ def _demirbas_block(src: str) -> str:
     i = src.find(MARKER)
     if i < 0:
         return ""
-    j = src.find("\n/* ===", i + 10)
-    if j < 0:
-        j = src.find("\nfunction ", i + 20000)
-    return src[i : (j if j > i else i + 12000)]
+    k = src.find("function girisDemirbasKaydet", i)
+    if k < 0:
+        return src[i : i + 25000]
+    # kaydet fonksiyonunun kapanışından sonraki ilk top-level sınır
+    j = src.find("\n</script>", k)
+    j2 = src.find("\n/* ===", k)
+    end = len(src)
+    if j > k:
+        end = min(end, j)
+    if j2 > k:
+        end = min(end, j2)
+    # kaba: kaydet'ten sonra en az 400 karakter
+    end = max(end, k + 400)
+    return src[i:end]
 
 
 def _extract_fe_paths(block: str) -> list[str]:
@@ -97,6 +107,10 @@ def test_ayna_ve_sabit():
     check("select_erken", "girisDemirbasYukle(id)" in sel_chunk and "selectedId = id" in sel_chunk)
     check("dedupe_state", "__girisDemirbasYukleState" in b_t)
     check("hata_mesaj", "Demirbaş listesi yüklenemedi" in b_t)
+    check("sema_mesaj", "Demirbaş tablosu güncellenmeli" in b_t)
+    check("adet_fn", "girisDemirbasAdetDegisti" in b_t and "girisDemirbasAdetNormalize" in b_t)
+    check("marka_key", "demirbas_markalar" in b_t and "Muhtelif" in b_t)
+    check("ui_adet_th", ">Adet</th>" in html and "Adet / Durum" not in html)
     # ayna: path sabitleri aynı
     check("ayna_paths", _extract_fe_paths(b_t) == _extract_fe_paths(b_h), str(_extract_fe_paths(b_h)))
 
@@ -154,6 +168,7 @@ def test_hata_yollari_node():
         "var __girisDemirbasDiger",
         "var __girisDemirbasAktif",
         "var __girisDemirbasTabloVar",
+        "var __girisDemirbasSemaHazir",
         "var __girisDemirbasYukleState",
         "function girisDemirbasApi",
         "function girisDemirbasSectionGoster",
@@ -174,8 +189,11 @@ def test_hata_yollari_node():
                 j = k
         parts.append(block[i:j].rstrip() + "\n")
     slim = "\n".join(parts)
-    # girisDemirbasSatirEkle yoksa satır ekleme çağrısı no-op
+    # bağımlı yardımcılar (hata yolu testi için stub)
     slim += "\nfunction girisDemirbasSatirEkle(){}\n"
+    slim += "\nfunction girisDemirbasMarkaListeYukle(){ return Promise.resolve(); }\n"
+    slim += "\nvar __girisDemirbasMarkaVarsayilan = 'Muhtelif';\n"
+    slim += "\nvar __girisDemirbasMarkaTaban = ['Muhtelif'];\n"
 
     js = r"""
 const fs = require('fs');

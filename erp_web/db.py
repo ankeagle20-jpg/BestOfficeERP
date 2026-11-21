@@ -1589,11 +1589,40 @@ def musteri_demirbas_table_exists() -> bool:
         return False
 
 
+def musteri_demirbas_schema_ready() -> bool:
+    """adet kolonu + musteri_demirbas_seri tablosu hazır mı (SELECT only)."""
+    if not musteri_demirbas_table_exists():
+        return False
+    try:
+        col = fetch_one(
+            """
+            SELECT 1 AS x
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'musteri_demirbas'
+              AND column_name = 'adet'
+            LIMIT 1
+            """
+        )
+        tbl = fetch_one(
+            """
+            SELECT 1 AS x
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = 'musteri_demirbas_seri'
+            LIMIT 1
+            """
+        )
+        return bool(col) and bool(tbl)
+    except Exception:
+        return False
+
+
 def ensure_musteri_demirbas_table():
-    """musteri_demirbas — müşteri kartı demirbaş satırları.
+    """musteri_demirbas + adet + musteri_demirbas_seri.
 
     Multi-tenant: kiracı search_path (ayrı tenant_id kolonu yok; proje deseni).
-    seri_no UNIQUE şema içinde global.
+    seri_no UNIQUE şema içinde global (ana satır + child).
     init_schema'dan ÇAĞRILMAZ — prod DDL ayrı onayla scripts/ensure_musteri_demirbas.py.
     """
     def _do():
@@ -1608,6 +1637,7 @@ def ensure_musteri_demirbas_table():
                 marka_model     TEXT NOT NULL DEFAULT '',
                 seri_no         TEXT NOT NULL,
                 adet_durum      TEXT NOT NULL DEFAULT '',
+                adet            INTEGER NOT NULL DEFAULT 1,
                 mulkiyet        TEXT NOT NULL DEFAULT 'OFISBIR',
                 kapsam          TEXT NOT NULL DEFAULT 'oda_ici',
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1621,6 +1651,10 @@ def ensure_musteri_demirbas_table():
             """
         )
         execute(
+            "ALTER TABLE musteri_demirbas "
+            "ADD COLUMN IF NOT EXISTS adet INTEGER NOT NULL DEFAULT 1"
+        )
+        execute(
             "CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_id "
             "ON musteri_demirbas (musteri_id)"
         )
@@ -1628,9 +1662,29 @@ def ensure_musteri_demirbas_table():
             "CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_musteri_sira "
             "ON musteri_demirbas (musteri_id, sira)"
         )
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_demirbas_seri (
+                id              SERIAL PRIMARY KEY,
+                demirbas_id     INTEGER NOT NULL
+                    REFERENCES musteri_demirbas(id) ON DELETE CASCADE,
+                sira            INTEGER NOT NULL DEFAULT 1,
+                seri_no         TEXT NOT NULL,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_musteri_demirbas_seri_no UNIQUE (seri_no),
+                CONSTRAINT uq_musteri_demirbas_seri_parent_sira
+                    UNIQUE (demirbas_id, sira)
+            )
+            """
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_demirbas_seri_demirbas_id "
+            "ON musteri_demirbas_seri (demirbas_id)"
+        )
 
     try:
-        _run_ensure_ddl_once("musteri_demirbas", _do)
+        # v2: adet + child seri (eski once anahtarı süreçte takılı kalmasın)
+        _run_ensure_ddl_once("musteri_demirbas_v2", _do)
     except Exception as e:
         print(f"musteri_demirbas: {e}")
         raise

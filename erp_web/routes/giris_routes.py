@@ -8254,21 +8254,55 @@ def api_senaryo_01():
     )
 
 
+def _demirbas_seri_exists_fn(seen: set[str] | None = None):
+    """Ana + child tabloda seri_no çakışması (seen = batch içi)."""
+    from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
+
+    seen = seen if seen is not None else set()
+
+    def _exists(seri: str) -> bool:
+        if seri in seen:
+            return True
+        if not musteri_demirbas_table_exists():
+            return False
+        row = fetch_one(
+            "SELECT 1 AS x FROM musteri_demirbas WHERE seri_no = %s LIMIT 1",
+            (seri,),
+        )
+        if row:
+            return True
+        if musteri_demirbas_schema_ready():
+            row2 = fetch_one(
+                "SELECT 1 AS x FROM musteri_demirbas_seri WHERE seri_no = %s LIMIT 1",
+                (seri,),
+            )
+            return bool(row2)
+        return False
+
+    return _exists
+
+
 def _demirbas_rows_for_mid(mid: int) -> list:
-    """Tablo yoksa []. PII yok — yalnızca demirbaş alanları."""
+    """Tablo/şema yoksa []. PII yok — yalnızca demirbaş alanları."""
     try:
-        from db import musteri_demirbas_table_exists
-        from demirbas import demirbas_tablosu_aktif
+        from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
+        from demirbas import (
+            demirbas_adet_normalize,
+            demirbas_marka_normalize,
+            demirbas_tablosu_aktif,
+        )
     except Exception:
         return []
     if not demirbas_tablosu_aktif(mid):
         return []
     if not musteri_demirbas_table_exists():
         return []
+    if not musteri_demirbas_schema_ready():
+        return []
     try:
         rows = fetch_all(
             """
-            SELECT sira, esya, marka_model, seri_no, adet_durum, mulkiyet, kapsam
+            SELECT id, sira, esya, marka_model, seri_no, adet_durum, adet, mulkiyet, kapsam
             FROM musteri_demirbas
             WHERE musteri_id = %s
             ORDER BY
@@ -8278,7 +8312,38 @@ def _demirbas_rows_for_mid(mid: int) -> list:
             """,
             (mid,),
         ) or []
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            did = d.pop("id", None)
+            child = []
+            if did is not None:
+                child = fetch_all(
+                    """
+                    SELECT seri_no FROM musteri_demirbas_seri
+                    WHERE demirbas_id = %s
+                    ORDER BY sira ASC, id ASC
+                    """,
+                    (did,),
+                ) or []
+            seri_nolar = [str(x.get("seri_no") or "").strip() for x in child if x.get("seri_no")]
+            if not seri_nolar:
+                sn = str(d.get("seri_no") or "").strip()
+                if sn:
+                    seri_nolar = [sn]
+            adet = demirbas_adet_normalize(
+                d.get("adet"),
+                default=demirbas_adet_normalize(d.get("adet_durum"), default=1),
+            )
+            if len(seri_nolar) > adet:
+                seri_nolar = seri_nolar[:adet]
+            d["adet"] = adet
+            d["seri_nolar"] = seri_nolar
+            d["seri_no"] = seri_nolar[0] if seri_nolar else str(d.get("seri_no") or "")
+            d["marka_model"] = demirbas_marka_normalize(d.get("marka_model"))
+            d.pop("adet_durum", None)
+            out.append(d)
+        return out
     except Exception:
         return []
 
@@ -8289,30 +8354,39 @@ def api_demirbas_katalog():
     """Katalog + bayrak durumu (mid opsiyonel). Tablo DDL çalıştırmaz."""
     from demirbas import (
         DEMIRBAS_DIGER,
+        DEMIRBAS_MARKA_LISTESI_TABAN,
+        DEMIRBAS_MARKA_VARSAYILAN,
         demirbas_katalog_fe,
         demirbas_tablosu_aktif,
     )
-    from db import musteri_demirbas_table_exists
+    from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
 
     mid = request.args.get("mid")
     aktif = demirbas_tablosu_aktif(mid)
     tablo_var = False
+    sema_hazir = False
     try:
         tablo_var = bool(musteri_demirbas_table_exists())
+        sema_hazir = bool(musteri_demirbas_schema_ready()) if tablo_var else False
     except Exception:
         tablo_var = False
+        sema_hazir = False
+    mesaj = None
+    if aktif and not tablo_var:
+        mesaj = "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir."
+    elif aktif and tablo_var and not sema_hazir:
+        mesaj = "Demirbaş tablosu güncellenmeli"
     return jsonify(
         {
             "ok": True,
             "aktif": aktif,
             "tablo_var": tablo_var,
+            "sema_hazir": sema_hazir,
             "diger": DEMIRBAS_DIGER,
+            "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+            "marka_listesi": list(DEMIRBAS_MARKA_LISTESI_TABAN),
             "katalog": demirbas_katalog_fe() if aktif else [],
-            "mesaj": (
-                None
-                if (not aktif or tablo_var)
-                else "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir."
-            ),
+            "mesaj": mesaj,
         }
     )
 
@@ -8320,32 +8394,36 @@ def api_demirbas_katalog():
 @bp.route("/api/demirbas-seri-no", methods=["POST"])
 @giris_gerekli
 def api_demirbas_seri_no():
-    """Eşya adından benzersiz seri no (BE tek fonksiyon)."""
-    from demirbas import demirbas_seri_no_uret_benzersiz, demirbas_tablosu_aktif
-    from db import musteri_demirbas_table_exists
+    """Eşya adından N benzersiz seri no (adet 1..99)."""
+    from demirbas import demirbas_adet_normalize, demirbas_seri_listesi_uret, demirbas_tablosu_aktif
 
     data = request.get_json(silent=True) or {}
     esya = str(data.get("esya") or "").strip()
     mid = data.get("mid")
+    adet = demirbas_adet_normalize(data.get("adet"), default=1)
+    mevcut = data.get("mevcut") or data.get("seri_nolar") or []
+    if not isinstance(mevcut, list):
+        mevcut = []
     if not esya:
         return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
     if mid is not None and not demirbas_tablosu_aktif(mid):
         return jsonify({"ok": False, "mesaj": "demirbas kapali"}), 403
 
-    def _exists(seri: str) -> bool:
-        if not musteri_demirbas_table_exists():
-            return False
-        row = fetch_one(
-            "SELECT 1 AS x FROM musteri_demirbas WHERE seri_no = %s LIMIT 1",
-            (seri,),
-        )
-        return bool(row)
-
+    exists = _demirbas_seri_exists_fn()
     try:
-        seri = demirbas_seri_no_uret_benzersiz(esya, exists_fn=_exists)
+        nolar = demirbas_seri_listesi_uret(
+            esya, adet, mevcut=[str(x) for x in mevcut], exists_fn=exists
+        )
     except RuntimeError:
         return jsonify({"ok": False, "mesaj": "seri no uretilemedi"}), 509
-    return jsonify({"ok": True, "seri_no": seri})
+    return jsonify(
+        {
+            "ok": True,
+            "seri_no": nolar[0] if nolar else "",
+            "seri_nolar": nolar,
+            "adet": len(nolar),
+        }
+    )
 
 
 @bp.route("/api/musteri/<int:mid>/demirbas", methods=["GET", "PUT"])
@@ -8353,12 +8431,14 @@ def api_demirbas_seri_no():
 def api_musteri_demirbas(mid: int):
     """Demirbaş listesi oku / toplu kaydet. Bayrak kapalı → 404 görünmez."""
     from demirbas import (
+        demirbas_adet_normalize,
         demirbas_kapsam_for_esya,
+        demirbas_marka_normalize,
+        demirbas_seri_listesi_uret,
         demirbas_seri_no_gecerli,
-        demirbas_seri_no_uret_benzersiz,
         demirbas_tablosu_aktif,
     )
-    from db import musteri_demirbas_table_exists
+    from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
 
     if not demirbas_tablosu_aktif(mid):
         return jsonify({"ok": False, "mesaj": "demirbas kapali"}), 404
@@ -8368,12 +8448,22 @@ def api_musteri_demirbas(mid: int):
                 "ok": False,
                 "mesaj": "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir.",
                 "tablo_var": False,
+                "sema_hazir": False,
+            }
+        ), 503
+    if not musteri_demirbas_schema_ready():
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Demirbaş tablosu güncellenmeli",
+                "tablo_var": True,
+                "sema_hazir": False,
             }
         ), 503
 
     if request.method == "GET":
         rows = _demirbas_rows_for_mid(mid)
-        return jsonify({"ok": True, "rows": rows, "tablo_var": True})
+        return jsonify({"ok": True, "rows": rows, "tablo_var": True, "sema_hazir": True})
 
     # PUT — mevcut satırları değiştir (mid bazlı replace)
     data = request.get_json(silent=True) or {}
@@ -8383,61 +8473,63 @@ def api_musteri_demirbas(mid: int):
 
     cleaned = []
     seen_seri: set[str] = set()
-    for i, it in enumerate(items):
+    for it in items:
         if not isinstance(it, dict):
             continue
         esya = str(it.get("esya") or "").strip()
         if not esya:
             continue
-        marka = str(it.get("marka_model") or "").strip()
-        adet = str(it.get("adet_durum") or "").strip()
+        marka = demirbas_marka_normalize(it.get("marka_model"))
+        adet = demirbas_adet_normalize(
+            it.get("adet"),
+            default=demirbas_adet_normalize(it.get("adet_durum"), default=1),
+        )
         mul_raw = str(it.get("mulkiyet") or "OFISBIR").strip().casefold()
         mul = "MUSTERI" if ("musteri" in mul_raw or "müşteri" in mul_raw) else "OFISBIR"
         kapsam = str(it.get("kapsam") or "").strip() or demirbas_kapsam_for_esya(esya)
         if kapsam not in ("oda_ici", "ortak_alan"):
             kapsam = demirbas_kapsam_for_esya(esya)
-        seri = str(it.get("seri_no") or "").strip()
+        raw_list = it.get("seri_nolar")
+        if not isinstance(raw_list, list):
+            sn0 = str(it.get("seri_no") or "").strip()
+            raw_list = [sn0] if sn0 else []
         cleaned.append(
             {
                 "sira": len(cleaned) + 1,
                 "esya": esya,
                 "marka_model": marka,
-                "seri_no": seri,
-                "adet_durum": adet,
+                "adet": adet,
+                "seri_nolar": [str(x or "").strip() for x in raw_list],
                 "mulkiyet": mul,
                 "kapsam": kapsam,
             }
         )
 
     try:
-        # Önce bu mid'in satırlarını sil; sonra benzersizlik diğer mid + batch içi
         execute("DELETE FROM musteri_demirbas WHERE musteri_id = %s", (mid,))
-
-        def _exists(seri: str) -> bool:
-            if seri in seen_seri:
-                return True
-            row = fetch_one(
-                "SELECT 1 AS x FROM musteri_demirbas WHERE seri_no = %s LIMIT 1",
-                (seri,),
-            )
-            return bool(row)
+        exists = _demirbas_seri_exists_fn(seen_seri)
 
         for r in cleaned:
-            seri = r["seri_no"]
-            if (not demirbas_seri_no_gecerli(seri)) or _exists(seri):
-                try:
-                    seri = demirbas_seri_no_uret_benzersiz(r["esya"], exists_fn=_exists)
-                except RuntimeError:
-                    return jsonify({"ok": False, "mesaj": "seri no uretilemedi"}), 509
-                r["seri_no"] = seri
-            seen_seri.add(seri)
+            try:
+                nolar = demirbas_seri_listesi_uret(
+                    r["esya"], r["adet"], mevcut=r["seri_nolar"], exists_fn=exists
+                )
+            except RuntimeError:
+                return jsonify({"ok": False, "mesaj": "seri no uretilemedi"}), 509
+            for s in nolar:
+                if not demirbas_seri_no_gecerli(s):
+                    return jsonify({"ok": False, "mesaj": "seri no gecersiz"}), 400
+                seen_seri.add(s)
+            r["seri_nolar"] = nolar
+            r["seri_no"] = nolar[0]
+            r["adet"] = len(nolar)
 
-        for r in cleaned:
-            execute(
+            new_id = execute_returning(
                 """
                 INSERT INTO musteri_demirbas
-                    (musteri_id, sira, esya, marka_model, seri_no, adet_durum, mulkiyet, kapsam)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    (musteri_id, sira, esya, marka_model, seri_no, adet_durum, adet, mulkiyet, kapsam)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
                 """,
                 (
                     mid,
@@ -8445,16 +8537,29 @@ def api_musteri_demirbas(mid: int):
                     r["esya"],
                     r["marka_model"],
                     r["seri_no"],
-                    r["adet_durum"],
+                    str(r["adet"]),
+                    r["adet"],
                     r["mulkiyet"],
                     r["kapsam"],
                 ),
             )
-    except Exception as e:
+            dem_id = (new_id or {}).get("id")
+            if dem_id is None:
+                return jsonify({"ok": False, "mesaj": "kayit basarisiz"}), 500
+            for si, sn in enumerate(nolar, start=1):
+                execute(
+                    """
+                    INSERT INTO musteri_demirbas_seri (demirbas_id, sira, seri_no)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (dem_id, si, sn),
+                )
+            r.pop("adet_durum", None)
+    except Exception:
         logging.getLogger(__name__).exception("demirbas kaydet")
         return jsonify({"ok": False, "mesaj": "kayit basarisiz"}), 500
 
-    return jsonify({"ok": True, "n": len(cleaned), "rows": cleaned})
+    return jsonify({"ok": True, "n": len(cleaned), "rows": cleaned, "sema_hazir": True})
 
 
 @bp.route("/api/grup2-etiketleri", methods=["GET", "POST", "PUT", "DELETE"])

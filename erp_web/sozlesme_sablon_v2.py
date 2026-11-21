@@ -395,11 +395,26 @@ def _delete_table_row(table, row_idx: int) -> None:
 
 
 def _set_cell_text(cell, val: str) -> None:
-    for p in cell.paragraphs:
-        _set_run_text_preserve(p, val)
-        break
-    else:
-        cell.text = val
+    text = "" if val is None else str(val)
+    if "\n" not in text:
+        for p in cell.paragraphs:
+            _set_run_text_preserve(p, text)
+            break
+        else:
+            cell.text = text
+        return
+    # Çok satır: ilk paragraf + ek paragraflar
+    lines = text.split("\n")
+    paras = list(cell.paragraphs)
+    if not paras:
+        cell.text = lines[0]
+        paras = list(cell.paragraphs)
+    _set_run_text_preserve(paras[0], lines[0])
+    for extra in paras[1:]:
+        _set_run_text_preserve(extra, "")
+    for line in lines[1:]:
+        p = cell.add_paragraph()
+        p.add_run(line)
 
 
 def _fill_table_ek1(table, ctx: dict) -> None:
@@ -502,6 +517,22 @@ def _fill_table_ek2(table, ctx: dict) -> None:
     """Ek-2 demirbaş envanteri. Satır yoksa şablondaki boş satırlar (en az 5 veri) kalır."""
     if len(table.columns) < 6 or len(table.rows) < 2:
         return
+    from demirbas import (
+        demirbas_adet_normalize,
+        demirbas_marka_normalize,
+        demirbas_satirlari_ek2_sirali,
+    )
+
+    # Başlık: "Adet / Durum" → "Adet"
+    try:
+        hdr = table.rows[0]
+        for cell in hdr.cells:
+            t = (cell.text or "").strip()
+            if "adet" in t.casefold():
+                _set_cell_text(cell, "Adet")
+    except Exception:
+        pass
+
     raw_rows = list(ctx.get("demirbas_rows") or [])
     if not raw_rows:
         # Boş: en az 5 veri satırı olsun (şablon 4 ise 1 ekle)
@@ -513,8 +544,6 @@ def _fill_table_ek2(table, ctx: dict) -> None:
                 [str(len(table.rows) - 1), "", "", "", "", "OFİSBİR / Müşteri"],
             )
         return
-
-    from demirbas import demirbas_satirlari_ek2_sirali
 
     ordered = demirbas_satirlari_ek2_sirali(raw_rows)
     oda = [r for r in ordered if (r.get("kapsam") or "oda_ici") != "ortak_alan"]
@@ -544,14 +573,24 @@ def _fill_table_ek2(table, ctx: dict) -> None:
         r = ent["row"]
         mul = str(r.get("mulkiyet") or "OFISBIR").upper()
         mul_txt = "OFİSBİR" if mul in ("OFISBIR", "OFİSBİR") else "Müşteri"
+        nolar = r.get("seri_nolar")
+        if not isinstance(nolar, list) or not nolar:
+            sn = str(r.get("seri_no") or "").strip()
+            nolar = [sn] if sn else []
+        nolar = [str(x).strip() for x in nolar if str(x).strip()]
+        adet = demirbas_adet_normalize(
+            r.get("adet"),
+            default=demirbas_adet_normalize(r.get("adet_durum"), default=max(1, len(nolar) or 1)),
+        )
+        marka = demirbas_marka_normalize(r.get("marka_model"))
         _ek2_set_row(
             row,
             [
                 str(sira_n),
                 str(r.get("esya") or ""),
-                str(r.get("marka_model") or ""),
-                str(r.get("seri_no") or ""),
-                str(r.get("adet_durum") or ""),
+                marka,
+                "\n".join(nolar),
+                str(adet),
                 mul_txt,
             ],
         )

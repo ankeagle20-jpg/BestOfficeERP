@@ -201,3 +201,98 @@ def demirbas_satirlari_ek2_sirali(rows: list[dict[str, Any]]) -> list[dict[str, 
     oda = [r for r in rows if (r.get("kapsam") or "oda_ici") != "ortak_alan"]
     ortak = [r for r in rows if (r.get("kapsam") or "") == "ortak_alan"]
     return oda + ortak
+
+
+DEMIRBAS_MARKA_VARSAYILAN = "Muhtelif"
+DEMIRBAS_MARKA_LISTESI_TABAN = [
+    "Muhtelif",
+    "Samsung",
+    "LG",
+    "HP",
+    "Dell",
+    "Lenovo",
+    "Asus",
+    "Apple",
+    "Philips",
+    "Arçelik",
+    "Vestel",
+    "Brother",
+    "Canon",
+    "Epson",
+    "Logitech",
+]
+
+
+def demirbas_adet_normalize(raw, *, default: int = 1) -> int:
+    """1..99 tamsayı. Sayısal değilse default."""
+    try:
+        if isinstance(raw, bool):
+            raise ValueError("bool")
+        if isinstance(raw, (int, float)):
+            n = int(raw)
+        else:
+            s = str(raw if raw is not None else "").strip().replace(",", ".")
+            if not s:
+                return max(1, min(99, int(default)))
+            m = re.match(r"^(\d{1,2})(?:\D|$)", s)
+            if not m:
+                return max(1, min(99, int(default)))
+            n = int(m.group(1))
+        if n < 1:
+            n = 1
+        if n > 99:
+            n = 99
+        return n
+    except Exception:
+        return max(1, min(99, int(default or 1)))
+
+
+def demirbas_marka_normalize(raw) -> str:
+    """Boş / muhtelif → Muhtelif."""
+    s = str(raw or "").strip()
+    if not s:
+        return DEMIRBAS_MARKA_VARSAYILAN
+    if s.casefold() == "muhtelif":
+        return DEMIRBAS_MARKA_VARSAYILAN
+    return s
+
+
+def demirbas_seri_listesi_uret(
+    esya_adi: str,
+    adet: int,
+    *,
+    mevcut: list[str] | None = None,
+    exists_fn=None,
+    max_deneme: int = 20,
+    rng=None,
+) -> list[str]:
+    """Adet kadar benzersiz seri. Mevcutlar korunur; fazla sonlar kesilir; eksiğe yeni üretilir."""
+    n = demirbas_adet_normalize(adet)
+    kept: list[str] = []
+    for s in mevcut or []:
+        s2 = str(s or "").strip()
+        if s2 and demirbas_seri_no_gecerli(s2) and s2 not in kept:
+            kept.append(s2)
+        if len(kept) >= n:
+            break
+    if len(kept) > n:
+        kept = kept[:n]
+    seen = set(kept)
+
+    def _exists(seri: str) -> bool:
+        if seri in seen:
+            return True
+        if exists_fn is None:
+            return False
+        try:
+            return bool(exists_fn(seri))
+        except Exception:
+            return False
+
+    while len(kept) < n:
+        yeni = demirbas_seri_no_uret_benzersiz(
+            esya_adi, exists_fn=_exists, max_deneme=max_deneme, rng=rng
+        )
+        kept.append(yeni)
+        seen.add(yeni)
+    return kept

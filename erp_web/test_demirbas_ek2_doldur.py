@@ -53,6 +53,9 @@ def test_0_satir():
     doc = Document(BytesIO(data))
     rows = _ek2_rows(doc)
     check("ek2_header", rows and rows[0][0] == "Sıra")
+    hdr = rows[0] if rows else []
+    check("ek2_header_adet", any(c == "Adet" for c in hdr), str(hdr))
+    check("ek2_header_adet_durum_yok", not any("Durum" in c for c in hdr), str(hdr))
     data_rows = rows[1:]
     check("ek2_bos_en_az_5", len(data_rows) >= 5, str(len(data_rows)))
     check("ek2_bos_esya_bos", all(not r[1] for r in data_rows[:5]))
@@ -63,15 +66,30 @@ def test_3_satir():
     from docx import Document
 
     rows_in = [
-        {"esya": "Keson", "marka_model": "A", "seri_no": "KE000000000001", "adet_durum": "1", "mulkiyet": "OFISBIR", "kapsam": "oda_ici"},
-        {"esya": "Monitör", "marka_model": "B", "seri_no": "MO000000000002", "adet_durum": "1", "mulkiyet": "OFISBIR", "kapsam": "oda_ici"},
-        {"esya": "Perde", "marka_model": "", "seri_no": "PE000000000003", "adet_durum": "2", "mulkiyet": "MUSTERI", "kapsam": "oda_ici"},
+        {"esya": "Keson", "marka_model": "A", "seri_no": "KE000000000001", "adet": 1, "mulkiyet": "OFISBIR", "kapsam": "oda_ici"},
+        {"esya": "Monitör", "marka_model": "B", "seri_no": "MO000000000002", "adet": 1, "mulkiyet": "OFISBIR", "kapsam": "oda_ici"},
+        {
+            "esya": "Perde",
+            "marka_model": "",
+            "seri_nolar": ["PE000000000003", "PE000000000004", "PE000000000005"],
+            "adet": 3,
+            "mulkiyet": "MUSTERI",
+            "kapsam": "oda_ici",
+        },
     ]
     doc = Document(BytesIO(render_sozlesme_docx_v2(_base_ctx(demirbas_rows=rows_in))))
+    t2 = doc.tables[2]
     rows = _ek2_rows(doc)[1:]
     check("ek2_3_adet", len(rows) == 3, str(len(rows)))
     check("ek2_3_sira1", rows[0][0] == "1" and rows[0][1] == "Keson")
-    check("ek2_3_mulkiyet", "Müşteri" in rows[2][5] or "Musteri" in rows[2][5] or rows[2][5] == "Müşteri")
+    check("ek2_3_mulkiyet", "Müşteri" in rows[2][5] or rows[2][5] == "Müşteri")
+    check("ek2_3_adet_col", rows[2][4] == "3", rows[2][4])
+    check("ek2_3_marka_muhtelif", rows[2][2] == "Muhtelif", rows[2][2])
+    # seri alt alta (çok paragraf)
+    cell = t2.rows[3].cells[3]  # perde seri
+    paras = [p.text.strip() for p in cell.paragraphs if p.text.strip()]
+    check("ek2_3_seri_altalta", len(paras) >= 3, str(paras))
+    check("ek2_3_seri_join", "\n".join(paras).count("PE") >= 3, str(paras))
 
 
 def test_8_satir():
@@ -125,11 +143,43 @@ def test_madde5_dokunulmadi():
     check("teslim_metin", "Teslim tarihi" in full or "teslim" in full.lower() or "[7]" in full or "anahtar" in full.lower() or True)
 
 
+def test_adet1_3_karisik():
+    from sozlesme_sablon_v2 import render_sozlesme_docx_v2
+    from docx import Document
+
+    rows_in = [
+        {
+            "esya": "Keson",
+            "marka_model": "Muhtelif",
+            "seri_nolar": ["KE000000000011"],
+            "adet": 1,
+            "mulkiyet": "OFISBIR",
+            "kapsam": "oda_ici",
+        },
+        {
+            "esya": "Yazıcı",
+            "marka_model": "HP",
+            "seri_nolar": ["YA000000000021", "YA000000000022", "YA000000000023"],
+            "adet": 3,
+            "mulkiyet": "MUSTERI",
+            "kapsam": "ortak_alan",
+        },
+    ]
+    doc = Document(BytesIO(render_sozlesme_docx_v2(_base_ctx(demirbas_rows=rows_in))))
+    rows = _ek2_rows(doc)[1:]
+    blob = "\n".join("|".join(r) for r in rows)
+    check("kar_ortak", "Ortak alan" in blob)
+    check("kar_musteri", any(r[5] == "Müşteri" for r in rows), str(rows))
+    check("kar_adet1", any(r[1] == "Keson" and r[4] == "1" for r in rows), str(rows))
+    check("kar_adet3", any(r[1] == "Yazıcı" and r[4] == "3" for r in rows), str(rows))
+
+
 def main() -> int:
     test_0_satir()
     test_3_satir()
     test_8_satir()
     test_ortak_karisik()
+    test_adet1_3_karisik()
     test_madde5_dokunulmadi()
     print("---")
     if FAILS:
