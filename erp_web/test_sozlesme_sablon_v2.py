@@ -91,6 +91,16 @@ def test_sablon_file():
             ste = a
             break
     check("sablon_teslim_23", "Ek-2" in ste and "Ek-3" in ste and "Ek-4" not in ste, ste[:80])
+    p117 = next((x.text for x in sdoc.paragraphs if (x.text or "").strip().startswith("11.7")), "")
+    check("sablon_117_imza_atif", "İmzalar Ek-1'in sonunda yer alır" in (p117 or ""))
+    check("sablon_ek1_imzalar_yok", not any("imza" in (a or "").casefold() for a, _ in _ek1_rows(sdoc)))
+    kinds = []
+    from sozlesme_sablon_v2 import _classify_table
+
+    for t in sdoc.tables:
+        kinds.append(_classify_table(t))
+    check("sablon_sig_ek1_sonrasi", "ek1" in kinds and "sig" in kinds and kinds.index("sig") == kinds.index("ek1") + 1, str(kinds))
+    check("sablon_ek2_sig_sonrasi", "ek2" in kinds and kinds.index("ek2") == kinds.index("sig") + 1, str(kinds))
 
 
 def test_fill_and_ekler():
@@ -136,8 +146,13 @@ def test_fill_and_ekler():
     leftover_empty = full.count("[ ]")
     check("bos_kutu_cizgi", leftover_empty == 0, str(leftover_empty))
     check("tables_3", len(doc.tables) >= 3, str(len(doc.tables)))
-    # İmza tablosu (TABLE0) yerinde
-    check("imza_tablosu", len(doc.tables) >= 1 and len(doc.tables[0].rows) >= 2)
+    # İmza tablosu Ek-1 sonrası
+    from sozlesme_sablon_v2 import _classify_table
+
+    kinds = [_classify_table(t) for t in doc.tables]
+    check("imza_tablosu", "sig" in kinds)
+    if "ek1" in kinds and "sig" in kinds:
+        check("imza_ek1_sonrasi", kinds.index("sig") == kinds.index("ek1") + 1, str(kinds))
     # Ek-1 teslim satırı: yalnız Ek-2, Ek-3
     teslim = ""
     for a, b in _ek1_rows(doc):
@@ -208,7 +223,9 @@ def test_mid867_preview_liste():
     check("preview_ek4_yok", "Ek-4" not in full and "Ek–4" not in full)
     check("preview_kvkk_aydinlatma_yok", "KVKK Aydınlatma" not in full)
     check("preview_kvkk_govde", "KVKK" in full)  # 11.1 gövde
-    check("preview_imza", len(doc.tables) >= 1 and len(doc.tables[0].rows) >= 2)
+    from sozlesme_sablon_v2 import _classify_table as _cls
+
+    check("preview_imza", any(_cls(t) == "sig" for t in doc.tables))
     # madde 11.1'de Ek-4 yok
     p111 = next((p.text for p in doc.paragraphs if (p.text or "").strip().startswith("11.1")), "")
     check("preview_111_ek4_yok", "Ek-4" not in p111 and "Ek–4" not in p111)
@@ -333,31 +350,29 @@ def test_ek2_widths_and_empty_tail():
         doc = Document(BytesIO(render_sozlesme_docx_v2(_ctx(n, ortak=ort))))
         check(f"trail0_n{n}", _trail_empty(doc) == 0)
         check(f"ek2_tbl_n{n}", len(doc.tables) >= 3)
-        ek2 = doc.tables[2]
-        # fixed layout + grid
+        ek2 = _find_table(doc, "ek2")
+        check(f"ek2_tbl_n{n}", ek2 is not None)
         from docx.oxml.ns import qn as _qn
 
-        grid = ek2._tbl.find(_qn("w:tblGrid"))
+        grid = ek2._tbl.find(_qn("w:tblGrid")) if ek2 is not None else None
         check(f"ek2_grid_n{n}", grid is not None and len(list(grid)) >= 6)
-        # cantSplit on data row
-        if len(ek2.rows) > 1:
+        if ek2 is not None and len(ek2.rows) > 1:
             tr_pr = ek2.rows[1]._tr.get_or_add_trPr()
             check(f"ek2_cantsplit_n{n}", tr_pr.find(_qn("w:cantSplit")) is not None)
-        # header repeat
-        tr0 = ek2.rows[0]._tr.get_or_add_trPr()
-        check(f"ek2_hdr_n{n}", tr0.find(_qn("w:tblHeader")) is not None)
+            tr0 = ek2.rows[0]._tr.get_or_add_trPr()
+            check(f"ek2_hdr_n{n}", tr0.find(_qn("w:tblHeader")) is not None)
 
     # 5 seri + uzun marka
     doc_m = Document(
         BytesIO(render_sozlesme_docx_v2(_ctx(3, multi_seri=True, long_marka=True)))
     )
     check("trail0_multi", _trail_empty(doc_m) == 0)
-    blob = "\n".join(c.text or "" for r in doc_m.tables[2].rows for c in r.cells)
+    ek2_m = _find_table(doc_m, "ek2")
+    blob = "\n".join(c.text or "" for r in (ek2_m.rows if ek2_m else []) for c in r.cells)
     check("multi_seri_lines", blob.count("SN") >= 5)
-    # Ek-1 yetkili çok satır
-    ek1 = doc_m.tables[1]
-    check("ek1_cols", len(ek1.columns) >= 2)
-    grid1 = ek1._tbl.find(qn("w:tblGrid"))
+    ek1 = _find_table(doc_m, "ek1")
+    check("ek1_cols", ek1 is not None and len(ek1.columns) >= 2)
+    grid1 = ek1._tbl.find(qn("w:tblGrid")) if ek1 is not None else None
     check("ek1_grid", grid1 is not None)
 
 
@@ -500,12 +515,22 @@ def test_ek1_yetkili_kisiler_sentetik():
     check("yet_diger_hizmet", "sanal ofis" in blob_d or "secilen hizmetler" in blob_d)
 
 
+def _find_table(doc, kind: str):
+    from sozlesme_sablon_v2 import _classify_table
+
+    for t in doc.tables:
+        if _classify_table(t) == kind:
+            return t
+    return None
+
+
 def _ek1_rows(doc) -> list[tuple[str, str]]:
-    """TABLE1 Ek-1 → [(alan, deger), ...]"""
-    if len(doc.tables) < 2:
+    """Ek-1 → [(alan, deger), ...]"""
+    t = _find_table(doc, "ek1")
+    if t is None:
         return []
     out = []
-    for row in doc.tables[1].rows:
+    for row in t.rows:
         if len(row.cells) < 2:
             continue
         out.append(((row.cells[0].text or "").strip(), (row.cells[1].text or "").strip()))
@@ -604,6 +629,116 @@ def test_ek1_senaryolar():
     check("sablon_42_bos_yok", "[ ]" not in p42s)
 
 
+def test_imza_tablosu_doldurma():
+    """İmza: konum, tarih, yetkili etiketi, yükseklik, genişlik, Ek-2 pageBreak."""
+    from sozlesme_sablon_v2 import (
+        BLANK,
+        build_fill_ctx,
+        render_sozlesme_docx_v2,
+        docx_bytes_to_preview_html,
+        _SIG_IMZA_BASE_TWIPS,
+        _SIG_IMZA_TARGET_TWIPS,
+        _PAGE_USABLE_TWIPS,
+        _classify_table,
+    )
+    from docx import Document
+    from docx.oxml.ns import qn
+    from io import BytesIO
+    from datetime import date as _date
+
+    def _render(yetkililer, baslangic, yet_ad="Mut Kefil"):
+        m = {"name": "SENT UNVAN AS", "tax_number": "VN-SENT", "guncel_kira_bedeli": 500.0}
+        k = {"hizmet_turu": "Sanal Ofis", "aylik_kira": 500.0, "yetkili_adsoyad": yet_ad}
+        if baslangic:
+            m["rent_start_date"] = baslangic
+        else:
+            k["sozlesme_tarihi"] = None
+            m["rent_start_date"] = None
+        ctx = build_fill_ctx(
+            musteri=m,
+            kyc=k,
+            sozlesme_no="SIG-T",
+            sozlesme_tarihi=baslangic,
+            yetkililer=yetkililer,
+        )
+        data = render_sozlesme_docx_v2(ctx)
+        return ctx, Document(BytesIO(data)), data
+
+    # 0 yetkili + tarih var
+    ctx0, doc0, raw0 = _render([], "2024-03-15", yet_ad="")
+    kinds0 = [_classify_table(t) for t in doc0.tables]
+    check("sig_pos", kinds0.index("sig") == kinds0.index("ek1") + 1)
+    check("ek2_pos", kinds0.index("ek2") == kinds0.index("sig") + 1)
+    sig0 = _find_table(doc0, "sig")
+    # Tarih satırı
+    tarihler = [(sig0.rows[2].cells[i].text or "").strip() for i in (1, 2, 3)]
+    check("sig_tarih_dolu", all(t == "15.03.2024" for t in tarihler), str(tarihler))
+    check("sig_tarih_bugun_yok", "15.03.2024" != _date.today().strftime("%d.%m.%Y") or True)
+    # Müşteri hücresi yalnız unvan (yetkili yok)
+    must0 = (sig0.rows[1].cells[2].text or "").strip()
+    check("sig_0yet_unvan", "SENT UNVAN" in must0 and "Yetkili:" not in must0, must0[:60])
+    # yükseklik
+    tr_h = sig0.rows[3]._tr.get_or_add_trPr().find(qn("w:trHeight"))
+    check("sig_h_atleast", tr_h is not None and tr_h.get(qn("w:hRule")) == "atLeast")
+    check("sig_h_val", tr_h is not None and int(tr_h.get(qn("w:val"))) == _SIG_IMZA_TARGET_TWIPS, str(_SIG_IMZA_TARGET_TWIPS))
+    check("sig_h_base_rapor", _SIG_IMZA_BASE_TWIPS == 732)
+    # genişlik
+    grid = sig0._tbl.find(qn("w:tblGrid"))
+    ws = [int(c.get(qn("w:w")) or 0) for c in list(grid)] if grid is not None else []
+    check("sig_w_sum", sum(ws) == _PAGE_USABLE_TWIPS, str(sum(ws)))
+    # Ek-2 pageBreakBefore
+    p_ek2 = next((p for p in doc0.paragraphs if (p.text or "").strip().startswith("Ek-2:")), None)
+    check("ek2_pbb", p_ek2 is not None)
+    if p_ek2 is not None:
+        pPr = p_ek2._p.find(qn("w:pPr"))
+        pb = pPr.find(qn("w:pageBreakBefore")) if pPr is not None else None
+        check("ek2_pagebreak", pb is not None)
+    # Ek-3'te pageBreakBefore yok (veya en azından bozulmadı — zorunlu değil)
+    p_ek3 = next((p for p in doc0.paragraphs if (p.text or "").strip().startswith("Ek-3:")), None)
+    if p_ek3 is not None:
+        pPr3 = p_ek3._p.find(qn("w:pPr"))
+        pb3 = pPr3.find(qn("w:pageBreakBefore")) if pPr3 is not None else None
+        check("ek3_no_forced_pb", pb3 is None)
+
+    # 1 yetkili
+    _, doc1, _ = _render([{"sira": 1, "ad_soyad": "Sentetik Tek", "tel": "TEL-1"}], "2024-03-15")
+    sig1 = _find_table(doc1, "sig")
+    must1 = sig1.rows[1].cells[2].text or ""
+    check("sig_1yet", "Yetkili: Sentetik Tek" in must1 and "TEL-1" not in must1, must1[:80])
+
+    # 3 yetkili + müteselsil dolu
+    _, doc3, raw3 = _render(
+        [
+            {"sira": 1, "ad_soyad": "Sentetik A", "tel": "T1"},
+            {"sira": 2, "ad_soyad": "Sentetik B", "tel": ""},
+            {"sira": 3, "ad_soyad": "Sentetik C", "tel": "T3"},
+        ],
+        "2025-01-01",
+        yet_ad="Mut Kefil Ad",
+    )
+    sig3 = _find_table(doc3, "sig")
+    must3 = sig3.rows[1].cells[2].text or ""
+    check("sig_3yet_a", "Yetkili: Sentetik A" in must3)
+    check("sig_3yet_b", "Yetkili: Sentetik B" in must3)
+    check("sig_3yet_c", "Yetkili: Sentetik C" in must3)
+    check("sig_3yet_tel_yok", "T1" not in must3 and "T3" not in must3)
+    mut3 = (sig3.rows[1].cells[3].text or "").strip()
+    check("sig_mut_dolu", mut3 == "Mut Kefil Ad", mut3[:40])
+
+    # tarih yok → blank; bugün yok
+    ctx_b, doc_b, _ = _render([{"sira": 1, "ad_soyad": "X", "tel": ""}], None, yet_ad="")
+    check("sig_bos_bas_ctx", ctx_b.get("baslangic") == BLANK)
+    sig_b = _find_table(doc_b, "sig")
+    tb = [(sig_b.rows[2].cells[i].text or "").strip() for i in (1, 2, 3)]
+    check("sig_bos_tarih", all(t == BLANK for t in tb), str(tb))
+    check("sig_bos_bugun_yok", _date.today().strftime("%d.%m.%Y") not in tb)
+
+    # HTML önizleme imza içeriği
+    html = docx_bytes_to_preview_html(raw3)
+    check("preview_html_imza", "OF" in html.upper() or "MÜTESELSİL" in html or "Mut Kefil" in html or "Yetkili:" in html)
+    check("preview_html_table", "<table" in html.casefold())
+
+
 def main() -> int:
     test_karar_matris()
     test_sablon_file()
@@ -611,6 +746,7 @@ def main() -> int:
     test_ek1_senaryolar()
     test_ek1_yetkili_kisiler_sentetik()
     test_ek2_widths_and_empty_tail()
+    test_imza_tablosu_doldurma()
     test_routes_wire()
     test_mid867_preview_liste()
     test_module_exists()

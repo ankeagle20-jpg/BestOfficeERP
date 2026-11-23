@@ -24,11 +24,21 @@ def check(name: str, ok: bool, ek: str = "") -> None:
         FAILS.append(name)
 
 
+def _ek2_table(doc):
+    from sozlesme_sablon_v2 import _classify_table
+
+    for t in doc.tables:
+        if _classify_table(t) == "ek2":
+            return t
+    return None
+
+
 def _ek2_rows(doc):
-    if len(doc.tables) < 3:
+    t = _ek2_table(doc)
+    if t is None:
         return []
     out = []
-    for row in doc.tables[2].rows:
+    for row in t.rows:
         out.append([(c.text or "").strip() for c in row.cells])
     return out
 
@@ -78,15 +88,15 @@ def test_3_satir():
         },
     ]
     doc = Document(BytesIO(render_sozlesme_docx_v2(_base_ctx(demirbas_rows=rows_in))))
-    t2 = doc.tables[2]
+    t2 = _ek2_table(doc)
     rows = _ek2_rows(doc)[1:]
     check("ek2_3_adet", len(rows) == 3, str(len(rows)))
     check("ek2_3_sira1", rows[0][0] == "1" and rows[0][1] == "Keson")
     check("ek2_3_mulkiyet", "Müşteri" in rows[2][5] or rows[2][5] == "Müşteri")
     check("ek2_3_adet_col", rows[2][4] == "3", rows[2][4])
     check("ek2_3_marka_muhtelif", rows[2][2] == "Muhtelif", rows[2][2])
-    # seri alt alta (çok paragraf)
-    cell = t2.rows[3].cells[3]  # perde seri
+    # seri alt alta (çok paragraf) — header + 3 veri → perde = rows[3]
+    cell = t2.rows[3].cells[3]
     paras = [p.text.strip() for p in cell.paragraphs if p.text.strip()]
     check("ek2_3_seri_altalta", len(paras) >= 3, str(paras))
     check("ek2_3_seri_join", "\n".join(paras).count("PE") >= 3, str(paras))
@@ -181,8 +191,9 @@ def test_ek2_layout_grid():
     from io import BytesIO
 
     doc = Document(BytesIO(render_sozlesme_docx_v2(_base_ctx(demirbas_rows=[]))))
-    ek2 = doc.tables[2]
-    grid = ek2._tbl.find(qn("w:tblGrid"))
+    ek2 = _ek2_table(doc)
+    check("layout_ek2", ek2 is not None)
+    grid = ek2._tbl.find(qn("w:tblGrid")) if ek2 is not None else None
     check("layout_grid", grid is not None)
     widths = []
     if grid is not None:

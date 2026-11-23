@@ -241,6 +241,21 @@ def yetkili_kisiler_hucre(
     return "\n".join(lines) if lines else BLANK
 
 
+def yetkili_adlari(
+    yetkililer: list | None = None,
+    *,
+    kyc: dict | None = None,
+    musteri: dict | None = None,
+) -> list[str]:
+    """Yetkili adları (telefonsuz); Ek-1 ile aynı kaynak/sıra/dedupe."""
+    out: list[str] = []
+    for line in yetkili_kisiler_satirlari(yetkililer, kyc=kyc, musteri=musteri):
+        ad = (line.split(" – ", 1)[0] if " – " in line else line).strip()
+        if ad:
+            out.append(ad)
+    return out
+
+
 def build_fill_ctx(
     *,
     musteri: dict | None = None,
@@ -346,6 +361,7 @@ def build_fill_ctx(
     if yet_list is None and isinstance(m.get("yetkililer"), list):
         yet_list = m.get("yetkililer")
     yet_hucre = yetkili_kisiler_hucre(yet_list, kyc=k, musteri=m)
+    yet_ads = yetkili_adlari(yet_list, kyc=k, musteri=m)
 
     return {
         "sozlesme_no": _s(sozlesme_no) or _s(k.get("sozlesme_no")),
@@ -361,6 +377,7 @@ def build_fill_ctx(
         "yetkili_ad": yet_ad or BLANK,
         "yetkili_tc": yet_tc or BLANK,
         "yetkili_kisiler": yet_hucre,
+        "yetkili_adlari": yet_ads,
         "hizmet_turu": ht,
         "baslangic": bas_s or BLANK,
         "bitis": bit_s or BLANK,
@@ -564,18 +581,113 @@ def _fill_table_ek1(table, ctx: dict) -> None:
                     _set_run_text_preserve(p, _fill_paragraph_text(p.text, ctx))
 
 
+# İmza / Kaşe satırı: şablonda auto (~36.6 pt ≈ 732 twip); hedef 2.5× atLeast
+_SIG_IMZA_BASE_TWIPS = 732
+_SIG_IMZA_TARGET_TWIPS = int(round(_SIG_IMZA_BASE_TWIPS * 2.5))  # 1830
+_SIG_LABEL_MIN, _SIG_LABEL_MAX = 900, 1800
+
+
+def _set_row_height_at_least(row, twips: int) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr_pr = row._tr.get_or_add_trPr()
+    tr_h = tr_pr.find(qn("w:trHeight"))
+    if tr_h is None:
+        tr_h = OxmlElement("w:trHeight")
+        tr_pr.append(tr_h)
+    tr_h.set(qn("w:val"), str(int(twips)))
+    tr_h.set(qn("w:hRule"), "atLeast")
+
+
+def _set_para_keep_next(paragraph, on: bool = True) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    kn = p_pr.find(qn("w:keepNext"))
+    if on:
+        if kn is None:
+            p_pr.append(OxmlElement("w:keepNext"))
+    elif kn is not None:
+        p_pr.remove(kn)
+
+
+def _set_page_break_before(paragraph, on: bool = True) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    pb = p_pr.find(qn("w:pageBreakBefore"))
+    if on:
+        if pb is None:
+            p_pr.append(OxmlElement("w:pageBreakBefore"))
+    elif pb is not None:
+        p_pr.remove(pb)
+
+
+def compute_sig_col_widths(label_chars: int, content_chars: int) -> list[int]:
+    """Etiket dar + 3 eşit imza sütunu; toplam kullanılabilir genişlik."""
+    lab = max(_SIG_LABEL_MIN, min(_SIG_LABEL_MAX, _char_width_twips(label_chars)))
+    # içerik üç sütuna yayılsın diye alt sınır
+    need = max(_char_width_twips(max(content_chars, 8)), 1600)
+    rest = _PAGE_USABLE_TWIPS - lab
+    each = max(need, rest // 3)
+    # sığdır
+    if lab + 3 * each > _PAGE_USABLE_TWIPS:
+        each = (_PAGE_USABLE_TWIPS - lab) // 3
+    widths = [lab, each, each, _PAGE_USABLE_TWIPS - lab - 2 * each]
+    return widths
+
+
+def apply_sig_table_layout(table) -> list[int]:
+    if len(table.columns) < 4:
+        return []
+    lab = 0
+    cont = 0
+    for row in table.rows:
+        if len(row.cells) < 4:
+            continue
+        lab = max(lab, _max_line_len(row.cells[0].text or ""))
+        for ci in (1, 2, 3):
+            cont = max(cont, _max_line_len(row.cells[ci].text or ""))
+    widths = compute_sig_col_widths(lab, cont)
+    _set_table_grid_widths(table, widths)
+    for row in table.rows:
+        _set_row_cant_split(row)
+    _apply_table_font_pt_safe(table, _EK2_FONT_PT)
+    return widths
+
+
 def _fill_signature_table(table, ctx: dict) -> None:
-    """İmza tablosu: ünvan satırı."""
-    if len(table.rows) < 2:
+    """İmza tablosu (Ek-1 sonrası): Ünvan / Tarih / İmza satırları."""
+    if len(table.rows) < 4 or len(table.columns) < 4:
         return
-    # R1: Ünvan / Ad Soyad — OFİSBİR | MÜŞTERİ | MÜTESELSİL
-    row = table.rows[1]
-    cells = row.cells
-    if len(cells) >= 4:
-        if cells[2].paragraphs:
-            _set_run_text_preserve(cells[2].paragraphs[0], ctx["musteri_unvan"])
-        if cells[3].paragraphs:
-            _set_run_text_preserve(cells[3].paragraphs[0], ctx["yetkili_ad"])
+    # R1: Ünvan / Ad Soyad — OFİSBİR dokunma; MÜŞTERİ unvan+yetkililer; MÜTESELSİL mevcut
+    row_u = table.rows[1]
+    cells_u = row_u.cells
+    unvan = ctx.get("musteri_unvan") or BLANK
+    ads = list(ctx.get("yetkili_adlari") or [])
+    musteri_lines = [unvan] if unvan and unvan != BLANK else []
+    for ad in ads:
+        a = _s(ad)
+        if a:
+            musteri_lines.append(f"Yetkili: {a}")
+    if not musteri_lines:
+        musteri_lines = [BLANK]
+    _set_cell_text(cells_u[2], "\n".join(musteri_lines))
+    # Müteselsil: mevcut mantık (yetkili_ad)
+    _set_cell_text(cells_u[3], ctx.get("yetkili_ad") or BLANK)
+
+    # R2: Tarih — üç hücreye başlangıç tarihi (bugün basılmaz)
+    bas = ctx.get("baslangic") or BLANK
+    row_t = table.rows[2]
+    for ci in (1, 2, 3):
+        if ci < len(row_t.cells):
+            _set_cell_text(row_t.cells[ci], bas if bas else BLANK)
+
+    # R3: İmza / Kaşe yüksekliği 2.5× (atLeast)
+    _set_row_height_at_least(table.rows[3], _SIG_IMZA_TARGET_TWIPS)
 
 
 def _ek2_clone_row(table, template_row) -> None:
@@ -930,23 +1042,76 @@ def apply_ek1_table_layout(table) -> list[int]:
     return widths
 
 
+def _classify_table(table) -> str:
+    """ek1 | sig | ek2 | other — şablon sırası bağımsız tanıma."""
+    if len(table.columns) >= 6 and len(table.rows) >= 1:
+        h0 = _tr_fold(table.rows[0].cells[0].text or "")
+        if h0.startswith("sira") or "esya" in _tr_fold(
+            table.rows[0].cells[1].text if len(table.rows[0].cells) > 1 else ""
+        ):
+            return "ek2"
+    if len(table.columns) >= 4 and len(table.rows) >= 2:
+        blob = _tr_fold(" ".join((c.text or "") for c in table.rows[0].cells))
+        if "ofisbir" in blob or "muteselsil" in blob or "musteri" in blob:
+            # imza başlık satırı
+            lab = _tr_fold(table.rows[1].cells[0].text or "") if len(table.rows) > 1 else ""
+            if "unvan" in lab or "ad soyad" in lab:
+                return "sig"
+            if "ofisbir" in blob and "muteselsil" in blob:
+                return "sig"
+    if len(table.columns) >= 2 and len(table.rows) >= 1:
+        h0 = _tr_fold(table.rows[0].cells[0].text or "")
+        if h0 == "alan" or "musteri unvani" in h0:
+            return "ek1"
+    return "other"
+
+
+def ensure_ek2_page_break_before(doc) -> bool:
+    """Ek-2 başlığına pageBreakBefore; Ek-3'e dokunma."""
+    for p in doc.paragraphs:
+        t = (p.text or "").strip()
+        if t.startswith("Ek-2:") or t.startswith("Ek–2:"):
+            _set_page_break_before(p, True)
+            return True
+    return False
+
+
 def finalize_sozlesme_layout(doc) -> dict:
-    """Boş son paragraf temizliği + Ek-1/Ek-2 sütun düzeni. Dönüş: metrikler."""
+    """Boş son paragraf + Ek-1/imza/Ek-2 düzeni + Ek-2 yeni sayfa."""
     removed = strip_trailing_empty_paragraphs(doc)
     ek1_w: list[int] = []
     ek2_w: list[int] = []
-    if len(doc.tables) > 1:
-        ek1_w = apply_ek1_table_layout(doc.tables[1])
-    if len(doc.tables) > 2:
-        ek2_w = apply_ek2_table_layout(doc.tables[2])
-    # düzen sonrası yeniden oluşabilecek boş kuyruk
+    sig_w: list[int] = []
+    by_kind = {_classify_table(t): t for t in doc.tables}
+    # birden fazla same-kind olursa son kazanır; sırayla uygula
+    for t in doc.tables:
+        kind = _classify_table(t)
+        if kind == "ek1":
+            ek1_w = apply_ek1_table_layout(t)
+            # Ek-1 son satır keepNext — imza tablosuyla bir arada tutmaya çalış
+            try:
+                for cell in t.rows[-1].cells:
+                    for p in cell.paragraphs:
+                        _set_para_keep_next(p, True)
+            except Exception:
+                pass
+        elif kind == "sig":
+            sig_w = apply_sig_table_layout(t)
+        elif kind == "ek2":
+            ek2_w = apply_ek2_table_layout(t)
+    ek2_pb = ensure_ek2_page_break_before(doc)
     removed += strip_trailing_empty_paragraphs(doc)
     return {
         "trailing_empty_removed": removed,
         "ek1_widths": ek1_w,
         "ek2_widths": ek2_w,
+        "sig_widths": sig_w,
         "ek2_width_sum": sum(ek2_w) if ek2_w else 0,
         "ek1_width_sum": sum(ek1_w) if ek1_w else 0,
+        "sig_width_sum": sum(sig_w) if sig_w else 0,
+        "sig_imza_base_twips": _SIG_IMZA_BASE_TWIPS,
+        "sig_imza_target_twips": _SIG_IMZA_TARGET_TWIPS,
+        "ek2_page_break": ek2_pb,
         "usable_twips": _PAGE_USABLE_TWIPS,
     }
 
@@ -975,13 +1140,14 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
         if new_t != para.text:
             _set_run_text_preserve(para, new_t)
 
-    for ti, table in enumerate(doc.tables):
-        # TABLE0 imza, TABLE1 Ek-1, TABLE2 Ek-2 envanter; Ek-3 paragraf (tablo değil); Ek-4 yok
-        if ti == 0:
-            _fill_signature_table(table, ctx)
-        elif ti == 1:
+    for table in doc.tables:
+        # Yeni şablon: Ek-1 → imza → Ek-2 (tanıma ile; indeks bağımsız)
+        kind = _classify_table(table)
+        if kind == "ek1":
             _fill_table_ek1(table, ctx)
-        elif ti == 2:
+        elif kind == "sig":
+            _fill_signature_table(table, ctx)
+        elif kind == "ek2":
             _fill_table_ek2(table, ctx)
         else:
             for row in table.rows:
