@@ -691,7 +691,7 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
             _set_run_text_preserve(para, new_t)
 
     for ti, table in enumerate(doc.tables):
-        # TABLE0 imza, TABLE1 Ek-1, TABLE2 Ek-2 envanter
+        # TABLE0 imza, TABLE1 Ek-1, TABLE2 Ek-2 envanter; Ek-3 paragraf (tablo değil); Ek-4 yok
         if ti == 0:
             _fill_signature_table(table, ctx)
         elif ti == 1:

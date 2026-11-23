@@ -73,10 +73,24 @@ def test_karar_matris():
 
 def test_sablon_file():
     from sozlesme_sablon_v2 import sozlesme_sablon_v2_path
+    from docx import Document
 
     p = sozlesme_sablon_v2_path()
     check("sablon_var", p.is_file(), str(p))
     check("sablon_docx", p.suffix.lower() == ".docx")
+    sdoc = Document(str(p))
+    sfull = chr(10).join(x.text or "" for x in sdoc.paragraphs)
+    check("sablon_ek3", "Ek-3:" in sfull)
+    check("sablon_ek4_yok", "Ek-4" not in sfull and "Ek–4" not in sfull)
+    check("sablon_kvkk_aydinlatma_yok", "KVKK Aydınlatma" not in sfull)
+    s111 = next((x.text for x in sdoc.paragraphs if (x.text or "").strip().startswith("11.1")), "")
+    check("sablon_111_ek4_yok", "Ek-4" not in (s111 or ""))
+    ste = ""
+    for a, _b in _ek1_rows(sdoc):
+        if "teslim edilen" in (a or "").casefold():
+            ste = a
+            break
+    check("sablon_teslim_23", "Ek-2" in ste and "Ek-3" in ste and "Ek-4" not in ste, ste[:80])
 
 
 def test_fill_and_ekler():
@@ -112,14 +126,25 @@ def test_fill_and_ekler():
     check("baslik_v2", "Ofisbir Ofis Kullanımı ve Hizmet Sözleşmesi" in full)
     check("ek1_baslik", "Ek-1: Hizmet ve Ücret Formu" in full)
     check("ek2_baslik", "Ek-2: Demirbaş Envanteri" in full)
-    # Güncel şablon: kullanım/KVKK gövdede (ayrı Ek-3/Ek-4 başlığı yok)
-    check("govde_kullanim", "Kullanım Kuralları" in full or "8." in full)
-    check("govde_kvkk", "KVKK" in full)
+    check("ek3_baslik", "Ek-3: Ofis Kullanım Kuralları" in full)
+    # Ek-4 KVKK Aydınlatma kaldırıldı
+    check("ek4_yok", "Ek-4" not in full and "Ek–4" not in full)
+    check("kvkk_aydinlatma_yok", "KVKK Aydınlatma" not in full)
+    check("govde_kvkk", "KVKK" in full)  # madde 11.1 gövde atfı kalır
     check("madde_korundu", "11." in full)
     check("unvan_dolu", "TEST UNVAN LTD" in full)
     leftover_empty = full.count("[ ]")
     check("bos_kutu_cizgi", leftover_empty == 0, str(leftover_empty))
     check("tables_3", len(doc.tables) >= 3, str(len(doc.tables)))
+    # İmza tablosu (TABLE0) yerinde
+    check("imza_tablosu", len(doc.tables) >= 1 and len(doc.tables[0].rows) >= 2)
+    # Ek-1 teslim satırı: yalnız Ek-2, Ek-3
+    teslim = ""
+    for a, b in _ek1_rows(doc):
+        if "teslim edilen" in (a or "").casefold():
+            teslim = a
+            break
+    check("teslim_ekler_23", "Ek-2" in teslim and "Ek-3" in teslim and "Ek-4" not in teslim, teslim[:80])
 
 
 def test_routes_wire():
@@ -176,7 +201,14 @@ def test_mid867_preview_liste():
     full = chr(10).join(p.text for p in doc.paragraphs)
     check("preview_ek1", "Ek-1" in full)
     check("preview_ek2", "Ek-2" in full)
-    check("preview_kvkk", "KVKK" in full)
+    check("preview_ek3", "Ek-3" in full)
+    check("preview_ek4_yok", "Ek-4" not in full and "Ek–4" not in full)
+    check("preview_kvkk_aydinlatma_yok", "KVKK Aydınlatma" not in full)
+    check("preview_kvkk_govde", "KVKK" in full)  # 11.1 gövde
+    check("preview_imza", len(doc.tables) >= 1 and len(doc.tables[0].rows) >= 2)
+    # madde 11.1'de Ek-4 yok
+    p111 = next((p.text for p in doc.paragraphs if (p.text or "").strip().startswith("11.1")), "")
+    check("preview_111_ek4_yok", "Ek-4" not in p111 and "Ek–4" not in p111)
     blob = _ek1_blob(_ek1_rows(doc))
     check("mid867_ek1_bas", "01.08.2023" in blob)
     check("mid867_ek1_odeme", "1. günü ile 6. günü arası" in blob)
