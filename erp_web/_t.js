@@ -30321,9 +30321,11 @@ function girisDemirbasEklerYukle(mid) {
         .then(function (res) {
             var j = res && res.json;
             if (!res.ok || !j || !j.ok) {
+                var msg = (j && j.mesaj) || 'Ekler yüklenemedi';
                 if (j && j.tablo_yok) {
-                    girisDemirbasMesaj(j.mesaj || 'Kayıt tablosu hazır değil');
+                    girisDemirbasMesaj(msg);
                 }
+                if (typeof girisDemirbasEklerDurumYaz === 'function') girisDemirbasEklerDurumYaz(msg, false);
                 girisDemirbasEklerFormaYaz({ anahtar_kart_sayisi: null, hasar_aciklama: '' });
                 return;
             }
@@ -30342,6 +30344,7 @@ function girisDemirbasEklerPanelAc() {
     var pan = girisDemirbasEklerPanelEl();
     if (!pan) return;
     pan.style.display = '';
+    if (typeof girisDemirbasEklerDurumYaz === 'function') girisDemirbasEklerDurumYaz('', true);
     girisDemirbasEklerAnahtarDoldur();
     var mid = (typeof selectedId !== 'undefined') ? selectedId : null;
     girisDemirbasEklerYukle(mid);
@@ -30390,26 +30393,41 @@ function girisDemirbasEklerKaydet() {
     });
 }
 
-function girisDemirbasEklerBag() {
-    girisDemirbasEklerAnahtarDoldur();
-    var root = document.getElementById('giris_demirbas_section') || document;
-    Array.prototype.forEach.call(root.querySelectorAll('[data-demirbas-action]'), function (el) {
-        if (el.getAttribute('data-demirbas-bound') === '1') return;
-        el.setAttribute('data-demirbas-bound', '1');
-        el.addEventListener('click', function (ev) {
-            ev.preventDefault();
+function girisDemirbasEklerDurumYaz(msg, ok) {
+    var st = document.getElementById('giris_demirbas_ekler_durum');
+    if (!st) return;
+    st.textContent = msg || '';
+    st.style.color = ok ? '#81c784' : '#ef9a9a';
+}
+
+function girisDemirbasEklerToggle() {
+    var pan = girisDemirbasEklerPanelEl();
+    if (pan && pan.style.display !== 'none') girisDemirbasEklerPanelKapat(false);
+    else girisDemirbasEklerPanelAc();
+}
+
+function girisDemirbasEklerBind() {
+    /* Bölüm konteynerine tek delegasyon; ad: Bind (çağrılarla uyumlu). */
+    var root = document.getElementById('giris_demirbas_section');
+    if (!root) root = document;
+    if (root.getAttribute('data-demirbas-ekler-deleg') !== '1') {
+        root.setAttribute('data-demirbas-ekler-deleg', '1');
+        root.addEventListener('click', function (ev) {
+            var t = ev.target;
+            if (!t || !t.closest) return;
+            var el = t.closest('[data-demirbas-action]');
+            if (!el || (root !== document && !root.contains(el))) return;
             var act = el.getAttribute('data-demirbas-action') || '';
-            if (act === 'ekler-ac') {
-                var pan = girisDemirbasEklerPanelEl();
-                if (pan && pan.style.display !== 'none') girisDemirbasEklerPanelKapat(false);
-                else girisDemirbasEklerPanelAc();
-            } else if (act === 'ekler-kaydet') {
-                girisDemirbasEklerKaydet();
-            } else if (act === 'ekler-kapat') {
-                girisDemirbasEklerPanelKapat(false);
+            if (act === 'ekler-ac' || act === 'ekler-kaydet' || act === 'ekler-kapat' || act === 'duzenle-ac') {
+                ev.preventDefault();
             }
+            if (act === 'ekler-ac') girisDemirbasEklerToggle();
+            else if (act === 'ekler-kaydet') girisDemirbasEklerKaydet();
+            else if (act === 'ekler-kapat') girisDemirbasEklerPanelKapat(false);
+            else if (act === 'duzenle-ac') girisDemirbasDuzenlePanelAcKapa();
         });
-    });
+    }
+    girisDemirbasEklerAnahtarDoldur();
     var ta = document.getElementById('giris_demirbas_ekler_hasar');
     if (ta && ta.getAttribute('data-demirbas-bound') !== '1') {
         ta.setAttribute('data-demirbas-bound', '1');
@@ -30427,6 +30445,8 @@ function girisDemirbasEklerBag() {
         });
     }
 }
+/* Sayfa yüklenince hemen bağla — Yukle başarı yolunu bekleme. */
+try { girisDemirbasEklerBind(); } catch (_eklerBindErr) { /* ignore */ }
 
 function girisDemirbasKaydet(mid) {
     if (!__girisDemirbasAktif || !mid) return Promise.resolve({ ok: true, skipped: true });
