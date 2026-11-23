@@ -831,8 +831,118 @@ def _set_table_borders_nil(table) -> None:
         el.set(qn("w:color"), "auto")
 
 
+def _clear_cell_shading(cell) -> None:
+    """Hücre dolgusunu kaldır (Docs başlık gri/koyu taşınmasını sil)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = tc_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        tc_pr.append(shd)
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), "auto")
+
+
+def _set_cell_valign(cell, val: str = "top") -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    va = tc_pr.find(qn("w:vAlign"))
+    if va is None:
+        va = OxmlElement("w:vAlign")
+        tc_pr.append(va)
+    va.set(qn("w:val"), val)
+
+
+def _set_cell_margins_equal(cell, twips: int = 0) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    mar = tc_pr.find(qn("w:tcMar"))
+    if mar is None:
+        mar = OxmlElement("w:tcMar")
+        tc_pr.append(mar)
+    for edge in ("top", "left", "bottom", "right"):
+        el = mar.find(qn(f"w:{edge}"))
+        if el is None:
+            el = OxmlElement(f"w:{edge}")
+            mar.append(el)
+        el.set(qn("w:w"), str(int(twips)))
+        el.set(qn("w:type"), "dxa")
+
+
+def _normalize_run_plain_black(paragraph, *, font_pt: float) -> None:
+    """Kalın/italik/renk farkını sil; siyah + sabit punto."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    half = str(int(round(float(font_pt) * 2)))
+    for run in paragraph.runs:
+        try:
+            run.bold = False
+            run.italic = False
+            run.underline = False
+            run.font.color.rgb = RGBColor(0, 0, 0)
+            run.font.size = Pt(font_pt)
+        except Exception:
+            pass
+        r_pr = run._r.get_or_add_rPr()
+        # highlight / shading on run
+        for tag in ("highlight", "shd", "b", "i", "u", "color"):
+            el = r_pr.find(qn(f"w:{tag}"))
+            if el is not None and tag in ("highlight", "shd", "b", "i", "u"):
+                r_pr.remove(el)
+        col = r_pr.find(qn("w:color"))
+        if col is None:
+            col = OxmlElement("w:color")
+            r_pr.append(col)
+        col.set(qn("w:val"), "000000")
+        for sz_tag in ("sz", "szCs"):
+            sz = r_pr.find(qn(f"w:{sz_tag}"))
+            if sz is None:
+                sz = OxmlElement(f"w:{sz_tag}")
+                r_pr.append(sz)
+            sz.set(qn("w:val"), half)
+
+
+def _set_para_spacing_exact(paragraph, *, before: int, after: int = 0, line: int | None = None) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    sp = p_pr.find(qn("w:spacing"))
+    if sp is None:
+        sp = OxmlElement("w:spacing")
+        p_pr.append(sp)
+    sp.set(qn("w:before"), str(int(before)))
+    sp.set(qn("w:after"), str(int(after)))
+    if line is not None:
+        sp.set(qn("w:line"), str(int(line)))
+        sp.set(qn("w:lineRule"), "auto")
+    # girinti sıfır
+    ind = p_pr.find(qn("w:ind"))
+    if ind is not None:
+        p_pr.remove(ind)
+
+
+def _clear_row_tbl_header(row) -> None:
+    """Docs'tan gelen tblHeader (koyu başlık biçimi) kaldır."""
+    from docx.oxml.ns import qn
+
+    tr_pr = row._tr.get_or_add_trPr()
+    th = tr_pr.find(qn("w:tblHeader"))
+    if th is not None:
+        tr_pr.remove(th)
+
+
 def apply_ek2_teslim_imza_layout(table) -> list[int]:
-    """2 eşit sütun, çizgisiz, spacing before ~12pt, cantSplit, 9pt."""
+    """2 eşit sütun, çizgisiz, dolgusuz, aynı dikey hiza, spacing before her iki hücrede."""
     if not _is_ek2_teslim_imza_table(table):
         return []
     half = _PAGE_USABLE_TWIPS // 2
@@ -840,19 +950,22 @@ def apply_ek2_teslim_imza_layout(table) -> list[int]:
     _set_table_grid_widths(table, widths)
     _set_table_borders_nil(table)
     for row in table.rows:
+        _clear_row_tbl_header(row)
         _set_row_cant_split(row)
-        for ci, cell in enumerate(row.cells):
-            for pi, p in enumerate(cell.paragraphs):
-                # bir satır boşluk: ilk hücre ilk paragrafına before
-                if ci == 0 and pi == 0:
-                    _set_para_spacing_before(p, _EK2_IMZA_BEFORE_TWIPS)
+        for cell in row.cells:
+            _clear_cell_shading(cell)
+            _set_cell_valign(cell, "top")
+            _set_cell_margins_equal(cell, 0)
+            for p in cell.paragraphs:
+                # İKİ hücrede aynı before — aksi halde MÜŞTERİ yukarı kayar
+                _set_para_spacing_exact(p, before=_EK2_IMZA_BEFORE_TWIPS, after=0)
                 _set_para_keep_lines(p, True)
                 try:
-                    p.alignment = 0  # WD_ALIGN_PARAGRAPH.LEFT
+                    p.alignment = 0  # LEFT
                 except Exception:
                     pass
+                _normalize_run_plain_black(p, font_pt=_EK2_FONT_PT)
     _apply_table_font_pt_safe(table, _EK2_FONT_PT)
-    # metin sabit kalsın (şablon zaten OFİSBİR: ____ / MÜŞTERİ: ____)
     return widths
 
 
@@ -1295,11 +1408,42 @@ def finalize_sozlesme_layout(doc) -> dict:
 
 
 def docx_bytes_to_preview_html(data: bytes) -> str:
-    """DOCX → HTML önizleme (mammoth). Disk/DB yazmaz."""
+    """DOCX → HTML önizleme (mammoth). Disk/DB yazmaz.
+
+    Ek-2 OFİSBİR|MÜŞTERİ satırı: dolgusuz + aynı hiza (Docs başlık CSS'i temizlenir).
+    """
     import mammoth
+    import re as _re
 
     result = mammoth.convert_to_html(BytesIO(data))
-    return result.value or ""
+    html = result.value or ""
+
+    def _scrub_cell(m: _re.Match) -> str:
+        chunk = m.group(0)
+        up = chunk.upper()
+        if "OFİSBİR" not in chunk and "OFISBIR" not in up and "MÜŞTERİ" not in chunk and "MUSTERI" not in up:
+            return chunk
+        chunk = _re.sub(
+            r"background(-color)?\s*:\s*[^;\"']+;?",
+            "background:transparent;",
+            chunk,
+            flags=_re.I,
+        )
+        chunk = _re.sub(
+            r"color\s*:\s*#(fff|ffffff|f2f2f2)\b;?",
+            "color:#000000;",
+            chunk,
+            flags=_re.I,
+        )
+        chunk = _re.sub(r"font-weight\s*:\s*bold;?", "font-weight:normal;", chunk, flags=_re.I)
+        if "vertical-align" not in chunk.casefold():
+            if 'style="' in chunk:
+                chunk = chunk.replace('style="', 'style="vertical-align:top;', 1)
+            else:
+                chunk = chunk.replace("<td", '<td style="vertical-align:top"', 1)
+        return chunk
+
+    return _re.sub(r"<td\b[^>]*>[\s\S]*?</td>", _scrub_cell, html, flags=_re.I)
 
 
 def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> bytes:

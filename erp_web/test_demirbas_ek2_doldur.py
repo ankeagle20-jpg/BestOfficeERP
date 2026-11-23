@@ -264,15 +264,36 @@ def test_ek2_dipnot_imza_tablo():
         if borders is not None:
             top = borders.find(qn("w:top"))
             check("imza_border_nil", top is not None and top.get(qn("w:val")) == "nil")
-        # spacing before ~12pt
-        p0 = imza.rows[0].cells[0].paragraphs[0]
-        pPr = p0._p.find(qn("w:pPr"))
-        sp = pPr.find(qn("w:spacing")) if pPr is not None else None
-        before = int(sp.get(qn("w:before"))) if sp is not None and sp.get(qn("w:before")) else 0
-        check("imza_spacing_before", before == _EK2_IMZA_BEFORE_TWIPS, str(before))
-        # cantSplit
+        # spacing before ~12pt — İKİ hücrede aynı (dikey hiza)
+        befores = []
+        for ci in (0, 1):
+            p0 = imza.rows[0].cells[ci].paragraphs[0]
+            pPr = p0._p.find(qn("w:pPr"))
+            sp = pPr.find(qn("w:spacing")) if pPr is not None else None
+            before = int(sp.get(qn("w:before"))) if sp is not None and sp.get(qn("w:before")) else 0
+            befores.append(before)
+            tc_pr = imza.rows[0].cells[ci]._tc.get_or_add_tcPr()
+            shd = tc_pr.find(qn("w:shd"))
+            fill = (shd.get(qn("w:fill")) if shd is not None else "") or ""
+            check(f"imza_shd_auto_{ci}", fill.lower() in ("", "auto", "ffffff"), fill)
+            va = tc_pr.find(qn("w:vAlign"))
+            check(f"imza_valign_{ci}", va is not None and va.get(qn("w:val")) == "top")
+        check("imza_spacing_before", befores[0] == _EK2_IMZA_BEFORE_TWIPS, str(befores))
+        check("imza_spacing_esit", befores[0] == befores[1], str(befores))
+        # tblHeader yok (Docs koyu başlık)
         tr_pr = imza.rows[0]._tr.get_or_add_trPr()
         check("imza_cantsplit", tr_pr.find(qn("w:cantSplit")) is not None)
+        check("imza_no_tblheader", tr_pr.find(qn("w:tblHeader")) is None)
+        # yazı siyah / kalın değil
+        for ci in (0, 1):
+            for run in imza.rows[0].cells[ci].paragraphs[0].runs:
+                col = None
+                try:
+                    col = run.font.color.rgb
+                except Exception:
+                    pass
+                check(f"imza_renk_{ci}", col is None or str(col) == "000000", str(col))
+                check(f"imza_bold_yok_{ci}", not bool(run.bold))
 
     # keepNext dipnotta
     if dip is not None:
@@ -305,6 +326,107 @@ def test_ek2_dipnot_imza_tablo():
     # Mutation: OFİSBİR paragrafta kalırsa test yakalar
     mut_dip = dt + " OFİSBİR: ____ MÜŞTERİ: ____"
     check("mut_kalinti_yakalar", "OFİSBİR:" in mut_dip and "OFİSBİR:" not in dt)
+
+    # Sentetik koyu başlıklı girdi → layout temizler
+    test_ek2_imza_sentetik_koyu()
+
+
+def test_ek2_imza_sentetik_koyu():
+    """Docs'tan gelen koyu tblHeader + gri shd + asimetrik spacing temizlenir."""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from sozlesme_sablon_v2 import (
+        apply_ek2_teslim_imza_layout,
+        _is_ek2_teslim_imza_table,
+        _EK2_IMZA_BEFORE_TWIPS,
+        _SABLON_V2,
+    )
+
+    doc = Document(str(_SABLON_V2))
+    imza = next((t for t in doc.tables if _is_ek2_teslim_imza_table(t)), None)
+    check("sent_imza_var", imza is not None)
+    if imza is None:
+        return
+    # kirlet
+    tr_pr = imza.rows[0]._tr.get_or_add_trPr()
+    if tr_pr.find(qn("w:tblHeader")) is None:
+        tr_pr.append(OxmlElement("w:tblHeader"))
+    for ci, cell in enumerate(imza.rows[0].cells):
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = tc_pr.find(qn("w:shd"))
+        if shd is None:
+            shd = OxmlElement("w:shd")
+            tc_pr.append(shd)
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:fill"), "333333")
+        p = cell.paragraphs[0]
+        # sadece sola before
+        pPr = p._p.get_or_add_pPr()
+        sp = pPr.find(qn("w:spacing"))
+        if sp is None:
+            sp = OxmlElement("w:spacing")
+            pPr.append(sp)
+        if ci == 0:
+            sp.set(qn("w:before"), "240")
+        else:
+            sp.set(qn("w:before"), "0")
+        for run in p.runs:
+            run.bold = True
+            r_pr = run._r.get_or_add_rPr()
+            col = r_pr.find(qn("w:color"))
+            if col is None:
+                col = OxmlElement("w:color")
+                r_pr.append(col)
+            col.set(qn("w:val"), "FFFFFF")
+    # 3 sütunlu imza (sig) başlığını da kirlet — etkilenmemeli
+    from sozlesme_sablon_v2 import _classify_table
+
+    sig = next((t for t in doc.tables if _classify_table(t) == "sig"), None)
+    sig_had_header = False
+    if sig is not None and sig.rows:
+        spr = sig.rows[0]._tr.get_or_add_trPr()
+        if spr.find(qn("w:tblHeader")) is None:
+            spr.append(OxmlElement("w:tblHeader"))
+        sig_had_header = spr.find(qn("w:tblHeader")) is not None
+        # gri shd sig hücre 0
+        c0 = sig.rows[0].cells[0]
+        tcp = c0._tc.get_or_add_tcPr()
+        sh = tcp.find(qn("w:shd"))
+        if sh is None:
+            sh = OxmlElement("w:shd")
+            tcp.append(sh)
+        sh.set(qn("w:fill"), "111111")
+        sig_fill_before = sh.get(qn("w:fill"))
+
+    apply_ek2_teslim_imza_layout(imza)
+
+    tr_pr = imza.rows[0]._tr.get_or_add_trPr()
+    check("sent_no_header", tr_pr.find(qn("w:tblHeader")) is None)
+    fills = []
+    befores = []
+    for ci, cell in enumerate(imza.rows[0].cells):
+        shd = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
+        fills.append((shd.get(qn("w:fill")) if shd is not None else "") or "")
+        sp = cell.paragraphs[0]._p.get_or_add_pPr().find(qn("w:spacing"))
+        befores.append(int(sp.get(qn("w:before"))) if sp is not None and sp.get(qn("w:before")) else -1)
+        va = cell._tc.get_or_add_tcPr().find(qn("w:vAlign"))
+        check(f"sent_va_{ci}", va is not None and va.get(qn("w:val")) == "top")
+    check("sent_fill_auto", all(f.lower() in ("auto", "ffffff", "") for f in fills), str(fills))
+    check("sent_before_esit", befores[0] == befores[1] == _EK2_IMZA_BEFORE_TWIPS, str(befores))
+
+    if sig is not None and sig_had_header:
+        spr = sig.rows[0]._tr.get_or_add_trPr()
+        check("sent_sig_header_korundu", spr.find(qn("w:tblHeader")) is not None)
+        sh = sig.rows[0].cells[0]._tc.get_or_add_tcPr().find(qn("w:shd"))
+        check("sent_sig_fill_korundu", sh is not None and sh.get(qn("w:fill")) == sig_fill_before)
+
+    # Mutation: shading temizlenmezse test yakalar
+    check(
+        "mut_shd_yakalar",
+        "333333" not in [x.lower() for x in fills] and all(f.lower() in ("auto", "ffffff", "") for f in fills),
+        str(fills),
+    )
 
 
 def main() -> int:
