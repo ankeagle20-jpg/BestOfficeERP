@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Özel ürün ekle→çıkar zinciri (firma / kullanıcı / iki kullanıcı + mutation)."""
+"""Panel seçim/Çıkar semantiği: hazır gizle, özel sil, toplu, mutation, zor adlar."""
 from __future__ import annotations
 
 import os
@@ -26,8 +26,6 @@ def check(name: str, ok: bool, ek: str = "") -> None:
 
 
 def _install_pref_store(gr, *, firma_table: bool, firma_store: dict, user_store: dict):
-    """_demirbas_ui_pref_get/set gerçek zincirini bellek store ile bağla."""
-
     def get_firma(key):
         if not firma_table:
             return None
@@ -42,9 +40,6 @@ def _install_pref_store(gr, *, firma_table: bool, firma_store: dict, user_store:
         user_store[key] = dict(prefs)
         return True
 
-    def set_pref(key, prefs, removed=None):
-        return gr._demirbas_ui_pref_set(key, prefs, removed=removed)
-
     patches = [
         patch.object(gr, "_demirbas_ui_pref_get_firma", side_effect=get_firma),
         patch.object(gr, "_demirbas_ui_pref_get_user", side_effect=get_user),
@@ -54,7 +49,6 @@ def _install_pref_store(gr, *, firma_table: bool, firma_store: dict, user_store:
     if firma_table:
 
         def execute(sql, params=None):
-            # INSERT/UPDATE firma_ui_preferences
             if params and len(params) >= 2:
                 import json as _json
 
@@ -62,7 +56,7 @@ def _install_pref_store(gr, *, firma_table: bool, firma_store: dict, user_store:
                 firma_store[key] = _json.loads(raw) if isinstance(raw, str) else dict(raw)
 
         patches.append(patch("db.execute", side_effect=execute))
-    return patches, set_pref
+    return patches
 
 
 def _katalog_adlar(d, gr):
@@ -71,7 +65,7 @@ def _katalog_adlar(d, gr):
     return {x["esya"] for x in kat}, ek, gizli
 
 
-def test_firma_ekle_cikar_geri_kalici():
+def test_hazir_gizle_ozel_sil():
     import demirbas as d
     import routes.giris_routes as gr
 
@@ -79,218 +73,203 @@ def test_firma_ekle_cikar_geri_kalici():
     reload(gr)
     firma_store: dict = {}
     user_store: dict = {}
-    patches, _ = _install_pref_store(
+    patches = _install_pref_store(
         gr, firma_table=True, firma_store=firma_store, user_store=user_store
     )
+
     class U:
         id = 7
 
     with patch.object(gr, "current_user", U()):
-        ctx = patches[0]
-        for p in patches[1:]:
-            ctx = ctx
-        # enter all
         entered = [p.__enter__() for p in patches]
         try:
-            ad = "deneme"
-            grup = "Teknoloji"
-            ek_in = d.demirbas_ek_normalize(
-                [{"esya": ad, "grup": grup, "kapsam": "oda_ici"}]
-            )
-            ok = gr._demirbas_ui_pref_set(d.DEMIRBAS_PREF_URUN_EK, {"urunler": ek_in})
-            check("firma_ekle_ok", ok is True)
-            adlar, ek, gizli = _katalog_adlar(d, gr)
-            check("firma_ekle_katalog", ad in adlar, str(adlar))
-            check("firma_ekle_ek", any(x["esya"] == ad for x in ek))
-
-            # çıkar = gizle (özel ürün ek'te kalır)
-            gizli_in = d.demirbas_gizli_normalize(gizli + [ad])
-            ok = gr._demirbas_ui_pref_set(d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in})
-            check("firma_cikar_ok", ok is True)
-            adlar2, ek2, gizli2 = _katalog_adlar(d, gr)
-            check("firma_cikar_katalog_yok", ad not in adlar2, str(adlar2))
-            check("firma_cikar_ek_var", any(x["esya"] == ad for x in ek2))
-            check("firma_cikar_gizli", any(d.demirbas_tr_casefold(x) == "deneme" for x in gizli2))
-
-            # geri getir
-            ok = gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": []}, removed=[ad]
-            )
-            check("firma_geri_ok", ok is True)
-            adlar3, _ek3, gizli3 = _katalog_adlar(d, gr)
-            check("firma_geri_katalog", ad in adlar3)
-            check("firma_geri_gizli_bos", not any(d.demirbas_tr_casefold(x) == "deneme" for x in gizli3))
-
-            # kalıcı sil (removed zorunlu)
-            ok = gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_EK, {"urunler": []}, removed=[ad]
-            )
-            check("firma_kalici_ok", ok is True)
-            adlar4, ek4, _g4 = _katalog_adlar(d, gr)
-            check("firma_kalici_katalog_yok", ad not in adlar4)
-            check("firma_kalici_ek_yok", not any(x["esya"] == ad for x in ek4))
-
-            # aynı ad yeniden eklenebilir
-            ok = gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_EK,
-                {"urunler": d.demirbas_ek_normalize([{"esya": ad, "grup": grup, "kapsam": "oda_ici"}])},
-            )
-            check("firma_yeniden_ekle", ok is True)
-            adlar5, _, _ = _katalog_adlar(d, gr)
-            check("firma_yeniden_katalog", ad in adlar5)
-        finally:
-            for p, _ in zip(patches, entered):
-                p.__exit__(None, None, None)
-
-
-def test_user_fallback_ekle_cikar():
-    """firma tablosu yok → kullanıcı store; çıkar sonrası katalogda yok."""
-    import demirbas as d
-    import routes.giris_routes as gr
-
-    reload(d)
-    reload(gr)
-    firma_store: dict = {}
-    user_store: dict = {}
-    patches, _ = _install_pref_store(
-        gr, firma_table=False, firma_store=firma_store, user_store=user_store
-    )
-    class U:
-        id = 11
-
-    with patch.object(gr, "current_user", U()):
-        entered = [p.__enter__() for p in patches]
-        try:
-            ad = "deneme"
             gr._demirbas_ui_pref_set(
                 d.DEMIRBAS_PREF_URUN_EK,
                 {
                     "urunler": d.demirbas_ek_normalize(
-                        [{"esya": ad, "grup": "Depolama", "kapsam": "oda_ici"}]
+                        [
+                            {
+                                "esya": 'O\'zel "A" & B',
+                                "grup": "Teknoloji",
+                                "kapsam": "oda_ici",
+                            }
+                        ]
                     )
                 },
             )
-            adlar, _, _ = _katalog_adlar(d, gr)
-            check("user_ekle", ad in adlar)
-            gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": [ad]}
+            ok, msg, ozet = gr._demirbas_urunleri_cikar_uygula(["Keson", 'O\'zel "A" & B'])
+            check("cikar_ok", ok is True, msg)
+            check("cikar_gizle_keson", "Keson" in (ozet.get("gizlenen") or []))
+            check(
+                "cikar_sil_ozel",
+                any('O\'zel "A" & B' == x for x in (ozet.get("silinen") or [])),
+                str(ozet),
             )
-            adlar2, ek2, _ = _katalog_adlar(d, gr)
-            check("user_cikar_katalog_yok", ad not in adlar2)
-            check("user_cikar_ek_var", any(x["esya"] == ad for x in ek2))
-            check("user_store_dolu", d.DEMIRBAS_PREF_URUN_GIZLI in user_store)
+            adlar, ek, gizli = _katalog_adlar(d, gr)
+            check("katalog_keson_yok", "Keson" not in adlar)
+            check("katalog_ozel_yok", not any('O\'zel "A" & B' == x for x in adlar))
+            check("ek_ozel_yok", not any(x["esya"] == 'O\'zel "A" & B' for x in ek))
+            check("gizli_keson", any(d.demirbas_tr_casefold(x) == "keson" for x in gizli))
+            # geri getir hazır
+            gr._demirbas_ui_pref_set(
+                d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": []}, removed=["Keson"]
+            )
+            adlar2, _, _ = _katalog_adlar(d, gr)
+            check("geri_keson", "Keson" in adlar2)
+            # aynı zor ad yeniden eklenebilir
+            gr._demirbas_ui_pref_set(
+                d.DEMIRBAS_PREF_URUN_EK,
+                {
+                    "urunler": d.demirbas_ek_normalize(
+                        [
+                            {
+                                "esya": 'O\'zel "A" & B',
+                                "grup": "Teknoloji",
+                                "kapsam": "oda_ici",
+                            }
+                        ]
+                    )
+                },
+            )
+            adlar3, _, _ = _katalog_adlar(d, gr)
+            check("yeniden_zor_ad", 'O\'zel "A" & B' in adlar3)
         finally:
             for p in patches:
                 p.__exit__(None, None, None)
 
 
-def test_iki_kullanici_firma_paylasim():
+def test_user_fallback_ve_iki_kullanici():
     import demirbas as d
     import routes.giris_routes as gr
 
     reload(d)
     reload(gr)
+    # user
     firma_store: dict = {}
-    user_a: dict = {}
-    user_b: dict = {}
-    patches_a, _ = _install_pref_store(
-        gr, firma_table=True, firma_store=firma_store, user_store=user_a
+    user_store: dict = {}
+    patches = _install_pref_store(
+        gr, firma_table=False, firma_store=firma_store, user_store=user_store
     )
 
-    class UA:
+    class U:
+        id = 3
+
+    with patch.object(gr, "current_user", U()):
+        entered = [p.__enter__() for p in patches]
+        try:
+            gr._demirbas_ui_pref_set(
+                d.DEMIRBAS_PREF_URUN_EK,
+                {
+                    "urunler": d.demirbas_ek_normalize(
+                        [{"esya": "deneme", "grup": "Depolama", "kapsam": "oda_ici"}]
+                    )
+                },
+            )
+            ok, _, ozet = gr._demirbas_urunleri_cikar_uygula(["deneme"])
+            check("user_sil", ok and "deneme" in (ozet.get("silinen") or []))
+            adlar, ek, _ = _katalog_adlar(d, gr)
+            check("user_katalog_yok", "deneme" not in adlar)
+            check("user_ek_yok", not any(x["esya"] == "deneme" for x in ek))
+        finally:
+            for p in patches:
+                p.__exit__(None, None, None)
+
+    # iki kullanıcı firma
+    firma_store = {}
+    patches_a = _install_pref_store(
+        gr, firma_table=True, firma_store=firma_store, user_store={}
+    )
+
+    class A:
         id = 1
 
-    class UB:
+    class B:
         id = 2
 
-    with patch.object(gr, "current_user", UA()):
+    with patch.object(gr, "current_user", A()):
         entered = [p.__enter__() for p in patches_a]
         try:
             gr._demirbas_ui_pref_set(
                 d.DEMIRBAS_PREF_URUN_EK,
                 {
                     "urunler": d.demirbas_ek_normalize(
-                        [{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}]
+                        [{"esya": "PanelX", "grup": "Teknoloji", "kapsam": "oda_ici"}]
                     )
                 },
             )
-            gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": ["deneme"]}
-            )
+            gr._demirbas_urunleri_cikar_uygula(["Keson"])
         finally:
             for p in patches_a:
                 p.__exit__(None, None, None)
-
-    patches_b, _ = _install_pref_store(
-        gr, firma_table=True, firma_store=firma_store, user_store=user_b
+    patches_b = _install_pref_store(
+        gr, firma_table=True, firma_store=firma_store, user_store={}
     )
-    with patch.object(gr, "current_user", UB()):
+    with patch.object(gr, "current_user", B()):
         entered = [p.__enter__() for p in patches_b]
         try:
             adlar, ek, gizli = _katalog_adlar(d, gr)
-            check("b_katalog_yok", "deneme" not in adlar)
-            check("b_ek_gorur", any(x["esya"] == "deneme" for x in ek))
-            check("b_gizli_gorur", any(d.demirbas_tr_casefold(x) == "deneme" for x in gizli))
-            # B geri getirince A de görür
-            gr._demirbas_ui_pref_set(
-                d.DEMIRBAS_PREF_URUN_GIZLI, {"gizli": []}, removed=["deneme"]
-            )
-            adlar2, _, _ = _katalog_adlar(d, gr)
-            check("b_geri_katalog", "deneme" in adlar2)
+            check("b_keson_yok", "Keson" not in adlar)
+            check("b_panelx_var", "PanelX" in adlar and any(x["esya"] == "PanelX" for x in ek))
+            check("b_gizli_keson", any(d.demirbas_tr_casefold(x) == "keson" for x in gizli))
         finally:
             for p in patches_b:
                 p.__exit__(None, None, None)
 
 
-def test_ozel_gizli_filtre_mutation():
-    """Mutation: ozel gizli filtresi bozulursa test FAIL etmeli (boş geçmesin)."""
+def test_toplu_liste_ve_marka():
     import demirbas as d
+    import routes.giris_routes as gr
 
     reload(d)
-    ek = [{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}]
-    gizli = ["deneme"]
-    iyi = d.demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-    check("mut_once_yok", not any(x["esya"] == "deneme" for x in iyi))
+    reload(gr)
+    firma_store: dict = {}
+    patches = _install_pref_store(
+        gr, firma_table=True, firma_store=firma_store, user_store={}
+    )
 
-    real = d.demirbas_katalog_birlesik
+    class U:
+        id = 9
 
-    def broken(*, ek=None, gizli=None):
-        # eski davranış: ozel gizlenmez
-        return real(ek=ek, gizli=[])
+    with patch.object(gr, "current_user", U()):
+        entered = [p.__enter__() for p in patches]
+        try:
+            gr._demirbas_ui_pref_set(
+                d.DEMIRBAS_PREF_URUN_EK,
+                {
+                    "urunler": d.demirbas_ek_normalize(
+                        [{"esya": "Özel1", "grup": "Teknoloji", "kapsam": "oda_ici"}]
+                    )
+                },
+            )
+            gr._demirbas_ui_pref_set(
+                d.DEMIRBAS_PREF_MARKA,
+                d.demirbas_marka_prefs_normalize({"markalar": ["Acer"], "gizli": []}),
+            )
+            ok_u, _, ozet = gr._demirbas_urunleri_cikar_uygula(["Keson", "Özel1"])
+            ok_m, _, sil_m = gr._demirbas_markalari_cikar_uygula(["Acer"])
+            check("toplu_urun", ok_u and "Keson" in ozet["gizlenen"] and "Özel1" in ozet["silinen"])
+            check("toplu_marka", ok_m and sil_m == ["Acer"])
+            kayitli, _g = gr._demirbas_marka_kayitli_gizli()
+            check("marka_yok", "Acer" not in kayitli)
+            # Muhtelif reddi
+            ok0, msg0, _ = gr._demirbas_markalari_cikar_uygula(["Muhtelif"])
+            check("muhtelif_kilit", ok0 is False and "Muhtelif" in msg0)
+        finally:
+            for p in patches:
+                p.__exit__(None, None, None)
 
-    d.demirbas_katalog_birlesik = broken  # type: ignore
-    try:
-        kotu = d.demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-        # bozuk fonksiyon ürünü geri getirir → assertion yakalar
-        check(
-            "mut_bozuk_yakala",
-            any(x["esya"] == "deneme" for x in kotu),
-            "mutation ürünü göstermeli",
-        )
-        # asıl koruma: düzgün filtre zorunlu
-        check(
-            "mut_duzeltme_gerekli",
-            any(x["esya"] == "deneme" for x in kotu)
-            and not any(x["esya"] == "deneme" for x in iyi),
-        )
-    finally:
-        d.demirbas_katalog_birlesik = real  # type: ignore
 
-
-def test_kalici_removed_mutation():
-    """Mutation: removed yok sayılırsa kalıcı sil birleşimde geri gelir → yakalanır."""
+def test_mutation_removed_ve_ozel_filtre():
     import demirbas as d
 
     reload(d)
     disk = {
         "urunler": [{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}]
     }
-    incoming = {"urunler": []}
     iyi = d.demirbas_pref_merge_json(
-        d.DEMIRBAS_PREF_URUN_EK, disk, incoming, removed=["deneme"]
+        d.DEMIRBAS_PREF_URUN_EK, disk, {"urunler": []}, removed=["deneme"]
     )
     check("mut_removed_iyi", not any(x["esya"] == "deneme" for x in iyi["urunler"]))
-
     real = d.demirbas_pref_merge_json
 
     def broken(pref_key, disk, incoming, *, removed=None):
@@ -299,54 +278,60 @@ def test_kalici_removed_mutation():
     d.demirbas_pref_merge_json = broken  # type: ignore
     try:
         kotu = d.demirbas_pref_merge_json(
-            d.DEMIRBAS_PREF_URUN_EK, disk, incoming, removed=["deneme"]
+            d.DEMIRBAS_PREF_URUN_EK, disk, {"urunler": []}, removed=["deneme"]
         )
         check(
             "mut_removed_yakala",
             any(x["esya"] == "deneme" for x in kotu["urunler"]),
-            "removed yok sayılınca ürün kalmalı",
         )
     finally:
         d.demirbas_pref_merge_json = real  # type: ignore
 
+    # hazir gizli filtre
+    iyi2 = d.demirbas_katalog_birlesik(gizli=["Keson"])
+    check("mut_gizli_iyi", not any(x["esya"] == "Keson" for x in iyi2))
+    real2 = d.demirbas_katalog_birlesik
 
-def test_panel_ve_fe_wire():
-    import demirbas as d
+    def broken2(*, ek=None, gizli=None):
+        return real2(ek=ek, gizli=[])
 
-    reload(d)
-    panel = d.demirbas_panel_urunler(
-        ek=[{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}],
-        gizli=["deneme", "Keson"],
-    )
-    den = next(x for x in panel if x["esya"] == "deneme")
-    kes = next(x for x in panel if x["esya"] == "Keson")
-    check("panel_ozel_pasif", den["aktif"] is False and den["kaynak"] == "ozel")
-    check("panel_hazir_pasif", kes["aktif"] is False and kes["kaynak"] == "hazir")
+    d.demirbas_katalog_birlesik = broken2  # type: ignore
+    try:
+        kotu2 = d.demirbas_katalog_birlesik(gizli=["Keson"])
+        check("mut_gizli_yakala", any(x["esya"] == "Keson" for x in kotu2))
+    finally:
+        d.demirbas_katalog_birlesik = real2  # type: ignore
+
+
+def test_fe_secim_ui():
     tjs = (ROOT / "_t.js").read_text(encoding="utf-8")
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
-    check("fe_checkbox", "dem-panel-aktif" in tjs and "girisDemirbasUrunAktifDegisti" in tjs)
-    check("fe_kalici", "girisDemirbasUrunKaliciSil" in tjs and "kalici: true" in tjs)
-    check("fe_baslik_ekle", "girisDemirbasDuzenleBaslikEkleHtml" in tjs)
-    # Eski kök neden: onclick="...Cikar("+JSON.stringify → tırnak kırılması
+    gr = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
+    check("fe_sec_bos", "dem-panel-sec" in tjs and "dem-panel-aktif" not in tjs)
+    check("fe_tumunu", "dem-panel-tumunu-sec" in tjs and "indeterminate" in tjs)
+    check("fe_secilen_sil", "Seçilenleri sil" in tjs and "demirbas-liste-cikar" in tjs)
+    check("fe_cikar_btn", "dem-panel-cikar" in tjs and "girisDemirbasPanelSatirCikar" in tjs)
+    check("fe_geri", "dem-panel-geri" in tjs)
+    check("fe_muhtelif_disabled", 'data-sabit="1"' in tjs)
     check(
         "fe_onclick_json_yok",
-        "girisDemirbasUrunCikar(' +" not in tjs
-        and "JSON.stringify(String(it.esya))" not in tjs,
+        "JSON.stringify(String(it.esya))" not in tjs
+        and "JSON.stringify(String(m))" not in tjs,
     )
-    check("fe_gizli_bolum_yok", "Gizlenenleri geri getir" not in tjs)
-    check("fe_gizli_html_yok", "giris_demirbas_gizli_liste" not in html)
-    check("fe_data_esya", "data-esya=" in tjs and "addEventListener('change'" in tjs)
-    gr = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
-    check("be_panel_payload", "demirbas_panel_urunler" in gr and '"panel"' in gr)
+    check("fe_bind", "girisDemirbasDuzenlePanelBag" in tjs and "addEventListener" in tjs)
+    check("fe_checked_default_yok", "dem-panel-sec\" checked" not in tjs.replace(" ", ""))
+    check("be_liste_cikar", "/api/demirbas-liste-cikar" in gr)
+    check("fe_ayna_liste", "demirbas-liste-cikar" in html)
+    # zor ad escape
+    check("fe_esc", "girisDemirbasEsc" in tjs and "data-esya=" in tjs)
 
 
 def main() -> int:
-    test_firma_ekle_cikar_geri_kalici()
-    test_user_fallback_ekle_cikar()
-    test_iki_kullanici_firma_paylasim()
-    test_ozel_gizli_filtre_mutation()
-    test_kalici_removed_mutation()
-    test_panel_ve_fe_wire()
+    test_hazir_gizle_ozel_sil()
+    test_user_fallback_ve_iki_kullanici()
+    test_toplu_liste_ve_marka()
+    test_mutation_removed_ve_ozel_filtre()
+    test_fe_secim_ui()
     print("---")
     if FAILS:
         print("FAILS", len(FAILS), FAILS)

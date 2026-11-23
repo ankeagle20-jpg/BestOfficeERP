@@ -125,9 +125,10 @@ def test_ayna_ve_sabit():
     check("marka_api_yol", "demirbas-markalar" in b_t)
     check("panel_urun", "girisDemirbasPanelUrunEkle" in b_t and "demirbas-urun" in b_t)
     check("panel_marka", "girisDemirbasPanelMarkaEkle" in b_t)
-    check("panel_checkbox", "dem-panel-aktif" in b_t and "girisDemirbasUrunAktifDegisti" in b_t)
-    check("panel_baslik_ekle", "girisDemirbasDuzenleBaslikEkleHtml" in b_t)
-    check("panel_kalici", "girisDemirbasUrunKaliciSil" in b_t)
+    check("panel_secim", "dem-panel-sec" in b_t and "dem-panel-tumunu-sec" in b_t)
+    check("panel_secilen_sil", "Seçilenleri sil" in b_t and "demirbas-liste-cikar" in b_t)
+    check("panel_cikar", "dem-panel-cikar" in b_t and "girisDemirbasPanelSatirCikar" in b_t)
+    check("panel_baslik", "girisDemirbasDuzenleBaslikHtml" in b_t)
     check("ayri_form_yok", "girisDemirbasYeniPanelGoster" not in b_t and "girisDemirbasMarkaFormKaydet" not in b_t)
     check("yeni_opt_yok", "__YENI__" not in b_t)
     check("auto_marka_yok", "girisDemirbasMarkaKaydetListe" not in b_t)
@@ -148,6 +149,7 @@ def test_fe_paths_url_map():
         "/giris/api/demirbas-urun",
         "/giris/api/demirbas-urun-cikar",
         "/giris/api/demirbas-urun-geri-getir",
+        "/giris/api/demirbas-liste-cikar",
         "/giris/api/demirbas-markalar",
         f"/giris/api/musteri/{MID}/demirbas",
     }
@@ -160,6 +162,7 @@ def test_fe_paths_url_map():
         "/giris/api/demirbas-urun": ("POST",),
         "/giris/api/demirbas-urun-cikar": ("POST",),
         "/giris/api/demirbas-urun-geri-getir": ("POST",),
+        "/giris/api/demirbas-liste-cikar": ("POST",),
         "/giris/api/demirbas-markalar": ("GET", "POST"),
         f"/giris/api/musteri/{MID}/demirbas": ("GET", "PUT"),
     }
