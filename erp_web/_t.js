@@ -29194,7 +29194,6 @@ var __girisDemirbasMarkaVarsayilan = 'Muhtelif';
 var __girisDemirbasMarkaTaban = ['Muhtelif'];
 var __girisDemirbasMarkalar = __girisDemirbasMarkaTaban.slice();
 var __girisDemirbasMarkalarOzel = [];
-var __girisDemirbasFormEscBag = null;
 
 function girisDemirbasApi(path, opts) {
     opts = opts || {};
@@ -29485,93 +29484,13 @@ function girisDemirbasEsyaAdi(tr) {
     return (sel && sel.value || '').trim();
 }
 
-function girisDemirbasFormEscKaldir() {
-    if (__girisDemirbasFormEscBag) {
-        document.removeEventListener('keydown', __girisDemirbasFormEscBag, true);
-        __girisDemirbasFormEscBag = null;
-    }
-}
-
-function girisDemirbasFormEscBag(hangi) {
-    girisDemirbasFormEscKaldir();
-    __girisDemirbasFormEscBag = function (ev) {
-        if (!ev) return;
-        if (ev.key === 'Escape') {
-            ev.preventDefault();
-            if (hangi === 'urun') girisDemirbasYeniPanelGizle();
-            else if (hangi === 'marka') girisDemirbasMarkaPanelGizle();
-        } else if (ev.key === 'Enter') {
-            var t = ev.target && ev.target.tagName ? String(ev.target.tagName).toLowerCase() : '';
-            if (t === 'textarea' || t === 'select') return;
-            ev.preventDefault();
-            if (hangi === 'urun') girisDemirbasYeniUrunKaydet();
-            else if (hangi === 'marka') girisDemirbasMarkaFormKaydet();
-        }
-    };
-    document.addEventListener('keydown', __girisDemirbasFormEscBag, true);
-}
-
-function girisDemirbasDigerPanelleriKapat(haric) {
-    if (haric !== 'urun') girisDemirbasYeniPanelGizle(true);
-    if (haric !== 'marka') girisDemirbasMarkaPanelGizle(true);
-    if (haric !== 'duzenle') {
-        var d = document.getElementById('giris_demirbas_duzenle_panel');
-        if (d) d.style.display = 'none';
-    }
-}
-
-function girisDemirbasYeniPanelGoster() {
-    girisDemirbasDigerPanelleriKapat('urun');
-    var pan = document.getElementById('giris_demirbas_yeni_panel');
-    if (!pan) return;
-    pan.style.display = '';
-    var adEl = document.getElementById('giris_demirbas_yeni_ad');
-    var grEl = document.getElementById('giris_demirbas_yeni_grup');
-    var msg = document.getElementById('giris_demirbas_yeni_mesaj');
-    if (adEl) adEl.value = '';
-    if (grEl) {
-        var html = '';
-        (__girisDemirbasGruplar || []).forEach(function (g) {
-            html += '<option value="' + girisDemirbasEsc(g) + '">' + girisDemirbasEsc(g) + '</option>';
-        });
-        grEl.innerHTML = html;
-    }
-    if (msg) { msg.style.display = 'none'; msg.innerHTML = ''; }
-    girisDemirbasFormEscBag('urun');
-    if (adEl) adEl.focus();
-}
-
-function girisDemirbasYeniPanelGizle(sessiz) {
-    var pan = document.getElementById('giris_demirbas_yeni_panel');
-    if (pan) pan.style.display = 'none';
-    if (!sessiz) girisDemirbasFormEscKaldir();
-}
-
-function girisDemirbasMarkaPanelGoster() {
-    girisDemirbasDigerPanelleriKapat('marka');
-    var pan = document.getElementById('giris_demirbas_marka_panel');
-    if (!pan) return;
-    pan.style.display = '';
-    var adEl = document.getElementById('giris_demirbas_marka_ad');
-    var msg = document.getElementById('giris_demirbas_marka_mesaj');
-    if (adEl) adEl.value = '';
-    if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
-    girisDemirbasFormEscBag('marka');
-    if (adEl) adEl.focus();
-}
-
-function girisDemirbasMarkaPanelGizle(sessiz) {
-    var pan = document.getElementById('giris_demirbas_marka_panel');
-    if (pan) pan.style.display = 'none';
-    if (!sessiz) girisDemirbasFormEscKaldir();
-}
-
-function girisDemirbasYeniUrunKaydet() {
-    var adEl = document.getElementById('giris_demirbas_yeni_ad');
-    var grEl = document.getElementById('giris_demirbas_yeni_grup');
-    var msg = document.getElementById('giris_demirbas_yeni_mesaj');
+function girisDemirbasPanelUrunEkle(btn) {
+    var wrap = btn && btn.closest ? btn.closest('.dem-duzenle-ekle') : null;
+    if (!wrap) return;
+    var grup = wrap.getAttribute('data-grup') || '';
+    var adEl = wrap.querySelector('.dem-duzenle-urun-ad');
+    var msg = wrap.querySelector('.dem-duzenle-msg');
     var ad = adEl ? String(adEl.value || '').trim() : '';
-    var grup = grEl ? String(grEl.value || '').trim() : '';
     if (msg) { msg.style.display = 'none'; msg.innerHTML = ''; }
     if (ad.length < 2 || ad.length > 40) {
         if (msg) { msg.style.display = ''; msg.textContent = 'Ürün adı 2–40 karakter olmalı'; }
@@ -29589,7 +29508,7 @@ function girisDemirbasYeniUrunKaydet() {
                     var es = String((j && j.esya) || ad);
                     msg.innerHTML = girisDemirbasEsc((j && j.mesaj) || 'Bu ürün gizlenmiş.') +
                         ' <a href="#" onclick="girisDemirbasUrunGeriGetir(' + JSON.stringify(es) +
-                        '); girisDemirbasYeniPanelGizle(); return false;">Geri getir</a>';
+                        '); return false;">Geri getir</a>';
                 } else {
                     msg.textContent = (j && j.mesaj) || 'Ürün eklenemedi';
                 }
@@ -29597,16 +29516,22 @@ function girisDemirbasYeniUrunKaydet() {
             return;
         }
         girisDemirbasKatalogUygula(j.katalog, j.gizli, __girisDemirbasGruplar);
-        girisDemirbasYeniPanelGizle();
         girisDemirbasMesaj((j.esya || ad) + ' eklendi', 'ok');
+        var again = null;
+        Array.prototype.forEach.call(document.querySelectorAll('.dem-duzenle-ekle'), function (el) {
+            if (el.getAttribute('data-grup') === grup) again = el.querySelector('.dem-duzenle-urun-ad');
+        });
+        if (again) { again.value = ''; again.focus(); }
     }).catch(function () {
         if (msg) { msg.style.display = ''; msg.textContent = 'Ürün eklenemedi'; }
     });
 }
 
-function girisDemirbasMarkaFormKaydet() {
-    var adEl = document.getElementById('giris_demirbas_marka_ad');
-    var msg = document.getElementById('giris_demirbas_marka_mesaj');
+function girisDemirbasPanelMarkaEkle(btn) {
+    var wrap = btn && btn.closest ? btn.closest('.dem-duzenle-marka-ekle') : null;
+    if (!wrap) return;
+    var adEl = wrap.querySelector('.dem-duzenle-marka-ad');
+    var msg = wrap.querySelector('.dem-duzenle-msg');
     var ad = adEl ? String(adEl.value || '').trim() : '';
     if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
     if (ad.length < 2 || ad.length > 40) {
@@ -29623,8 +29548,9 @@ function girisDemirbasMarkaFormKaydet() {
             return;
         }
         girisDemirbasMarkaUygula(j);
-        girisDemirbasMarkaPanelGizle();
         girisDemirbasMesaj(ad + ' eklendi', 'ok');
+        var again = document.querySelector('.dem-duzenle-marka-ekle .dem-duzenle-marka-ad');
+        if (again) { again.value = ''; again.focus(); }
     }).catch(function () {
         if (msg) { msg.style.display = ''; msg.textContent = 'Marka eklenemedi'; }
     });
@@ -29645,13 +29571,19 @@ function girisDemirbasDuzenlePanelAcKapa() {
     var pan = document.getElementById('giris_demirbas_duzenle_panel');
     if (!pan) return;
     if (pan.style.display === 'none' || !pan.style.display) {
-        girisDemirbasDigerPanelleriKapat('duzenle');
         pan.style.display = '';
         girisDemirbasDuzenlePanelDoldur();
-        girisDemirbasFormEscKaldir();
     } else {
         pan.style.display = 'none';
     }
+}
+
+function girisDemirbasDuzenleEkleSatirHtml(grup) {
+    return '<div class="dem-duzenle-ekle" data-grup="' + girisDemirbasEsc(grup) + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px;">' +
+        '<input type="text" class="dem-duzenle-urun-ad" maxlength="40" placeholder="Yeni ürün adı" style="flex:1;min-width:140px;" ' +
+        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();girisDemirbasPanelUrunEkle(this);return false;}">' +
+        '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasPanelUrunEkle(this); return false;">+ Ekle</button>' +
+        '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div></div>';
 }
 
 function girisDemirbasDuzenlePanelDoldur() {
@@ -29660,15 +29592,19 @@ function girisDemirbasDuzenlePanelDoldur() {
     var markaBox = document.getElementById('giris_demirbas_duzenle_markalar');
     if (!box) return;
     var byGrup = {};
+    (__girisDemirbasGruplar || []).forEach(function (g) { byGrup[g] = []; });
     (__girisDemirbasKatalog || []).forEach(function (it) {
         var g = it.grup || 'Diğer';
         if (!byGrup[g]) byGrup[g] = [];
         byGrup[g].push(it);
     });
     var html = '';
-    Object.keys(byGrup).forEach(function (g) {
+    var grupSirasi = (__girisDemirbasGruplar && __girisDemirbasGruplar.length)
+        ? __girisDemirbasGruplar.slice()
+        : Object.keys(byGrup);
+    grupSirasi.forEach(function (g) {
         html += '<div style="margin:6px 0 2px;font-weight:600;">' + girisDemirbasEsc(g) + '</div>';
-        byGrup[g].forEach(function (it) {
+        (byGrup[g] || []).forEach(function (it) {
             var kay = it.kaynak || 'hazir';
             html += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;">' +
                 '<span style="flex:1;">' + girisDemirbasEsc(it.esya) +
@@ -29677,6 +29613,7 @@ function girisDemirbasDuzenlePanelDoldur() {
                 '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasUrunCikar(' +
                 JSON.stringify(String(it.esya)) + '); return false;">Çıkar</button></div>';
         });
+        html += girisDemirbasDuzenleEkleSatirHtml(g);
     });
     box.innerHTML = html || '<div style="color:#90a4ae;">Liste boş</div>';
     if (gizBox) {
@@ -29703,6 +29640,11 @@ function girisDemirbasDuzenlePanelDoldur() {
                 '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasMarkaCikar(' +
                 JSON.stringify(String(m)) + '); return false;">Çıkar</button></div>';
         });
+        mh += '<div class="dem-duzenle-marka-ekle" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px;">' +
+            '<input type="text" class="dem-duzenle-marka-ad" maxlength="40" placeholder="Yeni marka adı" style="flex:1;min-width:140px;" ' +
+            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();girisDemirbasPanelMarkaEkle(this);return false;}">' +
+            '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasPanelMarkaEkle(this); return false;">+ Ekle</button>' +
+            '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div></div>';
         markaBox.innerHTML = mh;
     }
 }
