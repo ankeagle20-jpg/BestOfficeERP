@@ -117,8 +117,11 @@ def test_src_govde_ve_inline_tanim():
     # _t.js ayna
     tjs = (ROOT / "_t.js").read_text(encoding="utf-8")
     check("tjs_tanim", "function girisDemirbasYukle" in tjs)
+    check("tjs_ekler", "function girisDemirbasEklerPanelAc" in tjs and "demirbas-ekler" in tjs)
     ok, msg = _node_check("_t.js", tjs)
     check("tjs_syntax", ok, msg)
+    # inline HTML'de Ekler paneli (src'siz blok)
+    check("html_ekler_panel", "giris_demirbas_ekler_panel" in raw and 'data-demirbas-action="ekler-ac"' in raw)
 
 
 def test_playwright_typeof_global():

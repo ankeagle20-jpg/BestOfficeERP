@@ -3371,6 +3371,15 @@ def api_kyc_sozlesme():
             ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(musteri_id))
         except Exception:
             ctx["demirbas_rows"] = []
+        try:
+            from routes.giris_routes import _demirbas_ekler_read
+
+            ek_prefs, _ek_err = _demirbas_ekler_read(int(musteri_id))
+            if isinstance(ek_prefs, dict):
+                ctx["ek2_anahtar_kart"] = ek_prefs.get("anahtar_kart_sayisi")
+                ctx["ek2_hasar_aciklama"] = ek_prefs.get("hasar_aciklama") or ""
+        except Exception:
+            pass
         if onizle:
             html = docx_bytes_to_preview_html(render_sozlesme_docx_v2(ctx))
             indir_url = url_for(

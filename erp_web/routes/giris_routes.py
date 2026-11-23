@@ -9019,6 +9019,86 @@ def api_demirbas_seri_no():
     )
 
 
+@bp.route("/api/musteri/<int:mid>/demirbas-ekler", methods=["GET", "PUT"])
+@giris_gerekli
+def api_musteri_demirbas_ekler(mid: int):
+    """Ek-2 dipnot alanları (anahtar/kart + hasar). firma_ui_preferences; DDL yok.
+
+    Bayrak kapalı → 404. Tablo yok → 503 + mesaj (çökme yok).
+    """
+    from demirbas import demirbas_tablosu_aktif
+    from db import execute, firma_ui_preferences_table_exists
+
+    if not demirbas_tablosu_aktif(mid):
+        return jsonify({"ok": False, "mesaj": "demirbas kapali"}), 404
+
+    try:
+        tablo_var = bool(firma_ui_preferences_table_exists())
+    except Exception:
+        tablo_var = False
+    if not tablo_var:
+        return jsonify(
+            {
+                "ok": False,
+                "tablo_yok": True,
+                "mesaj": "Kayıt tablosu (firma_ui_preferences) hazır değil",
+            }
+        ), 503
+
+    pref_key = _demirbas_ekler_pref_key(mid)
+
+    if request.method == "GET":
+        prefs = _demirbas_ui_pref_get_firma(pref_key)
+        if prefs is None:
+            return jsonify(
+                {
+                    "ok": False,
+                    "tablo_yok": True,
+                    "mesaj": "Kayıt tablosu (firma_ui_preferences) hazır değil",
+                }
+            ), 503
+        prefs = prefs or {}
+        return jsonify(
+            {
+                "ok": True,
+                "anahtar_kart_sayisi": prefs.get("anahtar_kart_sayisi"),
+                "hasar_aciklama": prefs.get("hasar_aciklama") or "",
+            }
+        )
+
+    data = request.get_json(silent=True) or {}
+    err, norm = _demirbas_ekler_normalize_payload(data)
+    if err:
+        return jsonify({"ok": False, "mesaj": err}), 400
+    raw = json.dumps(norm, ensure_ascii=False)
+    try:
+        execute(
+            """
+            INSERT INTO firma_ui_preferences (pref_key, pref_json, updated_at)
+            VALUES (%s, %s::jsonb, NOW())
+            ON CONFLICT (pref_key) DO UPDATE SET
+                pref_json = EXCLUDED.pref_json,
+                updated_at = NOW()
+            """,
+            (pref_key, raw),
+        )
+    except Exception:
+        return jsonify(
+            {
+                "ok": False,
+                "tablo_yok": True,
+                "mesaj": "Kayıt yazılamadı (firma_ui_preferences)",
+            }
+        ), 503
+    return jsonify(
+        {
+            "ok": True,
+            "anahtar_kart_sayisi": norm.get("anahtar_kart_sayisi"),
+            "hasar_aciklama": norm.get("hasar_aciklama") or "",
+        }
+    )
+
+
 @bp.route("/api/musteri/<int:mid>/demirbas", methods=["GET", "PUT"])
 @giris_gerekli
 def api_musteri_demirbas(mid: int):
@@ -10470,6 +10550,45 @@ def _sozlesme_no_oner(tur_raw: str) -> str:
     return f"{prefix}{tarih_kod}-{sayac}"
 
 
+def _demirbas_ekler_pref_key(mid: int) -> str:
+    return f"demirbas_ek:{int(mid)}"
+
+
+def _demirbas_ekler_normalize_payload(data: dict) -> tuple[str | None, dict]:
+    """PUT gövdesi doğrula. Dönüş: (hata_mesajı|None, normalized)."""
+    from sozlesme_sablon_v2 import _sanitize_ek2_hasar
+
+    if not isinstance(data, dict):
+        return "geçersiz gövde", {}
+    raw_sayi = data.get("anahtar_kart_sayisi", None)
+    if raw_sayi is None or raw_sayi == "":
+        sayi = None
+    else:
+        try:
+            sayi = int(raw_sayi)
+        except (TypeError, ValueError):
+            return "anahtar/kart sayısı 0–20 olmalı", {}
+        if sayi < 0 or sayi > 20:
+            return "anahtar/kart sayısı 0–20 olmalı", {}
+    hasar = _sanitize_ek2_hasar(data.get("hasar_aciklama") or "", max_len=500)
+    return None, {"anahtar_kart_sayisi": sayi, "hasar_aciklama": hasar}
+
+
+def _demirbas_ekler_read(mid: int) -> tuple[dict | None, str | None]:
+    """firma_ui_preferences oku. Tablo yok → (None, mesaj); aksi (prefs, None)."""
+    try:
+        from db import firma_ui_preferences_table_exists
+
+        if not firma_ui_preferences_table_exists():
+            return None, "Kayıt tablosu (firma_ui_preferences) hazır değil"
+    except Exception:
+        return None, "Kayıt tablosu (firma_ui_preferences) hazır değil"
+    prefs = _demirbas_ui_pref_get_firma(_demirbas_ekler_pref_key(mid))
+    if prefs is None:
+        return None, "Kayıt tablosu (firma_ui_preferences) hazır değil"
+    return prefs or {}, None
+
+
 def _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw: str, sozlesme_no: str):
     """v2 doldurma bağlamı (DB yazmaz)."""
     from sozlesme_sablon_v2 import build_fill_ctx
@@ -10498,6 +10617,14 @@ def _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw: str, sozlesme_no: str):
         ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(mid))
     except Exception:
         ctx["demirbas_rows"] = []
+    # Ek-2 dipnot: anahtar/hasar (yalnızca okuma; yoksa çizgi)
+    try:
+        ek_prefs, _err = _demirbas_ekler_read(int(mid))
+        if isinstance(ek_prefs, dict):
+            ctx["ek2_anahtar_kart"] = ek_prefs.get("anahtar_kart_sayisi")
+            ctx["ek2_hasar_aciklama"] = ek_prefs.get("hasar_aciklama") or ""
+    except Exception:
+        pass
     return ctx
 
 

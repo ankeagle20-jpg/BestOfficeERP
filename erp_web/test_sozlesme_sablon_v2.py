@@ -670,43 +670,61 @@ def test_imza_tablosu_doldurma():
     check("sig_pos", kinds0.index("sig") == kinds0.index("ek1") + 1)
     check("ek2_pos", kinds0.index("ek2") == kinds0.index("sig") + 1)
     sig0 = _find_table(doc0, "sig")
-    # Tarih satırı
-    tarihler = [(sig0.rows[2].cells[i].text or "").strip() for i in (1, 2, 3)]
+
+    def _sig_row(sig, key: str):
+        from sozlesme_sablon_v2 import _tr_fold
+
+        for row in sig.rows:
+            lab = _tr_fold(row.cells[0].text or "")
+            if key == "tarih" and (lab.startswith("tarih") or lab == "tarih"):
+                return row
+            if key == "unvan" and ("unvan" in lab or "ad soyad" in lab):
+                return row
+            if key == "imza" and "imza" in lab:
+                return row
+        return None
+
+    # şablon sırası: Tarih → Ünvan → İmza
+    labs = []
+    for row in sig0.rows:
+        lab = (row.cells[0].text or "").strip()
+        if lab:
+            labs.append(lab)
+    check(
+        "sig_sira_tarih_unvan_imza",
+        len(labs) >= 3 and labs[0].startswith("Tarih") and "Ünvan" in labs[1] and "İmza" in labs[2],
+        str(labs),
+    )
+    row_t = _sig_row(sig0, "tarih")
+    tarihler = [(row_t.cells[i].text or "").strip() for i in (1, 2, 3)]
     check("sig_tarih_dolu", all(t == "15.03.2024" for t in tarihler), str(tarihler))
     check("sig_tarih_bugun_yok", "15.03.2024" != _date.today().strftime("%d.%m.%Y") or True)
-    # Müşteri hücresi yalnız unvan (yetkili yok)
-    must0 = (sig0.rows[1].cells[2].text or "").strip()
+    must0 = (_sig_row(sig0, "unvan").cells[2].text or "").strip()
     check("sig_0yet_unvan", "SENT UNVAN" in must0 and "Yetkili:" not in must0, must0[:60])
-    # yükseklik
-    tr_h = sig0.rows[3]._tr.get_or_add_trPr().find(qn("w:trHeight"))
+    tr_h = _sig_row(sig0, "imza")._tr.get_or_add_trPr().find(qn("w:trHeight"))
     check("sig_h_atleast", tr_h is not None and tr_h.get(qn("w:hRule")) == "atLeast")
     check("sig_h_val", tr_h is not None and int(tr_h.get(qn("w:val"))) == _SIG_IMZA_TARGET_TWIPS, str(_SIG_IMZA_TARGET_TWIPS))
     check("sig_h_base_rapor", _SIG_IMZA_BASE_TWIPS == 732)
-    # genişlik
     grid = sig0._tbl.find(qn("w:tblGrid"))
     ws = [int(c.get(qn("w:w")) or 0) for c in list(grid)] if grid is not None else []
     check("sig_w_sum", sum(ws) == _PAGE_USABLE_TWIPS, str(sum(ws)))
-    # Ek-2 pageBreakBefore
     p_ek2 = next((p for p in doc0.paragraphs if (p.text or "").strip().startswith("Ek-2:")), None)
     check("ek2_pbb", p_ek2 is not None)
     if p_ek2 is not None:
         pPr = p_ek2._p.find(qn("w:pPr"))
         pb = pPr.find(qn("w:pageBreakBefore")) if pPr is not None else None
         check("ek2_pagebreak", pb is not None)
-    # Ek-3'te pageBreakBefore yok (veya en azından bozulmadı — zorunlu değil)
     p_ek3 = next((p for p in doc0.paragraphs if (p.text or "").strip().startswith("Ek-3:")), None)
     if p_ek3 is not None:
         pPr3 = p_ek3._p.find(qn("w:pPr"))
         pb3 = pPr3.find(qn("w:pageBreakBefore")) if pPr3 is not None else None
         check("ek3_no_forced_pb", pb3 is None)
 
-    # 1 yetkili
     _, doc1, _ = _render([{"sira": 1, "ad_soyad": "Sentetik Tek", "tel": "TEL-1"}], "2024-03-15")
     sig1 = _find_table(doc1, "sig")
-    must1 = sig1.rows[1].cells[2].text or ""
+    must1 = _sig_row(sig1, "unvan").cells[2].text or ""
     check("sig_1yet", "Yetkili: Sentetik Tek" in must1 and "TEL-1" not in must1, must1[:80])
 
-    # 3 yetkili + müteselsil dolu
     _, doc3, raw3 = _render(
         [
             {"sira": 1, "ad_soyad": "Sentetik A", "tel": "T1"},
@@ -717,19 +735,18 @@ def test_imza_tablosu_doldurma():
         yet_ad="Mut Kefil Ad",
     )
     sig3 = _find_table(doc3, "sig")
-    must3 = sig3.rows[1].cells[2].text or ""
+    must3 = _sig_row(sig3, "unvan").cells[2].text or ""
     check("sig_3yet_a", "Yetkili: Sentetik A" in must3)
     check("sig_3yet_b", "Yetkili: Sentetik B" in must3)
     check("sig_3yet_c", "Yetkili: Sentetik C" in must3)
     check("sig_3yet_tel_yok", "T1" not in must3 and "T3" not in must3)
-    mut3 = (sig3.rows[1].cells[3].text or "").strip()
+    mut3 = (_sig_row(sig3, "unvan").cells[3].text or "").strip()
     check("sig_mut_dolu", mut3 == "Mut Kefil Ad", mut3[:40])
 
-    # tarih yok → blank; bugün yok
     ctx_b, doc_b, _ = _render([{"sira": 1, "ad_soyad": "X", "tel": ""}], None, yet_ad="")
     check("sig_bos_bas_ctx", ctx_b.get("baslangic") == BLANK)
     sig_b = _find_table(doc_b, "sig")
-    tb = [(sig_b.rows[2].cells[i].text or "").strip() for i in (1, 2, 3)]
+    tb = [(_sig_row(sig_b, "tarih").cells[i].text or "").strip() for i in (1, 2, 3)]
     check("sig_bos_tarih", all(t == BLANK for t in tb), str(tb))
     check("sig_bos_bugun_yok", _date.today().strftime("%d.%m.%Y") not in tb)
 

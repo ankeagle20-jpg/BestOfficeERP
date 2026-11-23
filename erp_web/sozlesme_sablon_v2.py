@@ -378,6 +378,9 @@ def build_fill_ctx(
         "yetkili_tc": yet_tc or BLANK,
         "yetkili_kisiler": yet_hucre,
         "yetkili_adlari": yet_ads,
+        # Ek-2 dipnot (varsayılan boş → çizgi); route doldurabilir
+        "ek2_anahtar_kart": None,
+        "ek2_hasar_aciklama": "",
         "hizmet_turu": ht,
         "baslangic": bas_s or BLANK,
         "bitis": bit_s or BLANK,
@@ -434,10 +437,11 @@ def _fill_paragraph_text(text: str, ctx: dict) -> str:
     if "Sözleşme [" in t and "nüsha" in t:
         t = _replace_first(t, "[ ]", ctx["nusha"])
 
-    if "Teslim tarihi:" in t:
-        t = _replace_first(t, "[ ]", BLANK)  # teslim tarihi bilinmiyor
-        t = _replace_first(t, "[ ]", BLANK)  # anahtar
-        t = _replace_first(t, "[ ]", BLANK)  # hasar
+    # Ek-2 dipnot: _fill_ek2_dipnot ile doldurulur (burada [ ] ezme)
+    if "Teslim tarihi:" in t and (
+        "anahtar" in t.casefold() or "kart" in t.casefold()
+    ):
+        return t
 
     if "teminat bedeli" in t.lower() or "Depozito/teminat" in t or "depozito/teminat" in t:
         # "Kalan tutar ... [ ] iş günü"
@@ -660,12 +664,9 @@ def apply_sig_table_layout(table) -> list[int]:
 
 
 def _fill_signature_table(table, ctx: dict) -> None:
-    """İmza tablosu (Ek-1 sonrası): Ünvan / Tarih / İmza satırları."""
-    if len(table.rows) < 4 or len(table.columns) < 4:
+    """İmza tablosu: satır ETİKETİNE göre (Tarih / Ünvan / İmza)."""
+    if len(table.columns) < 4:
         return
-    # R1: Ünvan / Ad Soyad — OFİSBİR dokunma; MÜŞTERİ unvan+yetkililer; MÜTESELSİL mevcut
-    row_u = table.rows[1]
-    cells_u = row_u.cells
     unvan = ctx.get("musteri_unvan") or BLANK
     ads = list(ctx.get("yetkili_adlari") or [])
     musteri_lines = [unvan] if unvan and unvan != BLANK else []
@@ -675,19 +676,99 @@ def _fill_signature_table(table, ctx: dict) -> None:
             musteri_lines.append(f"Yetkili: {a}")
     if not musteri_lines:
         musteri_lines = [BLANK]
-    _set_cell_text(cells_u[2], "\n".join(musteri_lines))
-    # Müteselsil: mevcut mantık (yetkili_ad)
-    _set_cell_text(cells_u[3], ctx.get("yetkili_ad") or BLANK)
-
-    # R2: Tarih — üç hücreye başlangıç tarihi (bugün basılmaz)
+    musteri_blok = "\n".join(musteri_lines)
     bas = ctx.get("baslangic") or BLANK
-    row_t = table.rows[2]
-    for ci in (1, 2, 3):
-        if ci < len(row_t.cells):
-            _set_cell_text(row_t.cells[ci], bas if bas else BLANK)
+    if not bas:
+        bas = BLANK
 
-    # R3: İmza / Kaşe yüksekliği 2.5× (atLeast)
-    _set_row_height_at_least(table.rows[3], _SIG_IMZA_TARGET_TWIPS)
+    for row in table.rows:
+        if len(row.cells) < 4:
+            continue
+        lab = _tr_fold(row.cells[0].text or "")
+        if not lab:
+            continue
+        if lab.startswith("tarih") or lab == "tarih":
+            for ci in (1, 2, 3):
+                _set_cell_text(row.cells[ci], bas)
+        elif "unvan" in lab or "ad soyad" in lab:
+            # OFİSBİR (cells[1]) dokunma
+            _set_cell_text(row.cells[2], musteri_blok)
+            _set_cell_text(row.cells[3], ctx.get("yetkili_ad") or BLANK)
+        elif "imza" in lab:
+            _set_row_height_at_least(row, _SIG_IMZA_TARGET_TWIPS)
+
+
+def _sanitize_ek2_hasar(text: str, *, max_len: int = 500) -> str:
+    """Hasar açıklaması: HTML etiketleri + kontrol karakteri temizle; \\n koru; uzunluk kes."""
+    s = str(text or "")
+    # yalnızca HTML benzeri etiketler (harf ile başlayan); a < b korunur
+    s = re.sub(r"</?[A-Za-z][^>]*>", "", s)
+    out: list[str] = []
+    for ch in s:
+        o = ord(ch)
+        if ch in ("\n", "\t") or o >= 32:
+            out.append(ch)
+        elif ch == "\r":
+            continue
+    cleaned = "".join(out).replace("\r\n", "\n").replace("\r", "\n")
+    # XML kaçışı python-docx text API ile; burada yalnızca uzunluk
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len]
+    return cleaned.strip()
+
+
+def _set_para_text_multiline(paragraph, text: str) -> None:
+    """Paragrafa metin yaz; \\n → soft line break (w:br)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    lines = (text or "").split("\n")
+    # mevcut run'ları temizle
+    for child in list(paragraph._p):
+        if child.tag.endswith("}r"):
+            paragraph._p.remove(child)
+    if not lines:
+        paragraph.add_run("")
+        return
+    run = paragraph.add_run(lines[0])
+    for line in lines[1:]:
+        br = OxmlElement("w:br")
+        run._r.append(br)
+        run2 = paragraph.add_run(line)
+        run = run2
+
+
+def _fill_ek2_dipnot(doc, ctx: dict) -> bool:
+    """Ek-2 dipnot: teslim tarihi / anahtar / hasar. Bulunursa True."""
+    for p in doc.paragraphs:
+        t = p.text or ""
+        if "Teslim tarihi:" not in t:
+            continue
+        if "anahtar" not in t.casefold() and "kart" not in t.casefold():
+            continue
+        bas = ctx.get("baslangic") or BLANK
+        if not bas:
+            bas = BLANK
+        ak = ctx.get("ek2_anahtar_kart")
+        if ak is None or ak == "":
+            anahtar_s = BLANK
+        else:
+            anahtar_s = str(ak).strip() or BLANK
+        hasar = _sanitize_ek2_hasar(ctx.get("ek2_hasar_aciklama") or "")
+        hasar_s = hasar if hasar else BLANK
+        # Şablon sonu sabit
+        suffix = (
+            "Taraflar, envanterin teslim anındaki durumu gösterdiğini kabul eder. "
+            "OFİSBİR: ____  MÜŞTERİ: ____"
+        )
+        head = (
+            f"Teslim tarihi: {bas}. "
+            f"Teslim edilen anahtar / kart sayısı: {anahtar_s}. "
+            f"Mevcut hasar veya eksiklikler: "
+        )
+        _set_para_text_multiline(p, head + hasar_s + ". " + suffix)
+        return True
+    return False
 
 
 def _ek2_clone_row(table, template_row) -> None:
@@ -1139,6 +1220,7 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
         new_t = _fill_paragraph_text(para.text, ctx)
         if new_t != para.text:
             _set_run_text_preserve(para, new_t)
+    _fill_ek2_dipnot(doc, ctx)
 
     for table in doc.tables:
         # Yeni şablon: Ek-1 → imza → Ek-2 (tanıma ile; indeks bağımsız)

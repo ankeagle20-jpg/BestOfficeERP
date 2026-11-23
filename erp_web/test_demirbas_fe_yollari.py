@@ -77,10 +77,15 @@ def _extract_fe_paths(block: str) -> list[str]:
         block,
     ):
         paths.append(f"{prefix}/musteri/{MID}/demirbas")
+    if re.search(
+        r"GIRIS_DEMIRBAS_API\s*\+\s*'/musteri/'\s*\+\s*encodeURIComponent\(mid\)\s*\+\s*'/demirbas-ekler'",
+        block,
+    ):
+        paths.append(f"{prefix}/musteri/{MID}/demirbas-ekler")
     # beklenmeyen başka GIRIS_DEMIRBAS_API + '...' sabitleri
     for lit in re.findall(r"GIRIS_DEMIRBAS_API\s*\+\s*'([^']+)'", block):
         base = lit.split("?")[0]
-        if base in known or base in ("/musteri/", "/demirbas"):
+        if base in known or base in ("/musteri/", "/demirbas", "/demirbas-ekler"):
             continue
         if base.startswith("/musteri/"):
             continue
@@ -152,6 +157,7 @@ def test_fe_paths_url_map():
         "/giris/api/demirbas-liste-cikar",
         "/giris/api/demirbas-markalar",
         f"/giris/api/musteri/{MID}/demirbas",
+        f"/giris/api/musteri/{MID}/demirbas-ekler",
     }
     check("fe_path_beklenen", expect.issubset(set(paths)), str(paths))
     app = _app()
@@ -165,6 +171,7 @@ def test_fe_paths_url_map():
         "/giris/api/demirbas-liste-cikar": ("POST",),
         "/giris/api/demirbas-markalar": ("GET", "POST"),
         f"/giris/api/musteri/{MID}/demirbas": ("GET", "PUT"),
+        f"/giris/api/musteri/{MID}/demirbas-ekler": ("GET", "PUT"),
     }
     for p in paths:
         methods = method_hints.get(p, ("GET", "POST", "PUT"))
