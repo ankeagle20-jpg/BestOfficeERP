@@ -539,6 +539,58 @@ def demirbas_marka_normalize(raw) -> str:
     return s
 
 
+def demirbas_marka_model_birlestir(marka, model) -> str:
+    """Kayıt metni: marka + (model doluysa ' ' + model). Muhtelif+boş → Muhtelif."""
+    brand = str(marka or "").strip()
+    if not brand or demirbas_tr_casefold(brand) == "muhtelif":
+        brand = DEMIRBAS_MARKA_VARSAYILAN
+    mod = str(model or "").strip()
+    if not mod:
+        return brand
+    return f"{brand} {mod}"
+
+
+def demirbas_marka_model_parcala(
+    raw,
+    *,
+    markalar: list | None = None,
+) -> tuple[str, str, bool]:
+    """(marka, model, bilinmeyen). En uzun bilinen marka öneki; yoksa tam metin marka.
+
+    bilinmeyen=True → marka listede yok (satır seçeneği olarak korunmalı).
+    """
+    s = str(raw or "").strip()
+    if not s or demirbas_tr_casefold(s) == "muhtelif":
+        return DEMIRBAS_MARKA_VARSAYILAN, "", False
+    liste = list(DEMIRBAS_MARKA_LISTESI_TABAN) + list(markalar or [])
+    # uzun fold önce
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for m in liste:
+        t = str(m or "").strip()
+        if not t:
+            continue
+        k = demirbas_tr_casefold(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(DEMIRBAS_MARKA_VARSAYILAN if k == "muhtelif" else t)
+    uniq.sort(key=lambda x: len(demirbas_tr_casefold(x)), reverse=True)
+    fs = demirbas_tr_casefold(s)
+    for brand in uniq:
+        fb = demirbas_tr_casefold(brand)
+        if fs == fb:
+            return brand, "", False
+        if fs.startswith(fb + " "):
+            acc = ""
+            for ch in s:
+                acc += ch
+                if demirbas_tr_casefold(acc) == fb:
+                    rest = s[len(acc) :].lstrip()
+                    return brand, rest, False
+    return s, "", True
+
+
 def demirbas_marka_adi_temizle(raw) -> str | None:
     """Kalıcı marka ekleme: 2–40 karakter, trim, HTML temiz. Muhtelif → None."""
     s = str(raw or "").strip()

@@ -189,9 +189,10 @@ def test_module_wire():
         not in (ROOT / "db.py").read_text(encoding="utf-8").split("def ensure_musteri_demirbas_table")[0],
     )
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    tjs = (ROOT / "_t.js").read_text(encoding="utf-8")
     check("ui_section", "giris_demirbas_section" in html)
     check("ui_adet_label", ">Adet</th>" in html and "Adet / Durum" not in html)
-    check("ui_marka_list", "giris_demirbas_marka_list" in html)
+    check("ui_marka_sel", "dem-marka-sel" in tjs and "dem-marka-model" in tjs)
     check("ui_after_grup2", html.find("giris_grup2_btn") < html.find("giris_demirbas_section"))
     scr = (ROOT / "scripts" / "ensure_musteri_demirbas.py").read_text(encoding="utf-8")
     check("script_seri", "musteri_demirbas_seri" in scr)
