@@ -127,8 +127,10 @@ def test_routes_wire():
     must = (ROOT / "routes" / "musteri_routes.py").read_text(encoding="utf-8")
     check("giris_import", "sozlesme_sablon_v2_aktif" in giris)
     check("giris_branch_mid", "sozlesme_sablon_v2_aktif(mid)" in giris)
+    check("giris_yetkililer_pass", "yetkililer=_yet_list" in giris or "yetkililer=_musteri_yetkililer" in giris)
     check("kyc_import", "sozlesme_sablon_v2_aktif" in must)
     check("kyc_branch_mid", "sozlesme_sablon_v2_aktif(musteri_id)" in must)
+    check("kyc_yetkililer_pass", "yetkililer=_yet_list" in must)
     check("eski_giris_baslik", "OFİSBİR HİZMET SÖZLEŞMESİ" in giris)
     check("eski_kyc_baslik", "HAZIR OFİS / SANAL OFİS" in must)
 
@@ -215,6 +217,146 @@ def test_module_exists():
     check("module_aktif_mid", "def sozlesme_sablon_v2_aktif(mid" in src)
     check("module_midler", "def sozlesme_sablon_v2_midler" in src)
     check("module_render", "def render_sozlesme_docx_v2" in src)
+    check("module_yetkili_hucre", "def yetkili_kisiler_hucre" in src)
+
+
+def _ek1_yetkili_deger(rows: list[tuple[str, str]]) -> str:
+    """Ek-1 «Yetkili Kişiler…» değer hücresi; yoksa ''."""
+    for a, b in rows:
+        lab = (a or "").casefold()
+        # fold İ/ı roughly
+        lab = lab.replace("ı", "i").replace("İ".casefold(), "i")
+        if "yetkili kisiler" in lab.replace("ş", "s").replace("Ş".casefold(), "s") or (
+            "yetkili" in lab and "cep" in lab
+        ):
+            return b or ""
+    return ""
+
+
+def _ek1_label_fold(a: str) -> str:
+    t = (a or "").replace("İ", "i").replace("I", "i").replace("ı", "i")
+    for x, y in (("ş", "s"), ("ğ", "g"), ("ü", "u"), ("ö", "o"), ("ç", "c")):
+        t = t.replace(x, y).replace(x.upper(), y)
+    return t.casefold()
+
+
+def test_ek1_yetkili_kisiler_sentetik():
+    """mid=867 bayrak bağlamı + SENTETİK yetkili (gerçek PII yok). Prod yazma yok."""
+    from sozlesme_sablon_v2 import (
+        BLANK,
+        build_fill_ctx,
+        render_sozlesme_docx_v2,
+        yetkili_kisiler_satirlari,
+        sozlesme_sablon_v2_path,
+    )
+    from docx import Document
+    from io import BytesIO
+
+    # Şablonda satır var mı
+    sablon = Document(str(sozlesme_sablon_v2_path()))
+    s_rows = _ek1_rows(sablon)
+    s_labs = [_ek1_label_fold(a) for a, _ in s_rows]
+    check(
+        "sablon_yetkili_satir",
+        any("yetkili kisiler" in x or ("yetkili" in x and "cep" in x) for x in s_labs),
+    )
+    # Ünvan satırının hemen altında
+    unvan_i = next((i for i, x in enumerate(s_labs) if "musteri unvani" in x), -1)
+    check("sablon_unvan_index", unvan_i >= 0, str(unvan_i))
+    if unvan_i >= 0 and unvan_i + 1 < len(s_labs):
+        nxt = s_labs[unvan_i + 1]
+        check(
+            "sablon_yetkili_unvan_alti",
+            "yetkili kisiler" in nxt or ("yetkili" in nxt and "cep" in nxt),
+            nxt[:60],
+        )
+
+    # Ortak sentetik müşteri iskeleti (mid 867; gerçek PII yok; kapı: 10-11 hane/e-posta yok)
+    base_m = {
+        "id": 867,
+        "name": "SENTETIK UNVAN AS",
+        "tax_number": "VN-SENT",
+        "address": "Sentetik Adres",
+        "phone": "TEL-KART",
+        "email": "sentetik-mail",
+        "guncel_kira_bedeli": 1000.0,
+        "rent_start_date": "2026-01-01",
+    }
+    base_k = {
+        "hizmet_turu": "Sanal Ofis",
+        "aylik_kira": 1000.0,
+        # KYC yetkili bilerek boş — liste senaryolarını bozmasın
+    }
+
+    def _render(yetkililer, kyc_extra=None):
+        k = dict(base_k)
+        if kyc_extra:
+            k.update(kyc_extra)
+        ctx = build_fill_ctx(
+            musteri=dict(base_m),
+            kyc=k,
+            sozlesme_no="TEST-867-YET",
+            sozlesme_tarihi="2026-01-01",
+            hizmet_turu="Sanal Ofis",
+            yetkililer=yetkililer,
+        )
+        doc = Document(BytesIO(render_sozlesme_docx_v2(ctx)))
+        rows = _ek1_rows(doc)
+        return ctx, rows, _ek1_yetkili_deger(rows), _ek1_blob(rows)
+
+    # --- 0 yetkili ---
+    ctx0, rows0, val0, blob0 = _render([])
+    check("yet0_hucre_blank", (ctx0.get("yetkili_kisiler") == BLANK) and (val0 == BLANK or val0 == ""), repr(val0)[:40])
+    check("yet0_diger_unvan", "sentetik unvan" in blob0)
+    # diğer Ek-1 satırları yerinde (başlangıç değeri + hizmet)
+    check(
+        "yet0_diger_baslangic",
+        "01.01.2026" in blob0 or "baslang" in blob0 or "ba\u015flang" in blob0,
+    )
+
+    # --- 1 yetkili ---
+    y1 = [{"id": 1, "sira": 1, "ad_soyad": "Sentetik Kisi A", "tel": "TEL-A1"}]
+    ctx1, rows1, val1, blob1 = _render(y1)
+    check("yet1_satir_sayisi", yetkili_kisiler_satirlari(y1) == ["Sentetik Kisi A – TEL-A1"])
+    check("yet1_hucre", "Sentetik Kisi A – TEL-A1" in (val1 or ""), repr(val1)[:80])
+    check("yet1_unvan_yerinde", "sentetik unvan" in blob1 and "vn-sent" in blob1)
+
+    # --- 3 yetkili (biri telefonsuz); sira ile sıra ---
+    y3 = [
+        {"id": 10, "sira": 2, "ad_soyad": "Sentetik Kisi B", "tel": "TEL-B2"},
+        {"id": 11, "sira": 1, "ad_soyad": "Sentetik Kisi C", "tel": ""},
+        {"id": 12, "sira": 3, "ad_soyad": "Sentetik Kisi D", "tel": "TEL-D3"},
+    ]
+    lines3 = yetkili_kisiler_satirlari(y3)
+    check("yet3_sira", lines3 == [
+        "Sentetik Kisi C",
+        "Sentetik Kisi B – TEL-B2",
+        "Sentetik Kisi D – TEL-D3",
+    ], str(lines3))
+    ctx3, rows3, val3, blob3 = _render(y3)
+    check("yet3_hucre_c", "Sentetik Kisi C" in (val3 or "") and "TEL-B2" in (val3 or ""))
+    check("yet3_telefonsuz_yalniz_ad", "Sentetik Kisi C –" not in (val3 or ""))
+    check("yet3_diger_kep", "kep" in blob3 or "e-posta" in blob3 or "e-posta" in blob3)
+
+    # --- tekrar: aynı kişi listede 2 kez + KYC aynı ad (liste dolu → KYC yok sayılır; liste içi dedupe) ---
+    ydup = [
+        {"id": 20, "sira": 1, "ad_soyad": "Sentetik Dup", "tel": "TEL-DUP"},
+        {"id": 21, "sira": 2, "ad_soyad": "Sentetik Dup", "tel": "TEL-DUP"},
+    ]
+    lines_d = yetkili_kisiler_satirlari(
+        ydup,
+        kyc={"yetkili_adsoyad": "Sentetik Dup", "yetkili_tel": "TEL-DUP"},
+    )
+    check("yet_dedupe_liste", lines_d == ["Sentetik Dup – TEL-DUP"], str(lines_d))
+    # Liste boşken KYC fallback + aynı kişi tekrar yazılmaz
+    lines_kyc = yetkili_kisiler_satirlari(
+        [],
+        kyc={"yetkili_adsoyad": "Sentetik Kyc", "yetkili_tel": "TEL-KYC"},
+    )
+    check("yet_kyc_fallback", lines_kyc == ["Sentetik Kyc – TEL-KYC"], str(lines_kyc))
+    _, _, val_d, blob_d = _render(ydup)
+    check("yet_dedupe_docx", (val_d or "").count("Sentetik Dup") == 1, repr(val_d)[:80])
+    check("yet_diger_hizmet", "sanal ofis" in blob_d or "secilen hizmetler" in blob_d)
 
 
 def _ek1_rows(doc) -> list[tuple[str, str]]:
@@ -326,6 +468,7 @@ def main() -> int:
     test_sablon_file()
     test_fill_and_ekler()
     test_ek1_senaryolar()
+    test_ek1_yetkili_kisiler_sentetik()
     test_routes_wire()
     test_mid867_preview_liste()
     test_module_exists()

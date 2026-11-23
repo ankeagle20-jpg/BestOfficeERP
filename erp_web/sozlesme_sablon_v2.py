@@ -171,6 +171,76 @@ def _or_blank(v: Any) -> str:
     return t if t else BLANK
 
 
+def _yetkili_fold(s: str) -> str:
+    return _tr_fold(str(s or "").strip())
+
+
+def yetkili_kisiler_satirlari(
+    yetkililer: list | None = None,
+    *,
+    kyc: dict | None = None,
+    musteri: dict | None = None,
+) -> list[str]:
+    """Yetkili satırları: «Ad Soyad – telefon» (tel yoksa yalnız ad). Tekrarlar elenir.
+
+    Öncelik: musteri_yetkililer listesi (kart «yetkililer» sekmesi /api/musteri).
+    Liste boşsa KYC/customers düz alanına düşülür (tek kişi).
+    """
+    k = kyc or {}
+    m = musteri or {}
+    rows = [r for r in (yetkililer or []) if isinstance(r, dict)]
+    # musteri dict içinden de gelebilir
+    if not rows and isinstance(m.get("yetkililer"), list):
+        rows = [r for r in m.get("yetkililer") or [] if isinstance(r, dict)]
+
+    out: list[str] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _ekle(ad: str, tel: str) -> None:
+        ad_t = _s(ad)
+        if not ad_t:
+            return
+        tel_t = _s(tel)
+        key = (_yetkili_fold(ad_t), _yetkili_fold(tel_t))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(f"{ad_t} – {tel_t}" if tel_t else ad_t)
+
+    if rows:
+        # Tablodaki sıra (sira, id); ikisi de yoksa ad sırası
+        def _sk(r: dict):
+            try:
+                sira = int(r.get("sira") or 0)
+            except (TypeError, ValueError):
+                sira = 0
+            try:
+                rid = int(r.get("id") or 0)
+            except (TypeError, ValueError):
+                rid = 0
+            return (sira, rid if rid else 10**12, _yetkili_fold(r.get("ad_soyad") or ""))
+
+        rows = sorted(rows, key=_sk)
+        for r in rows:
+            _ekle(r.get("ad_soyad"), r.get("tel"))
+    else:
+        # Liste boş: KYC / customers düz yetkili alanları (tek kişi)
+        ad = _s(k.get("yetkili_adsoyad")) or _s(m.get("yetkili_kisi")) or _s(m.get("yetkili_ad"))
+        tel = _s(k.get("yetkili_tel")) or _s(m.get("phone"))
+        _ekle(ad, tel)
+    return out
+
+
+def yetkili_kisiler_hucre(
+    yetkililer: list | None = None,
+    *,
+    kyc: dict | None = None,
+    musteri: dict | None = None,
+) -> str:
+    lines = yetkili_kisiler_satirlari(yetkililer, kyc=kyc, musteri=musteri)
+    return "\n".join(lines) if lines else BLANK
+
+
 def build_fill_ctx(
     *,
     musteri: dict | None = None,
@@ -178,6 +248,7 @@ def build_fill_ctx(
     sozlesme_no: str | None = None,
     sozlesme_tarihi=None,
     hizmet_turu: str | None = None,
+    yetkililer: list | None = None,
 ) -> dict:
     """Müşteri + KYC + firma_profil → şablon doldurma bağlamı (PII rapora yazılmaz)."""
     m = musteri or {}
@@ -271,6 +342,11 @@ def build_fill_ctx(
     firma_vn = _s(firma.get("vergi_no"))
     firma_vd_vn = " / ".join([x for x in (firma_vd, firma_vn) if x]) or BLANK
 
+    yet_list = yetkililer
+    if yet_list is None and isinstance(m.get("yetkililer"), list):
+        yet_list = m.get("yetkililer")
+    yet_hucre = yetkili_kisiler_hucre(yet_list, kyc=k, musteri=m)
+
     return {
         "sozlesme_no": _s(sozlesme_no) or _s(k.get("sozlesme_no")),
         "firma_adres": _s(firma.get("adres")) or BLANK,
@@ -284,6 +360,7 @@ def build_fill_ctx(
         "musteri_email": email or BLANK,
         "yetkili_ad": yet_ad or BLANK,
         "yetkili_tc": yet_tc or BLANK,
+        "yetkili_kisiler": yet_hucre,
         "hizmet_turu": ht,
         "baslangic": bas_s or BLANK,
         "bitis": bit_s or BLANK,
@@ -423,6 +500,7 @@ def _fill_table_ek1(table, ctx: dict) -> None:
         return
     mapping = {
         "musteri unvani": f"{ctx['musteri_unvan']} / {ctx['musteri_tc_vergi']}",
+        "yetkili kisiler": ctx.get("yetkili_kisiler") or BLANK,
         "sozlesme baslangic": ctx.get("baslangic_bitis")
         or f"{ctx['baslangic']} / {ctx['bitis']}",
         "secilen hizmetler": ctx["hizmet_turu"],

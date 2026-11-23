@@ -10514,12 +10514,18 @@ def sozlesme_olustur(mid):
             except Exception:
                 kyc_row = None
             # Belge başlangıç: kart/KYC (rent_start_date / sozlesme_tarihi); bugün basılmaz
+            # Yetkililer: musteri_yetkililer (kart sekmesi); boşsa KYC düz alan
+            try:
+                _yet_list = _musteri_yetkililer_listesi(mid)
+            except Exception:
+                _yet_list = []
             ctx = build_fill_ctx(
                 musteri=musteri,
                 kyc=kyc_row,
                 sozlesme_no=sozlesme_no,
                 sozlesme_tarihi=None,
                 hizmet_turu=tur_raw or None,
+                yetkililer=_yet_list,
             )
             try:
                 ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(mid))
