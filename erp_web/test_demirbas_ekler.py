@@ -99,8 +99,20 @@ def test_dipnot_doldur():
     check("dip_anahtar", "anahtar / kart sayısı: 2" in dip or "kart sayısı: 2" in dip, dip[:160])
     check("dip_hasar_nl", "çizik" in dip and "ikinci satır" in dip, dip[:200])
     check("dip_amp", "&" in dip)
-    check("dip_suffix", "OFİSBİR:" in dip and "MÜŞTERİ:" in dip)
+    check("dip_no_ofisbir_para", "OFİSBİR:" not in dip and "MÜŞTERİ:" not in dip, dip[-80:])
     check("dip_taraflar", "envanterin teslim anındaki durumu" in dip)
+    # 2 hücreli imza tablosu
+    from sozlesme_sablon_v2 import _is_ek2_teslim_imza_table, _PAGE_USABLE_TWIPS
+    from docx.oxml.ns import qn as _qn
+
+    imza_t = next((t for t in doc.tables if _is_ek2_teslim_imza_table(t)), None)
+    check("dip_imza_tbl", imza_t is not None)
+    if imza_t is not None:
+        check("dip_imza_ofis", "OFİSBİR" in (imza_t.rows[0].cells[0].text or ""))
+        check("dip_imza_mus", "MÜŞTERİ" in (imza_t.rows[0].cells[1].text or ""))
+        grid = imza_t._tbl.find(_qn("w:tblGrid"))
+        ws = [int(c.get(_qn("w:w")) or 0) for c in list(grid)] if grid is not None else []
+        check("dip_imza_w_sum", sum(ws) == _PAGE_USABLE_TWIPS, str(ws))
 
     paras = [p for p in doc.paragraphs if "Teslim tarihi:" in (p.text or "")]
     check("dip_para", bool(paras))

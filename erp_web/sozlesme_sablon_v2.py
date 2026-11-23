@@ -739,7 +739,7 @@ def _set_para_text_multiline(paragraph, text: str) -> None:
 
 
 def _fill_ek2_dipnot(doc, ctx: dict) -> bool:
-    """Ek-2 dipnot: teslim tarihi / anahtar / hasar. Bulunursa True."""
+    """Ek-2 dipnot: teslim tarihi / anahtar / hasar. OFİSBİR/MÜŞTERİ artık 2 hücreli tabloda."""
     for p in doc.paragraphs:
         t = p.text or ""
         if "Teslim tarihi:" not in t:
@@ -756,19 +756,111 @@ def _fill_ek2_dipnot(doc, ctx: dict) -> bool:
             anahtar_s = str(ak).strip() or BLANK
         hasar = _sanitize_ek2_hasar(ctx.get("ek2_hasar_aciklama") or "")
         hasar_s = hasar if hasar else BLANK
-        # Şablon sonu sabit
-        suffix = (
-            "Taraflar, envanterin teslim anındaki durumu gösterdiğini kabul eder. "
-            "OFİSBİR: ____  MÜŞTERİ: ____"
-        )
+        # İmza çizgileri paragrafta değil; ayrı 2 sütunlu tabloda
+        suffix = "Taraflar, envanterin teslim anındaki durumu gösterdiğini kabul eder."
         head = (
             f"Teslim tarihi: {bas}. "
             f"Teslim edilen anahtar / kart sayısı: {anahtar_s}. "
             f"Mevcut hasar veya eksiklikler: "
         )
         _set_para_text_multiline(p, head + hasar_s + ". " + suffix)
+        # dipnot + imza tablosu aynı sayfada kalsın
+        _set_para_keep_next(p, True)
         return True
     return False
+
+
+def _is_ek2_teslim_imza_table(table) -> bool:
+    """Ek-2 dipnot altı OFİSBİR | MÜŞTERİ (2 hücre) tablosu."""
+    if len(table.rows) < 1 or len(table.columns) != 2:
+        return False
+    a = _tr_fold(table.rows[0].cells[0].text or "")
+    b = _tr_fold(table.rows[0].cells[1].text or "")
+    return a.startswith("ofisbir") and b.startswith("musteri")
+
+
+_EK2_IMZA_BEFORE_TWIPS = 240  # ~12 pt ≈ bir satır boşluk (boş paragraf yerine)
+
+
+def _set_para_spacing_before(paragraph, twips: int) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    sp = p_pr.find(qn("w:spacing"))
+    if sp is None:
+        sp = OxmlElement("w:spacing")
+        p_pr.append(sp)
+    sp.set(qn("w:before"), str(int(twips)))
+
+
+def _set_para_keep_lines(paragraph, on: bool = True) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    kl = p_pr.find(qn("w:keepLines"))
+    if on:
+        if kl is None:
+            p_pr.append(OxmlElement("w:keepLines"))
+    elif kl is not None:
+        p_pr.remove(kl)
+
+
+def _set_table_borders_nil(table) -> None:
+    """Kenarlıksız tablo (nil)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._tbl.insert(0, tbl_pr)
+    borders = tbl_pr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = borders.find(qn(f"w:{edge}"))
+        if el is None:
+            el = OxmlElement(f"w:{edge}")
+            borders.append(el)
+        el.set(qn("w:val"), "nil")
+        el.set(qn("w:sz"), "0")
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), "auto")
+
+
+def apply_ek2_teslim_imza_layout(table) -> list[int]:
+    """2 eşit sütun, çizgisiz, spacing before ~12pt, cantSplit, 9pt."""
+    if not _is_ek2_teslim_imza_table(table):
+        return []
+    half = _PAGE_USABLE_TWIPS // 2
+    widths = [half, _PAGE_USABLE_TWIPS - half]
+    _set_table_grid_widths(table, widths)
+    _set_table_borders_nil(table)
+    for row in table.rows:
+        _set_row_cant_split(row)
+        for ci, cell in enumerate(row.cells):
+            for pi, p in enumerate(cell.paragraphs):
+                # bir satır boşluk: ilk hücre ilk paragrafına before
+                if ci == 0 and pi == 0:
+                    _set_para_spacing_before(p, _EK2_IMZA_BEFORE_TWIPS)
+                _set_para_keep_lines(p, True)
+                try:
+                    p.alignment = 0  # WD_ALIGN_PARAGRAPH.LEFT
+                except Exception:
+                    pass
+    _apply_table_font_pt_safe(table, _EK2_FONT_PT)
+    # metin sabit kalsın (şablon zaten OFİSBİR: ____ / MÜŞTERİ: ____)
+    return widths
+
+
+def ensure_ek2_teslim_imza_layout(doc) -> list[int]:
+    for t in doc.tables:
+        if _is_ek2_teslim_imza_table(t):
+            return apply_ek2_teslim_imza_layout(t)
+    return []
 
 
 def _ek2_clone_row(table, template_row) -> None:
@@ -1124,7 +1216,9 @@ def apply_ek1_table_layout(table) -> list[int]:
 
 
 def _classify_table(table) -> str:
-    """ek1 | sig | ek2 | other — şablon sırası bağımsız tanıma."""
+    """ek1 | sig | ek2 | ek2_imza | other — şablon sırası bağımsız tanıma."""
+    if _is_ek2_teslim_imza_table(table):
+        return "ek2_imza"
     if len(table.columns) >= 6 and len(table.rows) >= 1:
         h0 = _tr_fold(table.rows[0].cells[0].text or "")
         if h0.startswith("sira") or "esya" in _tr_fold(
@@ -1181,15 +1275,18 @@ def finalize_sozlesme_layout(doc) -> dict:
         elif kind == "ek2":
             ek2_w = apply_ek2_table_layout(t)
     ek2_pb = ensure_ek2_page_break_before(doc)
+    ek2_imza_w = ensure_ek2_teslim_imza_layout(doc)
     removed += strip_trailing_empty_paragraphs(doc)
     return {
         "trailing_empty_removed": removed,
         "ek1_widths": ek1_w,
         "ek2_widths": ek2_w,
         "sig_widths": sig_w,
+        "ek2_imza_widths": ek2_imza_w,
         "ek2_width_sum": sum(ek2_w) if ek2_w else 0,
         "ek1_width_sum": sum(ek1_w) if ek1_w else 0,
         "sig_width_sum": sum(sig_w) if sig_w else 0,
+        "ek2_imza_width_sum": sum(ek2_imza_w) if ek2_imza_w else 0,
         "sig_imza_base_twips": _SIG_IMZA_BASE_TWIPS,
         "sig_imza_target_twips": _SIG_IMZA_TARGET_TWIPS,
         "ek2_page_break": ek2_pb,
@@ -1231,6 +1328,9 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
             _fill_signature_table(table, ctx)
         elif kind == "ek2":
             _fill_table_ek2(table, ctx)
+        elif kind == "ek2_imza":
+            # metin şablonda sabit; düzen finalize_sozlesme_layout'ta
+            continue
         else:
             for row in table.rows:
                 for cell in row.cells:

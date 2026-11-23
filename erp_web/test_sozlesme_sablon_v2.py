@@ -101,6 +101,13 @@ def test_sablon_file():
         kinds.append(_classify_table(t))
     check("sablon_sig_ek1_sonrasi", "ek1" in kinds and "sig" in kinds and kinds.index("sig") == kinds.index("ek1") + 1, str(kinds))
     check("sablon_ek2_sig_sonrasi", "ek2" in kinds and kinds.index("ek2") == kinds.index("sig") + 1, str(kinds))
+    check("sablon_ek2_imza", "ek2_imza" in kinds and kinds.index("ek2_imza") == kinds.index("ek2") + 1, str(kinds))
+    # dipnot paragrafında OFİSBİR/MÜŞTERİ kalıntısı yok
+    dip_s = next(
+        (x.text for x in sdoc.paragraphs if "Teslim tarihi:" in (x.text or "") and "anahtar" in (x.text or "").casefold()),
+        "",
+    )
+    check("sablon_dip_ofisbir_yok", "OFİSBİR:" not in (dip_s or "") and "MÜŞTERİ:" not in (dip_s or ""), (dip_s or "")[-80:])
 
 
 def test_fill_and_ekler():

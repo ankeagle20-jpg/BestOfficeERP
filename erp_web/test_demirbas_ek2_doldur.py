@@ -204,6 +204,109 @@ def test_ek2_layout_grid():
     check("layout_sum", sum(widths[:6]) == _PAGE_USABLE_TWIPS, str(sum(widths[:6])))
 
 
+def test_ek2_dipnot_imza_tablo():
+    """Dipnot doldurma + 2 hücreli çizgisiz imza; spacing before; kalan OFİSBİR yok."""
+    from sozlesme_sablon_v2 import (
+        render_sozlesme_docx_v2,
+        build_fill_ctx,
+        _is_ek2_teslim_imza_table,
+        _PAGE_USABLE_TWIPS,
+        _EK2_IMZA_BEFORE_TWIPS,
+        _classify_table,
+        strip_trailing_empty_paragraphs,
+        docx_bytes_to_preview_html,
+    )
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    m = {
+        "name": "SENT UNVAN",
+        "tax_number": "VN-1",
+        "guncel_kira_bedeli": 100.0,
+        "rent_start_date": "2024-06-01",
+    }
+    k = {"hizmet_turu": "Sanal Ofis", "aylik_kira": 100.0}
+    ctx = build_fill_ctx(musteri=m, kyc=k, sozlesme_no="DIP-T", sozlesme_tarihi="2024-06-01")
+    ctx["demirbas_rows"] = []
+    ctx["ek2_anahtar_kart"] = 3
+    ctx["ek2_hasar_aciklama"] = "satır A\nsatır B & x"
+    raw = render_sozlesme_docx_v2(ctx)
+    doc = Document(BytesIO(raw))
+
+    dip = next(
+        (p for p in doc.paragraphs if "Teslim tarihi:" in (p.text or "") and "anahtar" in (p.text or "").casefold()),
+        None,
+    )
+    check("dip_var", dip is not None)
+    dt = (dip.text or "") if dip else ""
+    check("dip_tarih", "01.06.2024" in dt, dt[:100])
+    check("dip_sayi", "kart sayısı: 3" in dt or "anahtar / kart sayısı: 3" in dt)
+    check("dip_hasar_nl", "satır A" in dt and "satır B" in dt)
+    check("dip_ofisbir_kalinti_yok", "OFİSBİR:" not in dt and "MÜŞTERİ:" not in dt, dt[-60:])
+    check("dip_taraflar", "envanterin teslim anındaki durumu" in dt)
+
+    kinds = [_classify_table(t) for t in doc.tables]
+    check("kind_ek2_imza", "ek2_imza" in kinds, str(kinds))
+    imza = next((t for t in doc.tables if _is_ek2_teslim_imza_table(t)), None)
+    check("imza_tbl", imza is not None)
+    if imza is not None:
+        check("imza_2hucre", len(imza.rows) == 1 and len(imza.columns) == 2)
+        check("imza_sol", (imza.rows[0].cells[0].text or "").strip().startswith("OFİSBİR"))
+        check("imza_sag", (imza.rows[0].cells[1].text or "").strip().startswith("MÜŞTERİ"))
+        grid = imza._tbl.find(qn("w:tblGrid"))
+        ws = [int(c.get(qn("w:w")) or 0) for c in list(grid)] if grid is not None else []
+        check("imza_w_sum", sum(ws) == _PAGE_USABLE_TWIPS, str(ws))
+        check("imza_w_esit", abs(ws[0] - ws[1]) <= 1 if len(ws) == 2 else False, str(ws))
+        # çizgisiz
+        tbl_pr = imza._tbl.tblPr
+        borders = tbl_pr.find(qn("w:tblBorders")) if tbl_pr is not None else None
+        check("imza_borders", borders is not None)
+        if borders is not None:
+            top = borders.find(qn("w:top"))
+            check("imza_border_nil", top is not None and top.get(qn("w:val")) == "nil")
+        # spacing before ~12pt
+        p0 = imza.rows[0].cells[0].paragraphs[0]
+        pPr = p0._p.find(qn("w:pPr"))
+        sp = pPr.find(qn("w:spacing")) if pPr is not None else None
+        before = int(sp.get(qn("w:before"))) if sp is not None and sp.get(qn("w:before")) else 0
+        check("imza_spacing_before", before == _EK2_IMZA_BEFORE_TWIPS, str(before))
+        # cantSplit
+        tr_pr = imza.rows[0]._tr.get_or_add_trPr()
+        check("imza_cantsplit", tr_pr.find(qn("w:cantSplit")) is not None)
+
+    # keepNext dipnotta
+    if dip is not None:
+        pPr = dip._p.find(qn("w:pPr"))
+        kn = pPr.find(qn("w:keepNext")) if pPr is not None else None
+        check("dip_keepnext", kn is not None)
+
+    # sonda boş paragraf kalmamalı (strip sonrası)
+    body = doc.element.body
+    kids = list(body.iterchildren())
+    trailing_empty = 0
+    for child in reversed(kids):
+        tag = child.tag.split("}")[-1]
+        if tag == "sectPr":
+            continue
+        if tag != "p":
+            break
+        texts = [t.text or "" for t in child.iter(qn("w:t"))]
+        if not any(x.strip() for x in texts):
+            trailing_empty += 1
+        else:
+            break
+    check("trail_empty_0", trailing_empty == 0, str(trailing_empty))
+
+    html = docx_bytes_to_preview_html(raw)
+    check("prev_imza_ofis", "OFİSBİR" in html)
+    check("prev_imza_mus", "MÜŞTERİ" in html)
+    check("prev_table", "<table" in html.casefold())
+
+    # Mutation: OFİSBİR paragrafta kalırsa test yakalar
+    mut_dip = dt + " OFİSBİR: ____ MÜŞTERİ: ____"
+    check("mut_kalinti_yakalar", "OFİSBİR:" in mut_dip and "OFİSBİR:" not in dt)
+
+
 def main() -> int:
     test_0_satir()
     test_3_satir()
@@ -212,6 +315,7 @@ def main() -> int:
     test_adet1_3_karisik()
     test_madde5_dokunulmadi()
     test_ek2_layout_grid()
+    test_ek2_dipnot_imza_tablo()
     print("---")
     if FAILS:
         print("FAILS", len(FAILS), FAILS)
