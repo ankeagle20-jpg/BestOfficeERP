@@ -205,7 +205,10 @@ def test_ek2_layout_grid():
 
 
 def test_ek2_dipnot_imza_tablo():
-    """Dipnot doldurma + 2 hücreli çizgisiz imza; spacing before; kalan OFİSBİR yok."""
+    """Dipnot doldurma + 2 hücreli çizgisiz imza; spacing before; kalan OFİSBİR yok.
+
+    Hazır ofis (dipnot GELİR). Sanal ofis gizleme → test_sanal_ofis_ek2_dipnot_gizle.
+    """
     from sozlesme_sablon_v2 import (
         render_sozlesme_docx_v2,
         build_fill_ctx,
@@ -224,9 +227,11 @@ def test_ek2_dipnot_imza_tablo():
         "tax_number": "VN-1",
         "guncel_kira_bedeli": 100.0,
         "rent_start_date": "2024-06-01",
+        "hazir_ofis_oda_no": 7,
     }
-    k = {"hizmet_turu": "Sanal Ofis", "aylik_kira": 100.0}
+    k = {"hizmet_turu": "Hazır Ofis", "aylik_kira": 100.0, "hazir_ofis_oda_no": 7}
     ctx = build_fill_ctx(musteri=m, kyc=k, sozlesme_no="DIP-T", sozlesme_tarihi="2024-06-01")
+    check("dip_hazir_sanal_false", ctx.get("sanal_ofis") is False)
     ctx["demirbas_rows"] = []
     ctx["ek2_anahtar_kart"] = 3
     ctx["ek2_hasar_aciklama"] = "satır A\nsatır B & x"
@@ -429,6 +434,166 @@ def test_ek2_imza_sentetik_koyu():
     )
 
 
+def _has_ek2_dipnot(doc) -> bool:
+    return any(
+        "Teslim tarihi:" in (p.text or "")
+        and ("anahtar" in (p.text or "").casefold() or "kart" in (p.text or "").casefold())
+        for p in doc.paragraphs
+    )
+
+
+def _has_ek2_imza(doc) -> bool:
+    from sozlesme_sablon_v2 import _is_ek2_teslim_imza_table
+
+    return any(_is_ek2_teslim_imza_table(t) for t in doc.tables)
+
+
+def _trail_empty_count(doc) -> int:
+    from docx.oxml.ns import qn
+
+    kids = list(doc.element.body.iterchildren())
+    n = 0
+    for child in reversed(kids):
+        tag = child.tag.split("}")[-1]
+        if tag == "sectPr":
+            continue
+        if tag != "p":
+            break
+        texts = [t.text or "" for t in child.iter(qn("w:t"))]
+        if not any(x.strip() for x in texts):
+            n += 1
+        else:
+            break
+    return n
+
+
+def test_sanal_ofis_ek2_dipnot_gizle():
+    """Sanal ofis: dipnot+imza yok; hazır/boş/karma: var; ekler prefs belgede görünmez; mutation."""
+    from sozlesme_sablon_v2 import (
+        build_fill_ctx,
+        render_sozlesme_docx_v2,
+        sozlesme_sanal_ofis_mi,
+        sozlesme_oda_secili_mi,
+        SANAL_OFIS_EK2_TAM_GIZLE,
+        docx_bytes_to_preview_html,
+        _classify_table,
+    )
+    from docx import Document
+
+    check("flag_tam_gizle_kapali", SANAL_OFIS_EK2_TAM_GIZLE is False)
+
+    # --- yardımcılar ---
+    check(
+        "helper_sanal",
+        sozlesme_sanal_ofis_mi(kyc={"hizmet_turu": "Sanal Ofis"}) is True,
+    )
+    check(
+        "helper_hazir",
+        sozlesme_sanal_ofis_mi(kyc={"hizmet_turu": "Hazır Ofis", "hazir_ofis_oda_no": 3}) is False,
+    )
+    check("helper_bos_ht", sozlesme_sanal_ofis_mi(kyc={}) is False)
+    check(
+        "helper_karma_oda",
+        sozlesme_sanal_ofis_mi(
+            musteri={"hazir_ofis_oda_no": 5},
+            kyc={"hizmet_turu": "Sanal Ofis"},
+        )
+        is False,
+    )
+    check(
+        "helper_karma_ht",
+        sozlesme_sanal_ofis_mi(kyc={"hizmet_turu": "Sanal Ofis / Hazır Ofis"}) is False,
+    )
+    check(
+        "helper_oda_sanal",
+        sozlesme_oda_secili_mi(kyc={"hizmet_turu": "Sanal Ofis"}) is False,
+    )
+    check(
+        "helper_oda_hazir",
+        sozlesme_oda_secili_mi(kyc={"hizmet_turu": "Hazır Ofis", "hazir_ofis_oda_no": 3}) is True,
+    )
+
+    def _render(ht_kyc, oda=None, extras=None):
+        m = {
+            "name": "SENT SO",
+            "tax_number": "1",
+            "guncel_kira_bedeli": 100.0,
+            "rent_start_date": "2024-06-01",
+        }
+        k = {"aylik_kira": 100.0}
+        if ht_kyc is not None:
+            k["hizmet_turu"] = ht_kyc
+        if oda is not None:
+            m["hazir_ofis_oda_no"] = oda
+            k["hazir_ofis_oda_no"] = oda
+        ctx = build_fill_ctx(musteri=m, kyc=k, sozlesme_no="SO-T")
+        ctx["demirbas_rows"] = []
+        if extras:
+            ctx.update(extras)
+        raw = render_sozlesme_docx_v2(ctx)
+        return ctx, raw, Document(BytesIO(raw))
+
+    # Sanal: dipnot/imza yok; ekler prefs girilmiş olsa bile belgede yok
+    ctx_s, raw_s, doc_s = _render(
+        "Sanal Ofis",
+        extras={"ek2_anahtar_kart": 9, "ek2_hasar_aciklama": "gizli hasar X"},
+    )
+    check("sanal_flag", ctx_s.get("sanal_ofis") is True)
+    check("sanal_oda_false", ctx_s.get("oda_secili") is False)
+    check("sanal_dip_yok", not _has_ek2_dipnot(doc_s))
+    check("sanal_imza_yok", not _has_ek2_imza(doc_s))
+    full_s = "\n".join(p.text or "" for p in doc_s.paragraphs)
+    check("sanal_anahtar_yok", "kart sayısı: 9" not in full_s and "gizli hasar" not in full_s)
+    check("sanal_ek2_tablo_var", any(_classify_table(t) == "ek2" for t in doc_s.tables))
+    check("sanal_ek2_baslik", any((p.text or "").strip().startswith("Ek-2") for p in doc_s.paragraphs))
+    check("sanal_trail0", _trail_empty_count(doc_s) == 0, str(_trail_empty_count(doc_s)))
+    html_s = docx_bytes_to_preview_html(raw_s)
+    check("sanal_prev_dip_yok", "Teslim tarihi:" not in html_s)
+    check("sanal_prev_envanter_yok", "envanterin teslim anındaki durumu" not in html_s)
+    # Önizlemede OFİSBİR imza satırı (ek2_imza) yok; ana imza tablosu ayrı
+    # ek2_imza 2 hücre: kaldırıldı → "MÜŞTERİ" yalnız hücre etiketi olarak ek2 imzada idi
+    # Mammoth hâlâ sig tablosunda OFİSBİR gösterebilir — dipnot/imza yokluğu yeterli
+    check("sanal_prev_teslim_yok", "Teslim edilen anahtar" not in html_s)
+
+    # Hazır: dipnot/imza var (mevcut davranış)
+    ctx_h, raw_h, doc_h = _render("Hazır Ofis", oda=4, extras={"ek2_anahtar_kart": 2})
+    check("hazir_sanal_false", ctx_h.get("sanal_ofis") is False)
+    check("hazir_dip_var", _has_ek2_dipnot(doc_h))
+    check("hazir_imza_var", _has_ek2_imza(doc_h))
+    check("hazir_trail0", _trail_empty_count(doc_h) == 0)
+
+    # Hizmet türü boş → dipnot gelir (varsayılan gösterim «Sanal Ofis» olsa da)
+    ctx_b, _, doc_b = _render(None)
+    check("bos_ht_sanal_false", ctx_b.get("sanal_ofis") is False)
+    check("bos_ht_dip_var", _has_ek2_dipnot(doc_b))
+    check("bos_ht_imza_var", _has_ek2_imza(doc_b))
+
+    # Karma: sanal + oda → dipnot gelir
+    ctx_k, _, doc_k = _render("Sanal Ofis", oda=8)
+    check("karma_sanal_false", ctx_k.get("sanal_ofis") is False)
+    check("karma_oda_true", ctx_k.get("oda_secili") is True)
+    check("karma_dip_var", _has_ek2_dipnot(doc_k))
+    check("karma_imza_var", _has_ek2_imza(doc_k))
+
+    # Ek-1 oda satırı: sanalda yok, hazırda var (değişmedi)
+    from sozlesme_sablon_v2 import render_sozlesme_docx_v2 as _r
+
+    def _ek1_blob(doc):
+        for t in doc.tables:
+            if _classify_table(t) == "ek1":
+                return "\n".join(
+                    (r.cells[0].text or "") + "|" + (r.cells[1].text or "") for r in t.rows
+                ).casefold()
+        return ""
+
+    check("ek1_sanal_oda_yok", "oda / alan" not in _ek1_blob(doc_s))
+    check("ek1_hazir_oda_var", "oda / alan" in _ek1_blob(doc_h))
+
+    # Mutation: sanalda dipnot yanlışlıkla kalsaydı test yakalar
+    mut = full_s + "\nTeslim tarihi: X. Teslim edilen anahtar / kart sayısı: 1."
+    check("mut_sanal_dip_yakalar", "Teslim tarihi:" in mut and "Teslim tarihi:" not in full_s)
+
+
 def main() -> int:
     test_0_satir()
     test_3_satir()
@@ -438,6 +603,7 @@ def main() -> int:
     test_madde5_dokunulmadi()
     test_ek2_layout_grid()
     test_ek2_dipnot_imza_tablo()
+    test_sanal_ofis_ek2_dipnot_gizle()
     print("---")
     if FAILS:
         print("FAILS", len(FAILS), FAILS)

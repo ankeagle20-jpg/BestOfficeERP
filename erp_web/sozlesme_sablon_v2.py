@@ -256,6 +256,80 @@ def yetkili_adlari(
     return out
 
 
+# İleride sanal ofiste Ek-2 başlık+envanteri de gizlemek için; şimdilik KAPALI.
+SANAL_OFIS_EK2_TAM_GIZLE = False
+
+
+def _hizmet_turu_raw(
+    musteri: dict | None = None,
+    kyc: dict | None = None,
+    hizmet_turu: str | None = None,
+) -> str:
+    """Ham hizmet türü (varsayılan «Sanal Ofis» eklenmez)."""
+    m = musteri or {}
+    k = kyc or {}
+    return (
+        _s(hizmet_turu)
+        or _s(k.get("hizmet_turu"))
+        or _s(m.get("hizmet_turu"))
+    )
+
+
+def _hazir_ofis_oda_no_int(
+    musteri: dict | None = None,
+    kyc: dict | None = None,
+) -> int:
+    """hazir_ofis_oda_no: KYC → müşteri kartı."""
+    m = musteri or {}
+    k = kyc or {}
+    oda_no = k.get("hazir_ofis_oda_no")
+    if oda_no in (None, "", 0, "0"):
+        oda_no = m.get("hazir_ofis_oda_no")
+    try:
+        return int(oda_no) if oda_no not in (None, "") else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def sozlesme_oda_secili_mi(
+    musteri: dict | None = None,
+    kyc: dict | None = None,
+    hizmet_turu: str | None = None,
+) -> bool:
+    """Ek-1 «Oda / alan» satırı gösterilsin mi.
+
+    Alanlar: hazir_ofis_oda_no (kyc/musteri), hizmet_turu (içinde «hazır ofis»).
+    """
+    oda_no_i = _hazir_ofis_oda_no_int(musteri=musteri, kyc=kyc)
+    ht = _hizmet_turu_raw(musteri=musteri, kyc=kyc, hizmet_turu=hizmet_turu) or "Sanal Ofis"
+    ht_l = _tr_fold(ht)
+    hazir_ofis = ("hazir" in ht_l and "ofis" in ht_l)
+    return bool(oda_no_i > 0 or hazir_ofis)
+
+
+def sozlesme_sanal_ofis_mi(
+    musteri: dict | None = None,
+    kyc: dict | None = None,
+    hizmet_turu: str | None = None,
+) -> bool:
+    """Sanal ofis (Ek-2 dipnot gizlenecek).
+
+    Kural: ham hizmet_turu «sanal ofis» içeriyorsa VE oda/hazır ofis yoksa → True.
+    Hizmet türü boş/bilinmiyorsa → False (dipnot gelir).
+    Karma (sanal + hazır/oda) → False (dipnot gelir).
+    Alanlar: hizmet_turu (param/kyc/musteri), hazir_ofis_oda_no (kyc/musteri).
+    """
+    ht_raw = _hizmet_turu_raw(musteri=musteri, kyc=kyc, hizmet_turu=hizmet_turu)
+    if not ht_raw:
+        return False
+    ht_l = _tr_fold(ht_raw)
+    if "sanal" not in ht_l or "ofis" not in ht_l:
+        return False
+    if sozlesme_oda_secili_mi(musteri=musteri, kyc=kyc, hizmet_turu=ht_raw):
+        return False
+    return True
+
+
 def build_fill_ctx(
     *,
     musteri: dict | None = None,
@@ -327,21 +401,12 @@ def build_fill_ctx(
     bit_d = _guncel_donem_bitis(bas) if bas else None
     bit_s = _fmt_date(bit_d) if bit_d else ""
 
-    ht = _s(hizmet_turu) or _s(k.get("hizmet_turu")) or "Sanal Ofis"
+    ht_raw = _hizmet_turu_raw(musteri=m, kyc=k, hizmet_turu=hizmet_turu)
+    ht = ht_raw or "Sanal Ofis"
 
-    # Oda seçimi: hazir_ofis_oda_no (KYC/customers) veya hizmet_turu «hazır ofis»
-    oda_no = k.get("hazir_ofis_oda_no")
-    if oda_no in (None, "", 0, "0"):
-        oda_no = m.get("hazir_ofis_oda_no")
-    try:
-        oda_no_i = int(oda_no) if oda_no not in (None, "") else 0
-    except (TypeError, ValueError):
-        oda_no_i = 0
-    ht_l = ht.casefold()
-    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"), ("ü", "u"), ("ö", "o"), ("ç", "c")):
-        ht_l = ht_l.replace(a, b)
-    hazir_ofis = ("hazir" in ht_l and "ofis" in ht_l)
-    oda_secili = bool(oda_no_i > 0 or hazir_ofis)
+    oda_secili = sozlesme_oda_secili_mi(musteri=m, kyc=k, hizmet_turu=ht_raw)
+    sanal_ofis = sozlesme_sanal_ofis_mi(musteri=m, kyc=k, hizmet_turu=ht_raw)
+    oda_no_i = _hazir_ofis_oda_no_int(musteri=m, kyc=k)
     oda_metin = ""
     if oda_secili:
         if oda_no_i > 0:
@@ -394,6 +459,7 @@ def build_fill_ctx(
         "vergi_dairesi": vergi_dairesi or BLANK,
         "nusha": "2",
         "oda_secili": oda_secili,
+        "sanal_ofis": sanal_ofis,
         "oda_metin": oda_metin,
         "odeme_gunu_metin": odeme_gunu_metin,
         "odeme_gun": odeme_gun,
@@ -738,13 +804,18 @@ def _set_para_text_multiline(paragraph, text: str) -> None:
         run = run2
 
 
+def _is_ek2_dipnot_paragraph(paragraph) -> bool:
+    t = paragraph.text or ""
+    if "Teslim tarihi:" not in t:
+        return False
+    tl = t.casefold()
+    return ("anahtar" in tl) or ("kart" in tl)
+
+
 def _fill_ek2_dipnot(doc, ctx: dict) -> bool:
     """Ek-2 dipnot: teslim tarihi / anahtar / hasar. OFİSBİR/MÜŞTERİ artık 2 hücreli tabloda."""
     for p in doc.paragraphs:
-        t = p.text or ""
-        if "Teslim tarihi:" not in t:
-            continue
-        if "anahtar" not in t.casefold() and "kart" not in t.casefold():
+        if not _is_ek2_dipnot_paragraph(p):
             continue
         bas = ctx.get("baslangic") or BLANK
         if not bas:
@@ -768,6 +839,38 @@ def _fill_ek2_dipnot(doc, ctx: dict) -> bool:
         _set_para_keep_next(p, True)
         return True
     return False
+
+
+def remove_sanal_ofis_ek2_dipnot_imza(doc) -> dict:
+    """Sanal ofis: Ek-2 dipnot paragrafı + OFİSBİR|MÜŞTERİ imza tablosunu kaldır.
+
+    SANAL_OFIS_EK2_TAM_GIZLE=True iken Ek-2 başlık+envanter de kaldırılır (şimdilik kapalı).
+    """
+    removed_paras = 0
+    removed_tables = 0
+    for p in list(doc.paragraphs):
+        if _is_ek2_dipnot_paragraph(p):
+            el = p._element
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+                removed_paras += 1
+    for t in list(doc.tables):
+        if _is_ek2_teslim_imza_table(t):
+            tbl = t._tbl
+            parent = tbl.getparent()
+            if parent is not None:
+                parent.remove(tbl)
+                removed_tables += 1
+    removed_ek2_full = False
+    if SANAL_OFIS_EK2_TAM_GIZLE:
+        # İleride: Ek-2 başlık + envanter tablosu da kaldırılacak — bayrak kapalı.
+        removed_ek2_full = False
+    return {
+        "dipnot_paras": removed_paras,
+        "imza_tables": removed_tables,
+        "ek2_full": removed_ek2_full,
+    }
 
 
 def _is_ek2_teslim_imza_table(table) -> bool:
@@ -1455,13 +1558,15 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
         raise FileNotFoundError(f"v2 sablon yok: {path}")
 
     doc = Document(str(path))
+    sanal = bool(ctx.get("sanal_ofis"))
     for para in doc.paragraphs:
         if not para.text:
             continue
         new_t = _fill_paragraph_text(para.text, ctx)
         if new_t != para.text:
             _set_run_text_preserve(para, new_t)
-    _fill_ek2_dipnot(doc, ctx)
+    if not sanal:
+        _fill_ek2_dipnot(doc, ctx)
 
     for table in doc.tables:
         # Yeni şablon: Ek-1 → imza → Ek-2 (tanıma ile; indeks bağımsız)
@@ -1474,6 +1579,7 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
             _fill_table_ek2(table, ctx)
         elif kind == "ek2_imza":
             # metin şablonda sabit; düzen finalize_sozlesme_layout'ta
+            # sanal ofiste tablo kaldırılacak — düzen uygulanmaz
             continue
         else:
             for row in table.rows:
@@ -1484,6 +1590,8 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
                             if nt != p.text:
                                 _set_run_text_preserve(p, nt)
 
+    if sanal:
+        remove_sanal_ofis_ek2_dipnot_imza(doc)
     finalize_sozlesme_layout(doc)
 
     buf = BytesIO()

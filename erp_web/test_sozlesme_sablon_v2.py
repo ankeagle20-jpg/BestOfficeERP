@@ -568,6 +568,7 @@ def test_ek1_senaryolar():
         hizmet_turu="Sanal Ofis",
     )
     check("oda0_secili_false", ctx0.get("oda_secili") is False)
+    check("oda0_sanal_true", ctx0.get("sanal_ofis") is True)
     check("odeme_gun_15", ctx0.get("odeme_gun") == 15, str(ctx0.get("odeme_gun")))
     m15 = ctx0.get("odeme_gunu_metin") or ""
     check("odeme_metin_15", "15. günü ile 20. günü arası" in m15 and "en geç 20. gün" in m15, m15)
@@ -598,6 +599,7 @@ def test_ek1_senaryolar():
         hizmet_turu="Hazır Ofis",
     )
     check("oda1_secili", ctx1.get("oda_secili") is True)
+    check("oda1_sanal_false", ctx1.get("sanal_ofis") is False)
     check("oda1_metin", "12" in (ctx1.get("oda_metin") or ""), str(ctx1.get("oda_metin")))
     check("odeme_gun_31", ctx1.get("odeme_gun") == 31, str(ctx1.get("odeme_gun")))
     check("odeme_metin_31", (ctx1.get("odeme_gunu_metin") or "") == "Her ayın son günü", str(ctx1.get("odeme_gunu_metin")))
