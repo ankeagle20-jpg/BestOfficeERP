@@ -109,6 +109,20 @@ def test_marka_taban():
         removed=["Acer"],
     )
     check("marka_cikar", mk["markalar"] == ["HP"], str(mk))
+    # ozel gizlenince katalogda yok, panelde pasif
+    bir_g = d.demirbas_katalog_birlesik(
+        ek=[{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}],
+        gizli=["deneme"],
+    )
+    check("ozel_gizli_katalog", not any(x["esya"] == "deneme" for x in bir_g))
+    pan = d.demirbas_panel_urunler(
+        ek=[{"esya": "deneme", "grup": "Teknoloji", "kapsam": "oda_ici"}],
+        gizli=["deneme"],
+    )
+    check(
+        "ozel_gizli_panel",
+        any(x["esya"] == "deneme" and x["aktif"] is False for x in pan),
+    )
 
 
 def test_eski_satir_metin():
@@ -146,6 +160,9 @@ def test_module_wire_urun():
     check("fe_marka_ui_tercih_yok", "/faturalar/api/ui-tercih" not in dem_block)
     check("fe_auto_marka_yok", "girisDemirbasMarkaKaydetListe" not in dem_block)
     check("fe_ekle_satir", "dem-duzenle-ekle" in dem_block and "dem-duzenle-marka-ekle" in dem_block)
+    check("fe_checkbox", "dem-panel-aktif" in dem_block and "girisDemirbasUrunAktifDegisti" in dem_block)
+    check("fe_baslik_ekle", "girisDemirbasDuzenleBaslikEkleHtml" in dem_block)
+    check("fe_gizli_btn_yok", "Gizlenenleri geri getir" not in dem_block)
     check("marka_adi_fn", "def demirbas_marka_adi_temizle" in (ROOT / "demirbas.py").read_text(encoding="utf-8"))
     db = (ROOT / "db.py").read_text(encoding="utf-8")
     check("firma_pref_ensure", "ensure_firma_ui_preferences_table" in db)

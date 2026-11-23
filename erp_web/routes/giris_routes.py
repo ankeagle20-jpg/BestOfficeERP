@@ -8397,7 +8397,11 @@ def _demirbas_ui_pref_get_firma(pref_key: str) -> dict | None:
 
 
 def _demirbas_ui_pref_get(pref_key: str) -> dict:
-    """Önce firma (şirket geneli); yoksa/boşsa kullanıcı geri dönüşü. Tablo yoksa kullanıcı."""
+    """Önce firma (şirket geneli); satır yoksa ({}) kullanıcı geri dönüşü. Tablo yoksa kullanıcı.
+
+    Not: firma satırı `{"urunler": []}` / `{"gizli": []}` gibi boş-içerikli olsa da
+    truthy dict döner — kullanıcıya düşülmez (çıkarılan öğenin geri gelmesini engeller).
+    """
     firma = _demirbas_ui_pref_get_firma(pref_key)
     if firma is None:
         return _demirbas_ui_pref_get_user(pref_key)
@@ -8490,18 +8494,8 @@ def _demirbas_urun_ek_gizli():
     return ek, gizli
 
 
-def _demirbas_marka_kayitli() -> list:
-    from demirbas import DEMIRBAS_PREF_MARKA
-
-    prefs = _demirbas_ui_pref_get(DEMIRBAS_PREF_MARKA) or {}
-    arr = prefs.get("markalar")
-    return list(arr) if isinstance(arr, list) else []
-
-
-@bp.route("/api/demirbas-katalog", methods=["GET"])
-@giris_gerekli
-def api_demirbas_katalog():
-    """Birleşik katalog + bayrak (mid opsiyonel). Tablo DDL çalıştırmaz."""
+def _demirbas_katalog_payload(*, aktif: bool = True) -> dict:
+    """Katalog + panel + gizli + ek (dropdown ve düzenle paneli için)."""
     from demirbas import (
         DEMIRBAS_DIGER,
         DEMIRBAS_GRUP_LISTESI,
@@ -8509,8 +8503,53 @@ def api_demirbas_katalog():
         DEMIRBAS_MARKA_VARSAYILAN,
         demirbas_katalog_birlesik,
         demirbas_marka_listesi_birlesik,
-        demirbas_tablosu_aktif,
+        demirbas_panel_urunler,
+        demirbas_tr_casefold,
     )
+
+    ek, gizli = ([], [])
+    if aktif:
+        ek, gizli = _demirbas_urun_ek_gizli()
+    kayitli, marka_gizli = _demirbas_marka_kayitli_gizli() if aktif else ([], [])
+    markalar = demirbas_marka_listesi_birlesik(kayitli, gizli=marka_gizli)
+    return {
+        "katalog": demirbas_katalog_birlesik(ek=ek, gizli=gizli) if aktif else [],
+        "panel": demirbas_panel_urunler(ek=ek, gizli=gizli) if aktif else [],
+        "ek": ek if aktif else [],
+        "gizli": gizli if aktif else [],
+        "diger": DEMIRBAS_DIGER,
+        "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+        "marka_listesi": markalar,
+        "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+        "markalar_ozel": [
+            t
+            for t in kayitli
+            if str(t or "").strip() and demirbas_tr_casefold(str(t)) != "muhtelif"
+        ]
+        if aktif
+        else [],
+        "markalar_gizli": marka_gizli if aktif else [],
+        "gruplar": list(DEMIRBAS_GRUP_LISTESI),
+    }
+
+
+def _demirbas_marka_kayitli() -> list:
+    kayitli, _g = _demirbas_marka_kayitli_gizli()
+    return kayitli
+
+
+def _demirbas_marka_kayitli_gizli() -> tuple[list, list]:
+    from demirbas import DEMIRBAS_PREF_MARKA, demirbas_marka_prefs_normalize
+
+    prefs = demirbas_marka_prefs_normalize(_demirbas_ui_pref_get(DEMIRBAS_PREF_MARKA) or {})
+    return list(prefs.get("markalar") or []), list(prefs.get("gizli") or [])
+
+
+@bp.route("/api/demirbas-katalog", methods=["GET"])
+@giris_gerekli
+def api_demirbas_katalog():
+    """Birleşik katalog + bayrak (mid opsiyonel). Tablo DDL çalıştırmaz."""
+    from demirbas import demirbas_tablosu_aktif
     from db import musteri_demirbas_schema_ready, musteri_demirbas_table_exists
 
     mid = request.args.get("mid")
@@ -8528,27 +8567,17 @@ def api_demirbas_katalog():
         mesaj = "Demirbaş tablosu henüz oluşturulmamış. Yönetici onayı gerekir."
     elif aktif and tablo_var and not sema_hazir:
         mesaj = "Demirbaş tablosu güncellenmeli"
-    ek, gizli = ([], [])
-    if aktif:
-        ek, gizli = _demirbas_urun_ek_gizli()
-    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli) if aktif else []
-    markalar = demirbas_marka_listesi_birlesik(_demirbas_marka_kayitli() if aktif else [])
-    return jsonify(
+    payload = _demirbas_katalog_payload(aktif=aktif)
+    payload.update(
         {
             "ok": True,
             "aktif": aktif,
             "tablo_var": tablo_var,
             "sema_hazir": sema_hazir,
-            "diger": DEMIRBAS_DIGER,
-            "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
-            "marka_listesi": markalar,
-            "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
-            "gruplar": list(DEMIRBAS_GRUP_LISTESI),
-            "katalog": katalog,
-            "gizli": gizli if aktif else [],
             "mesaj": mesaj,
         }
     )
+    return jsonify(payload)
 
 
 @bp.route("/api/demirbas-urun", methods=["POST"])
@@ -8561,7 +8590,6 @@ def api_demirbas_urun_ekle():
         DEMIRBAS_PREF_URUN_EK,
         demirbas_ek_normalize,
         demirbas_grup_kapsam,
-        demirbas_katalog_birlesik,
         demirbas_tr_casefold,
         demirbas_urun_adi_temizle,
     )
@@ -8583,43 +8611,58 @@ def api_demirbas_urun_ekle():
                 {
                     "ok": False,
                     "kod": "geri_getir",
-                    "mesaj": "Bu ürün gizlenmiş. 'Gizlenenleri geri getir' ile açın.",
+                    "mesaj": "Bu ürün listeden çıkarılmış. Onay kutusunu işaretleyerek geri getirin.",
                     "esya": hazir_map[key],
                 }
             ), 409
         return jsonify({"ok": False, "mesaj": "Bu ürün zaten listede"}), 409
-    if any(demirbas_tr_casefold(x.get("esya") or "") == key for x in ek):
+    ek_hit = next(
+        (x for x in ek if demirbas_tr_casefold(x.get("esya") or "") == key),
+        None,
+    )
+    if ek_hit:
+        if key in gizli_keys:
+            return jsonify(
+                {
+                    "ok": False,
+                    "kod": "geri_getir",
+                    "mesaj": "Bu ürün listeden çıkarılmış. Onay kutusunu işaretleyerek geri getirin.",
+                    "esya": ek_hit.get("esya") or ad,
+                }
+            ), 409
         return jsonify({"ok": False, "mesaj": "Bu ürün zaten listede"}), 409
     kapsam = demirbas_grup_kapsam(grup)
     ek_in = demirbas_ek_normalize(ek + [{"esya": ad, "grup": grup, "kapsam": kapsam}])
     if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_EK, {"urunler": ek_in}):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-    ek, gizli = _demirbas_urun_ek_gizli()
-    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-    return jsonify(
+    payload = _demirbas_katalog_payload(aktif=True)
+    payload.update(
         {
             "ok": True,
             "esya": ad,
             "grup": grup,
             "kapsam": kapsam,
             "kaynak": "ozel",
-            "katalog": katalog,
-            "gizli": gizli,
+            "islem": "ekle",
         }
     )
+    return jsonify(payload)
 
 
 @bp.route("/api/demirbas-urun-cikar", methods=["POST"])
 @giris_gerekli
 def api_demirbas_urun_cikar():
-    """Hazır ürünü gizle veya özel ürünü sil. Kayıtlı demirbaş satırlarına dokunmaz."""
+    """Ürünü listeden çıkar (gizle) veya özel ürünü kalıcı sil. Satır metinlerine dokunmaz.
+
+    Varsayılan: hazır ve özel → gizli listesine ekle (panelde soluk, tekrar açılabilir).
+    kalici=1: yalnızca özel → ek listesinden sil + gizliden temizle.
+    """
     from demirbas import (
         DEMIRBAS_KATALOG,
         DEMIRBAS_PREF_URUN_EK,
         DEMIRBAS_PREF_URUN_GIZLI,
         demirbas_ek_normalize,
         demirbas_gizli_normalize,
-        demirbas_katalog_birlesik,
         demirbas_tr_casefold,
         demirbas_urun_adi_temizle,
     )
@@ -8629,46 +8672,69 @@ def api_demirbas_urun_cikar():
     if not ad:
         return jsonify({"ok": False, "mesaj": "esya gerekli"}), 400
     key = demirbas_tr_casefold(ad)
+    kalici = data.get("kalici") in (True, 1, "1", "true", "True") or str(
+        data.get("islem") or ""
+    ).strip().casefold() in ("sil", "kalici", "kalici_sil")
     ek, gizli = _demirbas_urun_ek_gizli()
     hazir_map = {demirbas_tr_casefold(e): e for (_k, _g, e) in DEMIRBAS_KATALOG}
+    ek_hit = next(
+        (x for x in ek if demirbas_tr_casefold(x.get("esya") or "") == key),
+        None,
+    )
+
+    if kalici:
+        if key in hazir_map:
+            return jsonify(
+                {"ok": False, "mesaj": "Hazır ürün kalıcı silinemez; listeden çıkarın"}
+            ), 400
+        if not ek_hit:
+            return jsonify({"ok": False, "mesaj": "Ürün bulunamadı"}), 404
+        canon = ek_hit.get("esya") or ad
+        yeni_ek = [x for x in ek if demirbas_tr_casefold(x.get("esya") or "") != key]
+        if not _demirbas_ui_pref_set(
+            DEMIRBAS_PREF_URUN_EK,
+            {"urunler": demirbas_ek_normalize(yeni_ek)},
+            removed=[canon],
+        ):
+            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        gizli_in = demirbas_gizli_normalize(
+            [x for x in gizli if demirbas_tr_casefold(x) != key]
+        )
+        _demirbas_ui_pref_set(
+            DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}, removed=[canon]
+        )
+        payload = _demirbas_katalog_payload(aktif=True)
+        payload.update({"ok": True, "islem": "sil", "esya": canon})
+        return jsonify(payload)
+
+    # gizle (hazır veya özel)
     if key in hazir_map:
         canon = hazir_map[key]
-        gizli_in = demirbas_gizli_normalize(gizli + [canon])
-        if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}):
-            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-        ek, gizli = _demirbas_urun_ek_gizli()
-        katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-        return jsonify(
-            {"ok": True, "islem": "gizle", "esya": canon, "katalog": katalog, "gizli": gizli}
-        )
-    yeni_ek = [x for x in ek if demirbas_tr_casefold(x.get("esya") or "") != key]
-    if len(yeni_ek) == len(ek):
+    elif ek_hit:
+        canon = ek_hit.get("esya") or ad
+    else:
         return jsonify({"ok": False, "mesaj": "Ürün bulunamadı"}), 404
-    if not _demirbas_ui_pref_set(
-        DEMIRBAS_PREF_URUN_EK, {"urunler": demirbas_ek_normalize(yeni_ek)}, removed=[ad]
-    ):
+    gizli_in = demirbas_gizli_normalize(gizli + [canon])
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-    ek, gizli = _demirbas_urun_ek_gizli()
-    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-    return jsonify(
-        {"ok": True, "islem": "sil", "esya": ad, "katalog": katalog, "gizli": gizli}
-    )
+    payload = _demirbas_katalog_payload(aktif=True)
+    payload.update({"ok": True, "islem": "gizle", "esya": canon})
+    return jsonify(payload)
 
 
 @bp.route("/api/demirbas-urun-geri-getir", methods=["POST"])
 @giris_gerekli
 def api_demirbas_urun_geri_getir():
-    """Gizlenen hazır ürünü geri getir (tek veya hepsi)."""
+    """Gizlenen ürünü geri getir (tek veya hepsi)."""
     from demirbas import (
         DEMIRBAS_PREF_URUN_GIZLI,
         demirbas_gizli_normalize,
-        demirbas_katalog_birlesik,
         demirbas_tr_casefold,
         demirbas_urun_adi_temizle,
     )
 
     data = request.get_json(silent=True) or {}
-    ek, gizli = _demirbas_urun_ek_gizli()
+    _ek, gizli = _demirbas_urun_ek_gizli()
     if data.get("hepsi") in (True, 1, "1", "true", "True"):
         removed = list(gizli)
         gizli_in: list = []
@@ -8685,73 +8751,134 @@ def api_demirbas_urun_geri_getir():
         DEMIRBAS_PREF_URUN_GIZLI, {"gizli": gizli_in}, removed=removed
     ):
         return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-    ek, gizli = _demirbas_urun_ek_gizli()
-    katalog = demirbas_katalog_birlesik(ek=ek, gizli=gizli)
-    return jsonify({"ok": True, "katalog": katalog, "gizli": gizli})
+    payload = _demirbas_katalog_payload(aktif=True)
+    payload.update({"ok": True, "islem": "geri_getir"})
+    return jsonify(payload)
+
+
+def _demirbas_marka_payload() -> dict:
+    from demirbas import (
+        DEMIRBAS_MARKA_LISTESI_TABAN,
+        DEMIRBAS_MARKA_VARSAYILAN,
+        demirbas_marka_listesi_birlesik,
+        demirbas_tr_casefold,
+    )
+
+    kayitli, marka_gizli = _demirbas_marka_kayitli_gizli()
+    birlesik = demirbas_marka_listesi_birlesik(kayitli, gizli=marka_gizli)
+    return {
+        "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
+        "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+        "markalar": birlesik,
+        "markalar_ozel": [
+            t
+            for t in kayitli
+            if str(t or "").strip() and demirbas_tr_casefold(str(t)) != "muhtelif"
+        ],
+        "markalar_gizli": marka_gizli,
+    }
 
 
 @bp.route("/api/demirbas-markalar", methods=["GET", "POST"])
 @giris_gerekli
 def api_demirbas_markalar():
-    """Marka listesi oku / kalıcı ekle veya çıkar (demirbas_markalar). Taban: Muhtelif."""
+    """Marka listesi oku / ekle / gizle / geri getir / kalıcı sil. Taban: Muhtelif."""
     from demirbas import (
-        DEMIRBAS_MARKA_LISTESI_TABAN,
-        DEMIRBAS_MARKA_VARSAYILAN,
         DEMIRBAS_PREF_MARKA,
+        demirbas_gizli_normalize,
         demirbas_marka_adi_temizle,
-        demirbas_marka_listesi_birlesik,
+        demirbas_marka_prefs_normalize,
         demirbas_tr_casefold,
     )
 
     if request.method == "GET":
-        kayitli = _demirbas_marka_kayitli()
-        birlesik = demirbas_marka_listesi_birlesik(kayitli)
-        return jsonify(
-            {
-                "ok": True,
-                "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
-                "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
-                "markalar": birlesik,
-                "markalar_ozel": [
-                    t
-                    for t in kayitli
-                    if str(t or "").strip()
-                    and demirbas_tr_casefold(str(t)) != "muhtelif"
-                ],
-            }
-        )
+        payload = _demirbas_marka_payload()
+        payload["ok"] = True
+        return jsonify(payload)
 
     data = request.get_json(silent=True) or {}
-    kayitli = list(_demirbas_marka_kayitli())
+    kayitli, marka_gizli = _demirbas_marka_kayitli_gizli()
+    islem = str(data.get("islem") or "").strip().casefold()
+    aktif_raw = data.get("aktif")
+    cikar = data.get("cikar") in (True, 1, "1", "true", "True") or islem in (
+        "cikar",
+        "gizle",
+    )
+    geri = islem in ("geri", "geri_getir", "ac") or (
+        aktif_raw in (True, 1, "1", "true", "True") and data.get("marka")
+    )
+    kalici = data.get("kalici") in (True, 1, "1", "true", "True") or islem in (
+        "sil",
+        "kalici",
+        "kalici_sil",
+    )
 
-    # Çıkar (Muhtelif çıkarılamaz; satır metinleri etkilenmez)
-    if data.get("cikar") in (True, 1, "1", "true", "True") or str(
-        data.get("islem") or ""
-    ).strip().casefold() in ("cikar", "sil"):
+    # Gizle (onay kutusu kapat) — marka listesinde kalır, gizliye eklenir
+    if (cikar or aktif_raw in (False, 0, "0", "false", "False")) and not kalici and not geri:
         ad = demirbas_marka_adi_temizle(data.get("marka") or data.get("ad"))
         if not ad:
             return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
+        if demirbas_tr_casefold(ad) == "muhtelif":
+            return jsonify({"ok": False, "mesaj": "Muhtelif kaldırılamaz"}), 400
+        if not any(demirbas_tr_casefold(x) == demirbas_tr_casefold(ad) for x in kayitli):
+            return jsonify({"ok": False, "mesaj": "Marka bulunamadı"}), 404
+        gizli_in = demirbas_gizli_normalize(marka_gizli + [ad])
+        prefs = demirbas_marka_prefs_normalize(
+            {"markalar": kayitli, "gizli": gizli_in}
+        )
+        if not _demirbas_ui_pref_set(DEMIRBAS_PREF_MARKA, prefs):
+            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        payload = _demirbas_marka_payload()
+        payload.update({"ok": True, "islem": "gizle", "marka": ad})
+        return jsonify(payload)
+
+    # Geri getir (onay kutusu aç)
+    if geri and not kalici:
+        ad = demirbas_marka_adi_temizle(data.get("marka") or data.get("ad"))
+        if not ad:
+            return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
+        gizli_in = demirbas_gizli_normalize(
+            [x for x in marka_gizli if demirbas_tr_casefold(x) != demirbas_tr_casefold(ad)]
+        )
+        prefs = demirbas_marka_prefs_normalize(
+            {"markalar": kayitli, "gizli": gizli_in}
+        )
         if not _demirbas_ui_pref_set(
-            DEMIRBAS_PREF_MARKA, {"markalar": kayitli}, removed=[ad]
+            DEMIRBAS_PREF_MARKA, prefs, removed=[ad]
         ):
             return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-        kayitli2 = _demirbas_marka_kayitli()
-        birlesik = demirbas_marka_listesi_birlesik(kayitli2)
-        return jsonify(
+        payload = _demirbas_marka_payload()
+        payload.update({"ok": True, "islem": "geri_getir", "marka": ad})
+        return jsonify(payload)
+
+    # Kalıcı sil (özel marka)
+    if kalici:
+        ad = demirbas_marka_adi_temizle(data.get("marka") or data.get("ad"))
+        if not ad:
+            return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
+        if demirbas_tr_casefold(ad) == "muhtelif":
+            return jsonify({"ok": False, "mesaj": "Muhtelif kaldırılamaz"}), 400
+        prefs = demirbas_marka_prefs_normalize(
             {
-                "ok": True,
-                "islem": "cikar",
-                "markalar": birlesik,
-                "markalar_ozel": [
-                    t
-                    for t in kayitli2
-                    if str(t or "").strip()
-                    and demirbas_tr_casefold(str(t)) != "muhtelif"
+                "markalar": [
+                    x
+                    for x in kayitli
+                    if demirbas_tr_casefold(x) != demirbas_tr_casefold(ad)
                 ],
-                "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
-                "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
+                "gizli": [
+                    x
+                    for x in marka_gizli
+                    if demirbas_tr_casefold(x) != demirbas_tr_casefold(ad)
+                ],
             }
         )
+        if not _demirbas_ui_pref_set(
+            DEMIRBAS_PREF_MARKA, prefs, removed=[ad]
+        ):
+            return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+        payload = _demirbas_marka_payload()
+        payload.update({"ok": True, "islem": "sil", "marka": ad})
+        return jsonify(payload)
 
     eklenecek: list[str] = []
     if isinstance(data.get("markalar"), list):
@@ -8767,35 +8894,28 @@ def api_demirbas_markalar():
             continue
         k = demirbas_tr_casefold(marka)
         if any(demirbas_tr_casefold(x) == k for x in kayitli):
+            if any(demirbas_tr_casefold(x) == k for x in marka_gizli):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "kod": "geri_getir",
+                        "mesaj": "Bu marka listeden çıkarılmış. Onay kutusunu işaretleyin.",
+                        "marka": marka,
+                    }
+                ), 409
             return jsonify({"ok": False, "mesaj": "Bu marka zaten listede"}), 409
         kayitli.append(marka)
         eklenen.append(marka)
     if not eklenen:
         return jsonify({"ok": False, "mesaj": "Marka adı 2–40 karakter olmalı"}), 400
-    kayit_yazi = []
-    seen = set()
-    for m in kayitli:
-        t = str(m or "").strip()
-        if not t:
-            continue
-        k = demirbas_tr_casefold(t)
-        if k == "muhtelif" or k in seen:
-            continue
-        seen.add(k)
-        kayit_yazi.append(t)
-    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_MARKA, {"markalar": kayit_yazi}):
-        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
-    birlesik = demirbas_marka_listesi_birlesik(kayit_yazi)
-    return jsonify(
-        {
-            "ok": True,
-            "islem": "ekle",
-            "markalar": birlesik,
-            "markalar_ozel": kayit_yazi,
-            "marka_varsayilan": DEMIRBAS_MARKA_VARSAYILAN,
-            "marka_taban": list(DEMIRBAS_MARKA_LISTESI_TABAN),
-        }
+    prefs = demirbas_marka_prefs_normalize(
+        {"markalar": kayitli, "gizli": marka_gizli}
     )
+    if not _demirbas_ui_pref_set(DEMIRBAS_PREF_MARKA, prefs):
+        return jsonify({"ok": False, "mesaj": "Kayıt başarısız"}), 500
+    payload = _demirbas_marka_payload()
+    payload.update({"ok": True, "islem": "ekle"})
+    return jsonify(payload)
 
 
 @bp.route("/api/demirbas-seri-no", methods=["POST"])

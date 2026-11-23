@@ -179,7 +179,7 @@ def demirbas_katalog_birlesik(
     ek: list | None = None,
     gizli: list | None = None,
 ) -> list[dict[str, str]]:
-    """hazır − gizlenenler + özel eklenenler. Her öğede kaynak=hazir|ozel."""
+    """hazır − gizlenenler + özel eklenenler (− gizlenenler). Her öğede kaynak=hazir|ozel."""
     gizli_keys = {
         demirbas_tr_casefold(str(x or "").strip())
         for x in (gizli or [])
@@ -201,6 +201,8 @@ def demirbas_katalog_birlesik(
         if key in hazir_keys:
             # hazır (görünür veya gizli) ile çakışan özel kayıt yok sayılır
             continue
+        if key in gizli_keys:
+            continue
         if any(demirbas_tr_casefold(x["esya"]) == key for x in out):
             continue
         grup = str(it.get("grup") or "").strip()
@@ -210,6 +212,48 @@ def demirbas_katalog_birlesik(
         if kapsam not in ("oda_ici", "ortak_alan"):
             kapsam = demirbas_grup_kapsam(grup)
         out.append({"kapsam": kapsam, "grup": grup, "esya": ad, "kaynak": "ozel"})
+    return out
+
+
+def demirbas_panel_urunler(
+    *,
+    ek: list | None = None,
+    gizli: list | None = None,
+) -> list[dict[str, Any]]:
+    """Panel: tüm hazır + özel; aktif=False → gizlenmiş (soluk, tekrar açılabilir)."""
+    gizli_keys = {
+        demirbas_tr_casefold(str(x or "").strip())
+        for x in (gizli or [])
+        if str(x or "").strip()
+    }
+    hazir_keys = {demirbas_tr_casefold(e) for (_k, _g, e) in DEMIRBAS_KATALOG}
+    out: list[dict[str, Any]] = []
+    for k, g, e in DEMIRBAS_KATALOG:
+        out.append(
+            {
+                "kapsam": k,
+                "grup": g,
+                "esya": e,
+                "kaynak": "hazir",
+                "aktif": demirbas_tr_casefold(e) not in gizli_keys,
+            }
+        )
+    for it in demirbas_ek_normalize(ek):
+        ad = it["esya"]
+        key = demirbas_tr_casefold(ad)
+        if key in hazir_keys:
+            continue
+        if any(demirbas_tr_casefold(x["esya"]) == key for x in out):
+            continue
+        out.append(
+            {
+                "kapsam": it["kapsam"],
+                "grup": it["grup"],
+                "esya": ad,
+                "kaynak": "ozel",
+                "aktif": key not in gizli_keys,
+            }
+        )
     return out
 
 
@@ -342,8 +386,17 @@ DEMIRBAS_MARKA_LISTESI_TABAN = [
 ]
 
 
-def demirbas_marka_listesi_birlesik(kayitli: list | None = None) -> list[str]:
-    """Varsayılan taban + kayıtlı markalar (TR casefold tekil)."""
+def demirbas_marka_listesi_birlesik(
+    kayitli: list | None = None,
+    *,
+    gizli: list | None = None,
+) -> list[str]:
+    """Varsayılan taban + kayıtlı markalar − gizlenenler (TR casefold tekil)."""
+    gizli_keys = {
+        demirbas_tr_casefold(str(x or "").strip())
+        for x in (gizli or [])
+        if str(x or "").strip()
+    }
     seen: set[str] = set()
     out: list[str] = []
     for m in list(DEMIRBAS_MARKA_LISTESI_TABAN) + list(kayitli or []):
@@ -351,11 +404,35 @@ def demirbas_marka_listesi_birlesik(kayitli: list | None = None) -> list[str]:
         if not t:
             continue
         k = demirbas_tr_casefold(t)
-        if k in seen:
+        if k in seen or k in gizli_keys:
             continue
         seen.add(k)
         out.append(DEMIRBAS_MARKA_VARSAYILAN if k == "muhtelif" else t)
     return out or [DEMIRBAS_MARKA_VARSAYILAN]
+
+
+def demirbas_marka_prefs_normalize(prefs: dict | None) -> dict:
+    """markalar + gizli alanlarını normalize et (Muhtelif saklanmaz / gizlenemez)."""
+    prefs = prefs if isinstance(prefs, dict) else {}
+    seen: set[str] = set()
+    markalar: list[str] = []
+    for m in prefs.get("markalar") or []:
+        t = str(m or "").strip()
+        if not t:
+            continue
+        k = demirbas_tr_casefold(t)
+        if k == "muhtelif" or k in seen:
+            continue
+        seen.add(k)
+        markalar.append(t)
+    gizli = demirbas_gizli_normalize(prefs.get("gizli"))
+    gizli = [
+        x
+        for x in gizli
+        if demirbas_tr_casefold(x) != "muhtelif"
+        and demirbas_tr_casefold(x) in {demirbas_tr_casefold(m) for m in markalar}
+    ]
+    return {"markalar": markalar, "gizli": gizli}
 
 
 def demirbas_pref_merge_json(
@@ -397,7 +474,7 @@ def demirbas_pref_merge_json(
     if pref_key == DEMIRBAS_PREF_MARKA:
         raw = list(disk.get("markalar") or []) + list(incoming.get("markalar") or [])
         seen: set[str] = set()
-        out: list[str] = []
+        markalar: list[str] = []
         for m in raw:
             t = str(m or "").strip()
             if not t:
@@ -406,8 +483,21 @@ def demirbas_pref_merge_json(
             if k == "muhtelif" or k in seen or k in rem_keys:
                 continue
             seen.add(k)
-            out.append(t)
-        return {"markalar": out}
+            markalar.append(t)
+        # gizli: birleşim; removed = geri getir / kalıcı sil
+        gizli_raw = list(disk.get("gizli") or []) + list(incoming.get("gizli") or [])
+        gizli = demirbas_gizli_normalize(gizli_raw)
+        if rem_keys:
+            gizli = [x for x in gizli if demirbas_tr_casefold(x) not in rem_keys]
+        # kalıcı silinen marka gizli listesinde kalmasın
+        marka_keys = {demirbas_tr_casefold(m) for m in markalar}
+        gizli = [
+            x
+            for x in gizli
+            if demirbas_tr_casefold(x) != "muhtelif"
+            and demirbas_tr_casefold(x) in marka_keys
+        ]
+        return {"markalar": markalar, "gizli": gizli}
 
     # bilinmeyen anahtar: incoming öncelikli
     out = dict(disk)

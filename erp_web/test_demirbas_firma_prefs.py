@@ -58,6 +58,7 @@ def test_merge_esnek():
         {"markalar": ["Dell", "hp"]},
     )
     check("marka_merge", set(mk["markalar"]) == {"HP", "Dell"}, str(mk))
+    check("marka_merge_gizli", mk.get("gizli") == [], str(mk))
 
 
 def test_iki_kullanici_sim():

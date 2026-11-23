@@ -3637,13 +3637,10 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         <button type="button" class="auto-btn" id="giris_demirbas_ekle_btn" onclick="girisDemirbasSatirEkle(); return false;">+ Satır ekle</button>
                         <button type="button" class="auto-btn" id="giris_demirbas_liste_duzenle" onclick="girisDemirbasDuzenlePanelAcKapa(); return false;">Listeyi düzenle</button>
                     </div>
-                    <div id="giris_demirbas_duzenle_panel" style="display:none;margin-top:10px;padding:10px;border:1px solid #455a64;border-radius:4px;max-width:520px;">
+                    <div id="giris_demirbas_duzenle_panel" style="display:none;margin-top:10px;padding:10px;border:1px solid #455a64;border-radius:4px;max-width:640px;">
                         <div style="font-weight:600;margin-bottom:6px;">Ürün listesini düzenle</div>
                         <div id="giris_demirbas_duzenle_liste"></div>
-                        <div style="font-weight:600;margin:12px 0 6px;">Gizlenenler</div>
-                        <div id="giris_demirbas_gizli_liste"></div>
-                        <div style="font-weight:600;margin:12px 0 6px;">Markalar</div>
-                        <div id="giris_demirbas_duzenle_markalar"></div>
+                        <div id="giris_demirbas_duzenle_markalar" style="margin-top:12px;"></div>
                     </div>
                 </div>
 
@@ -39844,6 +39841,7 @@ var GIRIS_DEMIRBAS_API = '/giris/api';
 var GIRIS_DEMIRBAS_MARKA_KEY = 'demirbas_markalar';
 var __girisDemirbasKatalog = [];
 var __girisDemirbasGizli = [];
+var __girisDemirbasPanel = [];
 var __girisDemirbasGruplar = ['Çalışma Alanı', 'Depolama', 'Teknoloji', 'Aydınlatma ve Aksesuar', 'Ortak Alan (oda dışı)'];
 var __girisDemirbasDiger = 'Diğer (elle yaz)';
 var __girisDemirbasAktif = false;
@@ -39854,6 +39852,7 @@ var __girisDemirbasMarkaVarsayilan = 'Muhtelif';
 var __girisDemirbasMarkaTaban = ['Muhtelif'];
 var __girisDemirbasMarkalar = __girisDemirbasMarkaTaban.slice();
 var __girisDemirbasMarkalarOzel = [];
+var __girisDemirbasMarkalarGizli = [];
 
 function girisDemirbasApi(path, opts) {
     opts = opts || {};
@@ -39946,6 +39945,7 @@ function girisDemirbasMarkaUygula(j) {
             return !tabanK[girisDemirbasMarkaFold(m)];
         });
     }
+    if (Array.isArray(j.markalar_gizli)) __girisDemirbasMarkalarGizli = j.markalar_gizli.slice();
     girisDemirbasMarkaListeHtml();
     girisDemirbasDuzenlePanelDoldur();
 }
@@ -39958,9 +39958,10 @@ function girisDemirbasEsc(s) {
         .replace(/"/g, '&quot;');
 }
 
-function girisDemirbasKatalogUygula(katalog, gizli, gruplar) {
+function girisDemirbasKatalogUygula(katalog, gizli, gruplar, panel) {
     __girisDemirbasKatalog = Array.isArray(katalog) ? katalog : [];
     __girisDemirbasGizli = Array.isArray(gizli) ? gizli : [];
+    if (Array.isArray(panel)) __girisDemirbasPanel = panel.slice();
     if (Array.isArray(gruplar) && gruplar.length) __girisDemirbasGruplar = gruplar.slice();
     var tb = document.getElementById('giris_demirbas_tbody');
     if (tb) {
@@ -40004,6 +40005,22 @@ function girisDemirbasKatalogUygula(katalog, gizli, gruplar) {
         });
     }
     girisDemirbasDuzenlePanelDoldur();
+}
+
+function girisDemirbasPayloadUygula(j) {
+    if (!j) return;
+    if (Array.isArray(j.katalog) || Array.isArray(j.gizli) || Array.isArray(j.panel) || Array.isArray(j.gruplar)) {
+        girisDemirbasKatalogUygula(j.katalog, j.gizli, j.gruplar || __girisDemirbasGruplar, j.panel);
+    }
+    if (j.marka_varsayilan || j.marka_taban || j.markalar || j.marka_listesi || j.markalar_ozel || j.markalar_gizli) {
+        girisDemirbasMarkaUygula({
+            marka_varsayilan: j.marka_varsayilan,
+            marka_taban: j.marka_taban,
+            markalar: j.markalar || j.marka_listesi,
+            markalar_ozel: j.markalar_ozel,
+            markalar_gizli: j.markalar_gizli
+        });
+    }
 }
 
 function girisDemirbasUnvanIlkKelime() {
@@ -40149,7 +40166,8 @@ function girisDemirbasPanelUrunEkle(btn) {
     if (!wrap) return;
     var grup = wrap.getAttribute('data-grup') || '';
     var adEl = wrap.querySelector('.dem-duzenle-urun-ad');
-    var msg = wrap.querySelector('.dem-duzenle-msg');
+    var baslik = wrap.closest ? wrap.closest('.dem-duzenle-baslik') : null;
+    var msg = (baslik && baslik.querySelector('.dem-duzenle-msg')) || wrap.querySelector('.dem-duzenle-msg');
     var ad = adEl ? String(adEl.value || '').trim() : '';
     if (msg) { msg.style.display = 'none'; msg.innerHTML = ''; }
     if (ad.length < 2 || ad.length > 40) {
@@ -40166,16 +40184,20 @@ function girisDemirbasPanelUrunEkle(btn) {
                 msg.style.display = '';
                 if (j && j.kod === 'geri_getir') {
                     var es = String((j && j.esya) || ad);
-                    msg.innerHTML = girisDemirbasEsc((j && j.mesaj) || 'Bu ürün gizlenmiş.') +
-                        ' <a href="#" onclick="girisDemirbasUrunGeriGetir(' + JSON.stringify(es) +
-                        '); return false;">Geri getir</a>';
+                    msg.innerHTML = girisDemirbasEsc((j && j.mesaj) || 'Bu ürün listeden çıkarılmış.') +
+                        ' <a href="#" data-dem-geri="' + girisDemirbasEsc(es) + '">Geri getir</a>';
+                    var a = msg.querySelector('a[data-dem-geri]');
+                    if (a) a.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        girisDemirbasUrunGeriGetir(a.getAttribute('data-dem-geri'));
+                    });
                 } else {
                     msg.textContent = (j && j.mesaj) || 'Ürün eklenemedi';
                 }
             }
             return;
         }
-        girisDemirbasKatalogUygula(j.katalog, j.gizli, __girisDemirbasGruplar);
+        girisDemirbasPayloadUygula(j);
         girisDemirbasMesaj((j.esya || ad) + ' eklendi', 'ok');
         var again = null;
         Array.prototype.forEach.call(document.querySelectorAll('.dem-duzenle-ekle'), function (el) {
@@ -40191,7 +40213,8 @@ function girisDemirbasPanelMarkaEkle(btn) {
     var wrap = btn && btn.closest ? btn.closest('.dem-duzenle-marka-ekle') : null;
     if (!wrap) return;
     var adEl = wrap.querySelector('.dem-duzenle-marka-ad');
-    var msg = wrap.querySelector('.dem-duzenle-msg');
+    var baslik = wrap.closest ? wrap.closest('.dem-duzenle-baslik') : null;
+    var msg = (baslik && baslik.querySelector('.dem-duzenle-msg')) || wrap.querySelector('.dem-duzenle-msg');
     var ad = adEl ? String(adEl.value || '').trim() : '';
     if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
     if (ad.length < 2 || ad.length > 40) {
@@ -40216,17 +40239,6 @@ function girisDemirbasPanelMarkaEkle(btn) {
     });
 }
 
-function girisDemirbasMarkaCikar(marka) {
-    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-markalar', {
-        method: 'POST',
-        body: { marka: marka, cikar: true }
-    }).then(function (res) {
-        var j = res && res.json;
-        if (!res.ok || !j || !j.ok) return;
-        girisDemirbasMarkaUygula(j);
-    }).catch(function () {});
-}
-
 function girisDemirbasDuzenlePanelAcKapa() {
     var pan = document.getElementById('giris_demirbas_duzenle_panel');
     if (!pan) return;
@@ -40238,22 +40250,45 @@ function girisDemirbasDuzenlePanelAcKapa() {
     }
 }
 
-function girisDemirbasDuzenleEkleSatirHtml(grup) {
-    return '<div class="dem-duzenle-ekle" data-grup="' + girisDemirbasEsc(grup) + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px;">' +
-        '<input type="text" class="dem-duzenle-urun-ad" maxlength="40" placeholder="Yeni ürün adı" style="flex:1;min-width:140px;" ' +
+function girisDemirbasDuzenleBaslikEkleHtml(grup) {
+    return '<div class="dem-duzenle-ekle" data-grup="' + girisDemirbasEsc(grup) + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:160px;justify-content:flex-end;">' +
+        '<input type="text" class="dem-duzenle-urun-ad" maxlength="40" placeholder="Yeni ürün adı" style="flex:1;min-width:120px;max-width:200px;" ' +
         'onkeydown="if(event.key===\'Enter\'){event.preventDefault();girisDemirbasPanelUrunEkle(this);return false;}">' +
         '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasPanelUrunEkle(this); return false;">+ Ekle</button>' +
-        '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div></div>';
+        '</div>';
+}
+
+function girisDemirbasPanelDurumYaz(row, txt, ok) {
+    if (!row) return;
+    var st = row.querySelector('.dem-panel-durum');
+    if (!st) return;
+    st.textContent = txt || '';
+    st.style.color = ok ? '#81c784' : '#ef9a9a';
+    if (txt) {
+        setTimeout(function () {
+            if (st.textContent === txt) st.textContent = '';
+        }, 1600);
+    }
+}
+
+function girisDemirbasPanelRowBul(attr, val) {
+    var rows = document.querySelectorAll('.dem-panel-row[' + attr + ']');
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute(attr) === val) return rows[i];
+    }
+    return null;
 }
 
 function girisDemirbasDuzenlePanelDoldur() {
     var box = document.getElementById('giris_demirbas_duzenle_liste');
-    var gizBox = document.getElementById('giris_demirbas_gizli_liste');
     var markaBox = document.getElementById('giris_demirbas_duzenle_markalar');
     if (!box) return;
     var byGrup = {};
     (__girisDemirbasGruplar || []).forEach(function (g) { byGrup[g] = []; });
-    (__girisDemirbasKatalog || []).forEach(function (it) {
+    var kaynak = (__girisDemirbasPanel && __girisDemirbasPanel.length)
+        ? __girisDemirbasPanel
+        : (__girisDemirbasKatalog || []);
+    kaynak.forEach(function (it) {
         var g = it.grup || 'Diğer';
         if (!byGrup[g]) byGrup[g] = [];
         byGrup[g].push(it);
@@ -40263,50 +40298,154 @@ function girisDemirbasDuzenlePanelDoldur() {
         ? __girisDemirbasGruplar.slice()
         : Object.keys(byGrup);
     grupSirasi.forEach(function (g) {
-        html += '<div style="margin:6px 0 2px;font-weight:600;">' + girisDemirbasEsc(g) + '</div>';
+        html += '<div class="dem-duzenle-grup" style="margin:8px 0 4px;">' +
+            '<div class="dem-duzenle-baslik" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:4px;">' +
+            '<div style="font-weight:600;min-width:120px;">' + girisDemirbasEsc(g) + '</div>' +
+            girisDemirbasDuzenleBaslikEkleHtml(g) +
+            '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div>' +
+            '</div>';
         (byGrup[g] || []).forEach(function (it) {
             var kay = it.kaynak || 'hazir';
-            html += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;">' +
+            var aktif = (it.aktif !== false);
+            var soluk = aktif ? '' : 'opacity:0.45;';
+            html += '<div class="dem-panel-row" data-esya="' + girisDemirbasEsc(it.esya) + '" data-kaynak="' + girisDemirbasEsc(kay) + '" style="display:flex;align-items:center;gap:8px;margin:2px 0;' + soluk + '">' +
+                '<input type="checkbox" class="dem-panel-aktif" ' + (aktif ? 'checked ' : '') + 'aria-label="Listede">' +
                 '<span style="flex:1;">' + girisDemirbasEsc(it.esya) +
                 (kay === 'ozel' ? ' <em style="color:#90a4ae;font-size:11px;">(özel)</em>' : '') +
                 '</span>' +
-                '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasUrunCikar(' +
-                JSON.stringify(String(it.esya)) + '); return false;">Çıkar</button></div>';
+                (kay === 'ozel'
+                    ? '<button type="button" class="auto-btn dem-panel-kalici" title="Kalıcı sil" aria-label="Kalıcı sil" style="font-size:11px;padding:2px 6px;line-height:1;">✕</button>'
+                    : '') +
+                '<span class="dem-panel-durum" style="font-size:11px;min-width:64px;"></span></div>';
         });
-        html += girisDemirbasDuzenleEkleSatirHtml(g);
+        html += '</div>';
     });
     box.innerHTML = html || '<div style="color:#90a4ae;">Liste boş</div>';
-    if (gizBox) {
-        var gizli = __girisDemirbasGizli || [];
-        if (!gizli.length) {
-            gizBox.innerHTML = '<div style="color:#90a4ae;font-size:12px;">Gizlenen ürün yok</div>';
-        } else {
-            var gh = '';
-            gizli.forEach(function (ad) {
-                gh += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;">' +
-                    '<span style="flex:1;">' + girisDemirbasEsc(ad) + '</span>' +
-                    '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasUrunGeriGetir(' +
-                    JSON.stringify(String(ad)) + '); return false;">Geri getir</button></div>';
-            });
-            gh += '<button type="button" class="auto-btn" style="margin-top:6px;font-size:11px;" onclick="girisDemirbasUrunGeriGetirHepsi(); return false;">Gizlenenleri geri getir</button>';
-            gizBox.innerHTML = gh;
-        }
-    }
-    if (markaBox) {
-        var mh = '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;"><span style="flex:1;">Muhtelif <em style="color:#90a4ae;font-size:11px;">(sabit)</em></span></div>';
-        (__girisDemirbasMarkalarOzel || []).forEach(function (m) {
-            mh += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;">' +
-                '<span style="flex:1;">' + girisDemirbasEsc(m) + '</span>' +
-                '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasMarkaCikar(' +
-                JSON.stringify(String(m)) + '); return false;">Çıkar</button></div>';
+    Array.prototype.forEach.call(box.querySelectorAll('.dem-panel-aktif'), function (cb) {
+        cb.addEventListener('change', function () {
+            girisDemirbasUrunAktifDegisti(cb);
         });
-        mh += '<div class="dem-duzenle-marka-ekle" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px;">' +
-            '<input type="text" class="dem-duzenle-marka-ad" maxlength="40" placeholder="Yeni marka adı" style="flex:1;min-width:140px;" ' +
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('.dem-panel-kalici'), function (btn) {
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            girisDemirbasUrunKaliciSil(btn);
+        });
+    });
+    if (markaBox) {
+        var gizliK = {};
+        (__girisDemirbasMarkalarGizli || []).forEach(function (m) {
+            gizliK[girisDemirbasMarkaFold(m)] = 1;
+        });
+        var mh = '<div class="dem-duzenle-grup" style="margin:0;">' +
+            '<div class="dem-duzenle-baslik" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:4px;">' +
+            '<div style="font-weight:600;min-width:120px;">Markalar</div>' +
+            '<div class="dem-duzenle-marka-ekle" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:160px;justify-content:flex-end;">' +
+            '<input type="text" class="dem-duzenle-marka-ad" maxlength="40" placeholder="Yeni marka adı" style="flex:1;min-width:120px;max-width:200px;" ' +
             'onkeydown="if(event.key===\'Enter\'){event.preventDefault();girisDemirbasPanelMarkaEkle(this);return false;}">' +
             '<button type="button" class="auto-btn" style="font-size:11px;padding:2px 8px;" onclick="girisDemirbasPanelMarkaEkle(this); return false;">+ Ekle</button>' +
-            '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div></div>';
+            '</div>' +
+            '<div class="dem-duzenle-msg" style="display:none;width:100%;color:#ef9a9a;font-size:12px;"></div>' +
+            '</div>';
+        mh += '<div class="dem-panel-row" data-marka="Muhtelif" style="display:flex;align-items:center;gap:8px;margin:2px 0;">' +
+            '<input type="checkbox" class="dem-panel-marka-aktif" checked disabled aria-label="Muhtelif">' +
+            '<span style="flex:1;">Muhtelif <em style="color:#90a4ae;font-size:11px;">(sabit)</em></span>' +
+            '<span class="dem-panel-durum" style="font-size:11px;min-width:64px;"></span></div>';
+        (__girisDemirbasMarkalarOzel || []).forEach(function (m) {
+            var aktif = !gizliK[girisDemirbasMarkaFold(m)];
+            var soluk = aktif ? '' : 'opacity:0.45;';
+            mh += '<div class="dem-panel-row" data-marka="' + girisDemirbasEsc(m) + '" style="display:flex;align-items:center;gap:8px;margin:2px 0;' + soluk + '">' +
+                '<input type="checkbox" class="dem-panel-marka-aktif" ' + (aktif ? 'checked ' : '') + 'aria-label="Listede">' +
+                '<span style="flex:1;">' + girisDemirbasEsc(m) + '</span>' +
+                '<span class="dem-panel-durum" style="font-size:11px;min-width:64px;"></span></div>';
+        });
+        mh += '</div>';
         markaBox.innerHTML = mh;
+        Array.prototype.forEach.call(markaBox.querySelectorAll('.dem-panel-marka-aktif:not([disabled])'), function (cb) {
+            cb.addEventListener('change', function () {
+                girisDemirbasMarkaAktifDegisti(cb);
+            });
+        });
     }
+}
+
+function girisDemirbasUrunAktifDegisti(cb) {
+    var row = cb && cb.closest ? cb.closest('.dem-panel-row') : null;
+    if (!row) return;
+    var esya = row.getAttribute('data-esya') || '';
+    var aktif = !!cb.checked;
+    var path = aktif
+        ? (GIRIS_DEMIRBAS_API + '/demirbas-urun-geri-getir')
+        : (GIRIS_DEMIRBAS_API + '/demirbas-urun-cikar');
+    girisDemirbasApi(path, {
+        method: 'POST',
+        body: { esya: esya }
+    }).then(function (res) {
+        var j = res && res.json;
+        if (!res.ok || !j || !j.ok) {
+            cb.checked = !aktif;
+            girisDemirbasPanelDurumYaz(row, (j && j.mesaj) || 'Kayıt başarısız', false);
+            return;
+        }
+        girisDemirbasPayloadUygula(j);
+        girisDemirbasPanelDurumYaz(
+            girisDemirbasPanelRowBul('data-esya', esya) || row,
+            aktif ? 'eklendi' : 'çıkarıldı',
+            true
+        );
+    }).catch(function () {
+        cb.checked = !aktif;
+        girisDemirbasPanelDurumYaz(row, 'Kayıt başarısız', false);
+    });
+}
+
+function girisDemirbasUrunKaliciSil(btn) {
+    var row = btn && btn.closest ? btn.closest('.dem-panel-row') : null;
+    if (!row) return;
+    var esya = row.getAttribute('data-esya') || '';
+    if (!esya) return;
+    if (!window.confirm('«' + esya + '» kalıcı silinsin mi?')) return;
+    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-urun-cikar', {
+        method: 'POST',
+        body: { esya: esya, kalici: true }
+    }).then(function (res) {
+        var j = res && res.json;
+        if (!res.ok || !j || !j.ok) {
+            girisDemirbasPanelDurumYaz(row, (j && j.mesaj) || 'Silinemedi', false);
+            return;
+        }
+        girisDemirbasPayloadUygula(j);
+        girisDemirbasMesaj(esya + ' silindi', 'ok');
+    }).catch(function () {
+        girisDemirbasPanelDurumYaz(row, 'Silinemedi', false);
+    });
+}
+
+function girisDemirbasMarkaAktifDegisti(cb) {
+    var row = cb && cb.closest ? cb.closest('.dem-panel-row') : null;
+    if (!row) return;
+    var marka = row.getAttribute('data-marka') || '';
+    var aktif = !!cb.checked;
+    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-markalar', {
+        method: 'POST',
+        body: { marka: marka, aktif: aktif }
+    }).then(function (res) {
+        var j = res && res.json;
+        if (!res.ok || !j || !j.ok) {
+            cb.checked = !aktif;
+            girisDemirbasPanelDurumYaz(row, (j && j.mesaj) || 'Kayıt başarısız', false);
+            return;
+        }
+        girisDemirbasMarkaUygula(j);
+        girisDemirbasPanelDurumYaz(
+            girisDemirbasPanelRowBul('data-marka', marka) || row,
+            aktif ? 'eklendi' : 'çıkarıldı',
+            true
+        );
+    }).catch(function () {
+        cb.checked = !aktif;
+        girisDemirbasPanelDurumYaz(row, 'Kayıt başarısız', false);
+    });
 }
 
 function girisDemirbasUrunCikar(esya) {
@@ -40316,7 +40455,7 @@ function girisDemirbasUrunCikar(esya) {
     }).then(function (res) {
         var j = res && res.json;
         if (!res.ok || !j || !j.ok) return;
-        girisDemirbasKatalogUygula(j.katalog, j.gizli, __girisDemirbasGruplar);
+        girisDemirbasPayloadUygula(j);
     }).catch(function () {});
 }
 
@@ -40327,18 +40466,7 @@ function girisDemirbasUrunGeriGetir(esya) {
     }).then(function (res) {
         var j = res && res.json;
         if (!res.ok || !j || !j.ok) return;
-        girisDemirbasKatalogUygula(j.katalog, j.gizli, __girisDemirbasGruplar);
-    }).catch(function () {});
-}
-
-function girisDemirbasUrunGeriGetirHepsi() {
-    girisDemirbasApi(GIRIS_DEMIRBAS_API + '/demirbas-urun-geri-getir', {
-        method: 'POST',
-        body: { hepsi: true }
-    }).then(function (res) {
-        var j = res && res.json;
-        if (!res.ok || !j || !j.ok) return;
-        girisDemirbasKatalogUygula(j.katalog, j.gizli, __girisDemirbasGruplar);
+        girisDemirbasPayloadUygula(j);
     }).catch(function () {});
 }
 
@@ -40463,14 +40591,16 @@ function girisDemirbasYukle(mid) {
             __girisDemirbasSemaHazir = !!j.sema_hazir;
             __girisDemirbasKatalog = Array.isArray(j.katalog) ? j.katalog : [];
             __girisDemirbasGizli = Array.isArray(j.gizli) ? j.gizli : [];
+            __girisDemirbasPanel = Array.isArray(j.panel) ? j.panel : [];
             if (Array.isArray(j.gruplar) && j.gruplar.length) __girisDemirbasGruplar = j.gruplar.slice();
             if (j.diger) __girisDemirbasDiger = j.diger;
-            if (j.marka_varsayilan || j.marka_taban || j.marka_listesi) {
+            if (j.marka_varsayilan || j.marka_taban || j.marka_listesi || j.markalar_ozel || j.markalar_gizli) {
                 girisDemirbasMarkaUygula({
                     marka_varsayilan: j.marka_varsayilan,
                     marka_taban: j.marka_taban,
                     markalar: j.marka_listesi,
-                    markalar_ozel: j.markalar_ozel
+                    markalar_ozel: j.markalar_ozel,
+                    markalar_gizli: j.markalar_gizli
                 });
             }
             girisDemirbasDuzenlePanelDoldur();

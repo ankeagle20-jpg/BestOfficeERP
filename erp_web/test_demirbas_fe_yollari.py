@@ -125,9 +125,13 @@ def test_ayna_ve_sabit():
     check("marka_api_yol", "demirbas-markalar" in b_t)
     check("panel_urun", "girisDemirbasPanelUrunEkle" in b_t and "demirbas-urun" in b_t)
     check("panel_marka", "girisDemirbasPanelMarkaEkle" in b_t)
+    check("panel_checkbox", "dem-panel-aktif" in b_t and "girisDemirbasUrunAktifDegisti" in b_t)
+    check("panel_baslik_ekle", "girisDemirbasDuzenleBaslikEkleHtml" in b_t)
+    check("panel_kalici", "girisDemirbasUrunKaliciSil" in b_t)
     check("ayri_form_yok", "girisDemirbasYeniPanelGoster" not in b_t and "girisDemirbasMarkaFormKaydet" not in b_t)
     check("yeni_opt_yok", "__YENI__" not in b_t)
     check("auto_marka_yok", "girisDemirbasMarkaKaydetListe" not in b_t)
+    check("gizli_bolum_yok", "Gizlenenleri geri getir" not in b_t and "giris_demirbas_gizli_liste" not in html)
     check("satir_etiket", "+ Satır ekle" in html and "Yeni Marka Ekle" not in html and "Yeni Demirbaş Ekle" not in html)
     check("ui_adet_th", ">Adet</th>" in html and "Adet / Durum" not in html)
     # ayna: path sabitleri aynı
