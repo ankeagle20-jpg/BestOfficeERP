@@ -174,6 +174,25 @@ def test_adet1_3_karisik():
     check("kar_adet3", any(r[1] == "Yazıcı" and r[4] == "3" for r in rows), str(rows))
 
 
+def test_ek2_layout_grid():
+    from sozlesme_sablon_v2 import render_sozlesme_docx_v2, _PAGE_USABLE_TWIPS
+    from docx import Document
+    from docx.oxml.ns import qn
+    from io import BytesIO
+
+    doc = Document(BytesIO(render_sozlesme_docx_v2(_base_ctx(demirbas_rows=[]))))
+    ek2 = doc.tables[2]
+    grid = ek2._tbl.find(qn("w:tblGrid"))
+    check("layout_grid", grid is not None)
+    widths = []
+    if grid is not None:
+        for c in list(grid):
+            raw = c.get(qn("w:w"))
+            widths.append(int(raw) if raw else 0)
+    check("layout_ncols", len(widths) >= 6, str(len(widths)))
+    check("layout_sum", sum(widths[:6]) == _PAGE_USABLE_TWIPS, str(sum(widths[:6])))
+
+
 def main() -> int:
     test_0_satir()
     test_3_satir()
@@ -181,6 +200,7 @@ def main() -> int:
     test_ortak_karisik()
     test_adet1_3_karisik()
     test_madde5_dokunulmadi()
+    test_ek2_layout_grid()
     print("---")
     if FAILS:
         print("FAILS", len(FAILS), FAILS)

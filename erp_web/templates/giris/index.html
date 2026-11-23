@@ -32646,21 +32646,58 @@ function dosyaSil(index) {
     }
 }
 
-// Sözleşme oluştur
+// Sözleşme oluştur (v2: API önizleme modal; değilse eski sekme)
 async function sozlesmeOlustur() {
     if (!selectedId) {
-        // Henüz kayıtlı müşteri yoksa, formu kaydedip id almayı dene
         const fakeEvent = { preventDefault: function(){} };
         await kaydet(fakeEvent);
         if (!selectedId) {
-            // Kaydet sırasında zorunlu alan/validasyon hatası verilmiş olabilir
             return;
         }
     }
     const turSelect = document.getElementById('hizmet_turu');
     const tur = turSelect ? turSelect.value : '';
     const encoded = encodeURIComponent(tur);
-    window.open(`/giris/sozlesme-olustur/${selectedId}?tur=${encoded}`, '_blank');
+    const legacyUrl = '/giris/sozlesme-olustur/' + selectedId + '?tur=' + encoded;
+    try {
+        const r = await fetch('/giris/api/sozlesme-v2-onizle/' + selectedId + '?tur=' + encoded, { credentials: 'same-origin' });
+        if (r.ok) {
+            const data = await r.json();
+            if (data && data.v2 && data.html) {
+                const indir = data.indir_url || ('/giris/sozlesme-olustur/' + selectedId + '?indir=1&tur=' + encoded);
+                sozlesmeV2OnizleGoster(data.html, indir);
+                return;
+            }
+        }
+    } catch (e) { /* legacy */ }
+    window.open(legacyUrl, '_blank');
+}
+
+function sozlesmeV2OnizleGoster(html, indirUrl) {
+    var ov = document.getElementById('sozlesme-v2-onizle-overlay');
+    if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'sozlesme-v2-onizle-overlay';
+        ov.setAttribute('role', 'dialog');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:stretch;justify-content:center;padding:16px;';
+        ov.innerHTML = '<div style="background:#0f2740;color:#e0f7fa;max-width:960px;width:100%;margin:auto;border-radius:8px;display:flex;flex-direction:column;max-height:92vh;">'
+            + '<div style="display:flex;gap:10px;align-items:center;padding:12px;flex-wrap:wrap;">'
+            + '<strong style="margin-right:auto;">Sözleşme önizleme</strong>'
+            + '<a id="sozlesme-v2-onizle-indir" href="#" style="background:#2196f3;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:600;">İndir</a>'
+            + '<button type="button" id="sozlesme-v2-onizle-kapat" style="background:#546e7a;color:#fff;padding:10px 16px;border-radius:6px;border:none;cursor:pointer;font-weight:600;">Kapat</button>'
+            + '</div>'
+            + '<div id="sozlesme-v2-onizle-govde" style="background:#fff;color:#111;padding:20px;overflow:auto;flex:1;"></div>'
+            + '</div>';
+        document.body.appendChild(ov);
+        ov.addEventListener('click', function(ev){ if (ev.target === ov) ov.style.display = 'none'; });
+        var kapat = document.getElementById('sozlesme-v2-onizle-kapat');
+        if (kapat) kapat.addEventListener('click', function(){ ov.style.display = 'none'; });
+    }
+    var govde = document.getElementById('sozlesme-v2-onizle-govde');
+    if (govde) govde.innerHTML = html || '';
+    var a = document.getElementById('sozlesme-v2-onizle-indir');
+    if (a) a.href = indirUrl || '#';
+    ov.style.display = 'flex';
 }
 
 // Yazdır

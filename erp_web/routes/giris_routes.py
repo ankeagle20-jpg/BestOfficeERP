@@ -10443,17 +10443,143 @@ def resim_yukle(mid):
         return jsonify({'ok': False, 'mesaj': f'❌ Hata: {str(e)}'}), 400
 
 
+def _sozlesme_no_oner(tur_raw: str) -> str:
+    """Sonraki sözleşme no (yalnızca SELECT; INSERT yok)."""
+    tur_l = (tur_raw or "").lower()
+    if "hazır" in tur_l or "hazir" in tur_l:
+        prefix = "HO"
+    elif "paylaşımlı" in tur_l or "paylasimli" in tur_l:
+        prefix = "PO"
+    else:
+        prefix = "SO"
+    today = datetime.now()
+    tarih_kod = today.strftime("%d%m%y")
+    pattern = f"{prefix}{tarih_kod}-%"
+    last = fetch_one(
+        "SELECT sozlesme_no FROM sozlesmeler WHERE sozlesme_no LIKE %s ORDER BY sozlesme_no DESC LIMIT 1",
+        (pattern,),
+    )
+    if last and last.get("sozlesme_no"):
+        try:
+            son_parca = str(last["sozlesme_no"]).split("-")[-1]
+            sayac = int(son_parca) + 1
+        except Exception:
+            sayac = 600
+    else:
+        sayac = 600
+    return f"{prefix}{tarih_kod}-{sayac}"
+
+
+def _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw: str, sozlesme_no: str):
+    """v2 doldurma bağlamı (DB yazmaz)."""
+    from sozlesme_sablon_v2 import build_fill_ctx
+
+    kyc_row = None
+    try:
+        kyc_row = fetch_one(
+            "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+            (mid,),
+        )
+    except Exception:
+        kyc_row = None
+    try:
+        _yet_list = _musteri_yetkililer_listesi(mid)
+    except Exception:
+        _yet_list = []
+    ctx = build_fill_ctx(
+        musteri=musteri or {},
+        kyc=kyc_row,
+        sozlesme_no=sozlesme_no,
+        sozlesme_tarihi=None,
+        hizmet_turu=tur_raw or None,
+        yetkililer=_yet_list,
+    )
+    try:
+        ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(mid))
+    except Exception:
+        ctx["demirbas_rows"] = []
+    return ctx
+
+
+@bp.route("/api/sozlesme-v2-onizle/<int:mid>")
+@giris_gerekli
+def api_sozlesme_v2_onizle(mid):
+    """v2 sözleşme HTML önizleme. Disk/DB yazmaz. Bayrak kapalıysa v2=false."""
+    try:
+        from sozlesme_sablon_v2 import (
+            sozlesme_sablon_v2_aktif,
+            render_sozlesme_docx_v2,
+            docx_bytes_to_preview_html,
+        )
+    except Exception:
+        return jsonify({"ok": False, "v2": False, "mesaj": "modül yok"}), 500
+
+    if not sozlesme_sablon_v2_aktif(mid):
+        return jsonify({"ok": True, "v2": False})
+
+    musteri = fetch_one("SELECT c.* FROM customers c WHERE c.id = %s", (mid,))
+    if not musteri:
+        return jsonify({"ok": False, "v2": True, "mesaj": "Müşteri bulunamadı"}), 404
+
+    tur_raw = (request.args.get("tur") or "").lower()
+    sozlesme_no = _sozlesme_no_oner(tur_raw)
+    ctx = _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw, sozlesme_no)
+    data = render_sozlesme_docx_v2(ctx)
+    html = docx_bytes_to_preview_html(data)
+    indir_url = url_for(
+        "giris.sozlesme_olustur", mid=mid, indir="1", tur=request.args.get("tur", "")
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "v2": True,
+            "html": html,
+            "indir_url": indir_url,
+            "sozlesme_no": sozlesme_no,
+        }
+    )
+
+
 @bp.route('/sozlesme-olustur/<int:mid>')
 @giris_gerekli
 def sozlesme_olustur(mid):
-    """Müşteri sözleşmesi oluştur (Word). ?indir=1 ile doğrudan Word indirilir; yoksa sayfa + Word İndir / WhatsApp."""
+    """Müşteri sözleşmesi oluştur (Word). ?indir=1 ile Word indirilir (kayıt+dosya).
+
+    indir yok: eski şablon → ara sayfa; v2 aktif → HTML önizleme sayfası (yazma yok).
+    """
     try:
         musteri = fetch_one("SELECT c.* FROM customers c WHERE c.id = %s", (mid,))
         if not musteri:
             return "Müşteri bulunamadı", 404
 
+        tur_raw = (request.args.get("tur") or "").lower()
+
+        # v2 mi?
+        try:
+            from sozlesme_sablon_v2 import sozlesme_sablon_v2_aktif as _v2_aktif
+        except Exception:
+            _v2_aktif = None  # type: ignore
+        v2_on = callable(_v2_aktif) and _v2_aktif(mid)
+
         if request.args.get("indir") != "1":
             indir_url = url_for("giris.sozlesme_olustur", mid=mid, indir="1", tur=request.args.get("tur", ""))
+            if v2_on:
+                # Önizleme: bellek içi DOCX→HTML; uploads/sozlesmeler ve INSERT yok
+                from sozlesme_sablon_v2 import (
+                    render_sozlesme_docx_v2,
+                    docx_bytes_to_preview_html,
+                )
+
+                sozlesme_no = _sozlesme_no_oner(tur_raw)
+                ctx = _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw, sozlesme_no)
+                html = docx_bytes_to_preview_html(render_sozlesme_docx_v2(ctx))
+                return render_template(
+                    "giris/sozlesme_v2_onizle.html",
+                    musteri=musteri,
+                    indir_url=indir_url,
+                    preview_html=html,
+                    sozlesme_no=sozlesme_no,
+                )
             tel = (musteri.get("phone") or "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
             num = ("90" + tel[1:]) if (tel and tel.startswith("0")) else ("90" + tel if tel else "")
             metin = "Sayın " + (musteri.get("name") or "Müşteri") + ",\n\nHizmet sözleşmeniz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE"
@@ -10465,72 +10591,19 @@ def sozlesme_olustur(mid):
                 whatsapp_url=whatsapp_url,
             )
 
-        # Sözleşme numarası otomatik oluştur
-        # Hizmet türüne göre prefix belirle (SO/HO/PO)
-        tur_raw = (request.args.get("tur") or "").lower()
-        if "hazır" in tur_raw or "hazir" in tur_raw:
-            prefix = "HO"
-        elif "paylaşımlı" in tur_raw or "paylasimli" in tur_raw:
-            prefix = "PO"
-        else:
-            prefix = "SO"
-
-        today = datetime.now()
-        tarih_kod = today.strftime("%d%m%y")  # Örn: 270225
-
-        # Aynı gün ve aynı türdeki sözleşmeler için 600'den başlayan artan numara
-        pattern = f"{prefix}{tarih_kod}-%"
-        last = fetch_one(
-            "SELECT sozlesme_no FROM sozlesmeler WHERE sozlesme_no LIKE %s ORDER BY sozlesme_no DESC LIMIT 1",
-            (pattern,),
-        )
-        if last and last.get("sozlesme_no"):
-            try:
-                son_parca = str(last["sozlesme_no"]).split("-")[-1]
-                sayac = int(son_parca) + 1
-            except Exception:
-                sayac = 600
-        else:
-            sayac = 600
-
-        sozlesme_no = f"{prefix}{tarih_kod}-{sayac}"
+        # --- İNDİR: dosya + sozlesmeler kaydı ---
+        sozlesme_no = _sozlesme_no_oner(tur_raw)
 
         # v2 şablon (bayrak); varsayılan 0 = aşağıdaki eski üretim
         try:
             from sozlesme_sablon_v2 import (
                 sozlesme_sablon_v2_aktif,
-                build_fill_ctx,
                 save_sozlesme_docx_v2,
             )
         except Exception:
             sozlesme_sablon_v2_aktif = None  # type: ignore
         if callable(sozlesme_sablon_v2_aktif) and sozlesme_sablon_v2_aktif(mid):
-            kyc_row = None
-            try:
-                kyc_row = fetch_one(
-                    "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
-                    (mid,),
-                )
-            except Exception:
-                kyc_row = None
-            # Belge başlangıç: kart/KYC (rent_start_date / sozlesme_tarihi); bugün basılmaz
-            # Yetkililer: musteri_yetkililer (kart sekmesi); boşsa KYC düz alan
-            try:
-                _yet_list = _musteri_yetkililer_listesi(mid)
-            except Exception:
-                _yet_list = []
-            ctx = build_fill_ctx(
-                musteri=musteri,
-                kyc=kyc_row,
-                sozlesme_no=sozlesme_no,
-                sozlesme_tarihi=None,
-                hizmet_turu=tur_raw or None,
-                yetkililer=_yet_list,
-            )
-            try:
-                ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(mid))
-            except Exception:
-                ctx["demirbas_rows"] = []
+            ctx = _v2_sozlesme_ctx_for_mid(mid, musteri, tur_raw, sozlesme_no)
             filename = f"Sozlesme_{sozlesme_no}_{str(musteri.get('name') or 'Musteri').replace(' ', '_')}.docx"
             filepath = os.path.join("uploads", "sozlesmeler", filename)
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -10545,6 +10618,7 @@ def sozlesme_olustur(mid):
         from docx import Document  # lazy: boot RSS — yalnızca sözleşme .docx
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+        today = datetime.now()
         doc = Document()
         
         # Başlık

@@ -3252,6 +3252,7 @@ def api_kyc_sozlesme():
     """
     Seçili müşteri için KYC bilgileriyle Word sözleşmesi üret ve indir.
     Aynı müşteride tekrar çağrıldığında aynı sözleşme numarasını (yıl bazlı artan) kullanır.
+    ?onizle=1 (yalnızca v2): HTML önizleme; musteri_kyc UPDATE / dosya yazma yok.
     """
     musteri_id = request.args.get("musteri_id")
     if not musteri_id:
@@ -3265,6 +3266,8 @@ def api_kyc_sozlesme():
     if not kyc:
         flash("Bu müşteri için KYC bilgisi bulunamadı. Önce Kaydet yapın.", "danger")
         return redirect(url_for("musteriler.giris"))
+
+    onizle = str(request.args.get("onizle") or "").strip() in ("1", "true", "yes")
 
     # Sözleşme tarihi ve numarası
     soz_tarih = kyc.get("sozlesme_tarihi") or date.today()
@@ -3291,10 +3294,12 @@ def api_kyc_sozlesme():
             except Exception:
                 next_seq = 1
         soz_no = f"SZL-{yil}-{next_seq:04d}"
-        execute(
-            "UPDATE musteri_kyc SET sozlesme_no=%s, sozlesme_tarihi=%s WHERE id=%s",
-            (soz_no, soz_tarih, kyc["id"]),
-        )
+        # Önizlemede KYC UPDATE yok; kalıcı numara yalnız indirmede yazılır
+        if not onizle:
+            execute(
+                "UPDATE musteri_kyc SET sozlesme_no=%s, sozlesme_tarihi=%s WHERE id=%s",
+                (soz_no, soz_tarih, kyc["id"]),
+            )
 
     # Sözleşme metni için kullanılacak bilgiler
     unvan = kyc.get("sirket_unvani") or kyc.get("unvan") or ""
@@ -3337,6 +3342,8 @@ def api_kyc_sozlesme():
             sozlesme_sablon_v2_aktif,
             build_fill_ctx,
             save_sozlesme_docx_v2,
+            render_sozlesme_docx_v2,
+            docx_bytes_to_preview_html,
         )
     except Exception:
         sozlesme_sablon_v2_aktif = None  # type: ignore
@@ -3364,6 +3371,28 @@ def api_kyc_sozlesme():
             ctx["demirbas_rows"] = _demirbas_rows_for_mid(int(musteri_id))
         except Exception:
             ctx["demirbas_rows"] = []
+        if onizle:
+            html = docx_bytes_to_preview_html(render_sozlesme_docx_v2(ctx))
+            indir_url = url_for(
+                "musteriler.api_kyc_sozlesme", musteri_id=musteri_id
+            )
+            return render_template(
+                "giris/sozlesme_v2_onizle.html",
+                musteri=cust,
+                indir_url=indir_url,
+                preview_html=html,
+                sozlesme_no=soz_no,
+            )
+        # İndir: dosya yaz (önizleme yolu yazmaz)
+        if not soz_no or not (kyc.get("sozlesme_no") or "").strip():
+            # önizlemede yazılmadıysa kalıcı numara burada
+            try:
+                execute(
+                    "UPDATE musteri_kyc SET sozlesme_no=%s, sozlesme_tarihi=%s WHERE id=%s",
+                    (soz_no, soz_tarih, kyc["id"]),
+                )
+            except Exception:
+                pass
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out_dir = os.path.join(base_dir, "uploads", "sozlesmeler")
         os.makedirs(out_dir, exist_ok=True)

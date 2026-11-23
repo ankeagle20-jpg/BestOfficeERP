@@ -674,6 +674,291 @@ def _fill_table_ek2(table, ctx: dict) -> None:
         )
 
 
+# --- Sayfa / tablo düzeni (boş sayfa + sütun sığdırma) ---
+# Şablon Letter 12240×15840, kenar 1440 → kullanılabilir genişlik 9360 twip
+_PAGE_USABLE_TWIPS = 9360
+_EK2_FONT_PT = 9
+# Sıra | Eşya | Marka | Seri No | Adet | Mülkiyet
+_EK2_MIN = (420, 1100, 1000, 1680, 480, 900)
+_EK2_MAX = (720, 3000, 2800, 3200, 720, 1400)
+_EK2_PAD = 120  # hücre içi pay
+_EK1_MIN = (2200, 2800)
+_EK1_MAX = (4200, 7000)
+
+
+def _para_has_visible_text(p_el) -> bool:
+    from docx.oxml.ns import qn
+
+    for t in p_el.iter(qn("w:t")):
+        if (t.text or "").strip():
+            return True
+    # sayfa sonu kırılımı «içerik» sayılır — silme
+    for br in p_el.iter(qn("w:br")):
+        if br.get(qn("w:type")) == "page":
+            return True
+    return False
+
+
+def strip_trailing_empty_paragraphs(doc) -> int:
+    """Body sectPr öncesi sondaki boş paragrafları sil (boş son sayfa kök nedeni)."""
+    body = doc.element.body
+    kids = list(body.iterchildren())
+    removed = 0
+    # sondan: sectPr'yi koru, boş w:p sil
+    for child in reversed(kids):
+        tag = child.tag.split("}")[-1]
+        if tag == "sectPr":
+            continue
+        if tag != "p":
+            break
+        if _para_has_visible_text(child):
+            break
+        body.remove(child)
+        removed += 1
+    return removed
+
+
+def _char_width_twips(n_chars: int, *, font_pt: float = _EK2_FONT_PT) -> int:
+    """Ortalama orantılı genişlik tahmini (twip)."""
+    n = max(0, int(n_chars))
+    return int(n * font_pt * 10) + _EK2_PAD  # ~0.5em ≈ 10 twip/pt
+
+
+def _max_line_len(text: str) -> int:
+    lines = (text or "").split("\n")
+    return max((len(ln) for ln in lines), default=0)
+
+
+def compute_ek2_col_widths(col_max_chars: list[int]) -> list[int]:
+    """İçerik karakter uzunluklarına göre 6 sütun; toplam = kullanılabilir genişlik."""
+    if len(col_max_chars) < 6:
+        col_max_chars = list(col_max_chars) + [0] * (6 - len(col_max_chars))
+    raw = []
+    for i in range(6):
+        w = _char_width_twips(col_max_chars[i])
+        w = max(_EK2_MIN[i], min(_EK2_MAX[i], w))
+        raw.append(w)
+    total = sum(raw)
+    usable = _PAGE_USABLE_TWIPS
+    if total == usable:
+        return raw
+    # orantılı ölçekle; min/max'a yeniden kenetle (2 tur)
+    for _ in range(3):
+        total = sum(raw) or 1
+        scale = usable / total
+        raw = [max(_EK2_MIN[i], min(_EK2_MAX[i], int(raw[i] * scale))) for i in range(6)]
+        if abs(sum(raw) - usable) <= 6:
+            break
+    # kalan farkı esnek sütunlara (eşya/marka) dağıt
+    diff = usable - sum(raw)
+    flex = [1, 2]
+    i = 0
+    while diff != 0 and i < 60:
+        idx = flex[i % len(flex)]
+        step = 1 if diff > 0 else -1
+        nw = raw[idx] + step
+        if _EK2_MIN[idx] <= nw <= _EK2_MAX[idx]:
+            raw[idx] = nw
+            diff -= step
+        i += 1
+    # hâlâ fark varsa son çare sıra dışındaki geniş sütuna
+    diff = usable - sum(raw)
+    if diff:
+        raw[3] = max(_EK2_MIN[3], min(_EK2_MAX[3], raw[3] + diff))
+        diff = usable - sum(raw)
+        if diff:
+            raw[1] = raw[1] + diff
+    return raw
+
+
+def compute_ek1_col_widths(label_chars: int, value_chars: int) -> list[int]:
+    raw = [
+        max(_EK1_MIN[0], min(_EK1_MAX[0], _char_width_twips(label_chars))),
+        max(_EK1_MIN[1], min(_EK1_MAX[1], _char_width_twips(value_chars))),
+    ]
+    usable = _PAGE_USABLE_TWIPS
+    total = sum(raw) or 1
+    raw = [int(w * usable / total) for w in raw]
+    diff = usable - sum(raw)
+    raw[1] += diff
+    return raw
+
+
+def _set_table_grid_widths(table, widths: list[int]) -> None:
+    """tblGrid + hücre tcW sabit genişlik."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    # sabit düzen
+    layout = tbl_pr.find(qn("w:tblLayout"))
+    if layout is None:
+        layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(layout)
+    layout.set(qn("w:type"), "fixed")
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:w"), str(sum(widths)))
+    tbl_w.set(qn("w:type"), "dxa")
+
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        grid = OxmlElement("w:tblGrid")
+        tbl.insert(1, grid)
+    for child in list(grid):
+        grid.remove(child)
+    for w in widths:
+        gc = OxmlElement("w:gridCol")
+        gc.set(qn("w:w"), str(int(w)))
+        grid.append(gc)
+
+    for row in table.rows:
+        cells = row.cells
+        # birleşik hücre: aynı _tc birden fazla cells[i] olabilir — tc başına bir kez
+        seen = set()
+        col_i = 0
+        for cell in cells:
+            tc = cell._tc
+            if id(tc) in seen:
+                continue
+            seen.add(id(tc))
+            # gridSpan
+            tc_pr = tc.get_or_add_tcPr()
+            span_el = tc_pr.find(qn("w:gridSpan"))
+            span = int(span_el.get(qn("w:val"))) if span_el is not None else 1
+            w_sum = sum(widths[col_i : col_i + span]) if col_i < len(widths) else widths[-1]
+            tc_w = tc_pr.find(qn("w:tcW"))
+            if tc_w is None:
+                tc_w = OxmlElement("w:tcW")
+                tc_pr.append(tc_w)
+            tc_w.set(qn("w:w"), str(int(w_sum)))
+            tc_w.set(qn("w:type"), "dxa")
+            col_i += span
+
+
+def _set_row_cant_split(row) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr = row._tr
+    tr_pr = tr.get_or_add_trPr()
+    cs = tr_pr.find(qn("w:cantSplit"))
+    if cs is None:
+        cs = OxmlElement("w:cantSplit")
+        tr_pr.append(cs)
+
+
+def _set_header_row_repeat(row) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr = row._tr
+    tr_pr = tr.get_or_add_trPr()
+    th = tr_pr.find(qn("w:tblHeader"))
+    if th is None:
+        th = OxmlElement("w:tblHeader")
+        tr_pr.append(th)
+
+
+def _apply_table_font_pt_safe(table, pt: float = _EK2_FONT_PT) -> None:
+    from docx.shared import Pt
+
+    for row in table.rows:
+        for cell in row.cells:
+            for p in cell.paragraphs:
+                if not p.runs and (p.text or ""):
+                    t = p.text
+                    # mevcut metni tek run yap
+                    for child in list(p._p):
+                        if child.tag.endswith("}r"):
+                            p._p.remove(child)
+                    run = p.add_run(t)
+                    run.font.size = Pt(pt)
+                else:
+                    for run in p.runs:
+                        run.font.size = Pt(pt)
+
+
+def _ek2_collect_max_chars(table) -> list[int]:
+    maxima = [0] * 6
+    for row in table.rows:
+        for i, cell in enumerate(row.cells[:6]):
+            maxima[i] = max(maxima[i], _max_line_len(cell.text or ""))
+    # Seri No: en az 14 karakterlik tek satır sığsın
+    maxima[3] = max(maxima[3], 14)
+    # Mülkiyet
+    maxima[5] = max(maxima[5], len("OFİSBİR"), len("Müşteri"))
+    return maxima
+
+
+def apply_ek2_table_layout(table) -> list[int]:
+    if len(table.columns) < 6:
+        return []
+    widths = compute_ek2_col_widths(_ek2_collect_max_chars(table))
+    _set_table_grid_widths(table, widths)
+    if table.rows:
+        _set_header_row_repeat(table.rows[0])
+    for row in table.rows:
+        _set_row_cant_split(row)
+    _apply_table_font_pt_safe(table, _EK2_FONT_PT)
+    return widths
+
+
+def apply_ek1_table_layout(table) -> list[int]:
+    if len(table.columns) < 2:
+        return []
+    lab = 0
+    val = 0
+    for row in table.rows:
+        if len(row.cells) < 2:
+            continue
+        lab = max(lab, _max_line_len(row.cells[0].text or ""))
+        val = max(val, _max_line_len(row.cells[1].text or ""))
+    widths = compute_ek1_col_widths(lab, val)
+    _set_table_grid_widths(table, widths)
+    if table.rows:
+        _set_header_row_repeat(table.rows[0])
+    for row in table.rows:
+        _set_row_cant_split(row)
+    _apply_table_font_pt_safe(table, _EK2_FONT_PT)
+    return widths
+
+
+def finalize_sozlesme_layout(doc) -> dict:
+    """Boş son paragraf temizliği + Ek-1/Ek-2 sütun düzeni. Dönüş: metrikler."""
+    removed = strip_trailing_empty_paragraphs(doc)
+    ek1_w: list[int] = []
+    ek2_w: list[int] = []
+    if len(doc.tables) > 1:
+        ek1_w = apply_ek1_table_layout(doc.tables[1])
+    if len(doc.tables) > 2:
+        ek2_w = apply_ek2_table_layout(doc.tables[2])
+    # düzen sonrası yeniden oluşabilecek boş kuyruk
+    removed += strip_trailing_empty_paragraphs(doc)
+    return {
+        "trailing_empty_removed": removed,
+        "ek1_widths": ek1_w,
+        "ek2_widths": ek2_w,
+        "ek2_width_sum": sum(ek2_w) if ek2_w else 0,
+        "ek1_width_sum": sum(ek1_w) if ek1_w else 0,
+        "usable_twips": _PAGE_USABLE_TWIPS,
+    }
+
+
+def docx_bytes_to_preview_html(data: bytes) -> str:
+    """DOCX → HTML önizleme (mammoth). Disk/DB yazmaz."""
+    import mammoth
+
+    result = mammoth.convert_to_html(BytesIO(data))
+    return result.value or ""
+
+
 def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> bytes:
     """Şablonu doldurup DOCX baytları döndürür. DB yazmaz."""
     from docx import Document
@@ -706,6 +991,8 @@ def render_sozlesme_docx_v2(ctx: dict, *, sablon_path: Path | None = None) -> by
                             nt = _fill_paragraph_text(p.text, ctx)
                             if nt != p.text:
                                 _set_run_text_preserve(p, nt)
+
+    finalize_sozlesme_layout(doc)
 
     buf = BytesIO()
     doc.save(buf)

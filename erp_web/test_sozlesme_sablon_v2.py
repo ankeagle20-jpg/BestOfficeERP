@@ -153,9 +153,12 @@ def test_routes_wire():
     check("giris_import", "sozlesme_sablon_v2_aktif" in giris)
     check("giris_branch_mid", "sozlesme_sablon_v2_aktif(mid)" in giris)
     check("giris_yetkililer_pass", "yetkililer=_yet_list" in giris or "yetkililer=_musteri_yetkililer" in giris)
+    check("giris_onizle_api", "api_sozlesme_v2_onizle" in giris)
+    check("giris_onizle_route", "sozlesme-v2-onizle" in giris)
     check("kyc_import", "sozlesme_sablon_v2_aktif" in must)
     check("kyc_branch_mid", "sozlesme_sablon_v2_aktif(musteri_id)" in must)
     check("kyc_yetkililer_pass", "yetkililer=_yet_list" in must)
+    check("kyc_onizle", "onizle" in must and "docx_bytes_to_preview_html" in must)
     check("eski_giris_baslik", "OFİSBİR HİZMET SÖZLEŞMESİ" in giris)
     check("eski_kyc_baslik", "HAZIR OFİS / SANAL OFİS" in must)
 
@@ -250,6 +253,112 @@ def test_module_exists():
     check("module_midler", "def sozlesme_sablon_v2_midler" in src)
     check("module_render", "def render_sozlesme_docx_v2" in src)
     check("module_yetkili_hucre", "def yetkili_kisiler_hucre" in src)
+    check("module_layout", "def finalize_sozlesme_layout" in src)
+    check("module_preview_html", "def docx_bytes_to_preview_html" in src)
+
+
+def test_ek2_widths_and_empty_tail():
+    """Sütun genişliği min/max/toplam; sondaki boş paragraf yok; 0/3/8 satır."""
+    from sozlesme_sablon_v2 import (
+        build_fill_ctx,
+        render_sozlesme_docx_v2,
+        compute_ek2_col_widths,
+        _PAGE_USABLE_TWIPS,
+        _EK2_MIN,
+        _EK2_MAX,
+    )
+    from docx import Document
+    from docx.oxml.ns import qn
+    from io import BytesIO
+
+    # genişlik hesabı
+    w = compute_ek2_col_widths([1, 40, 40, 14, 2, 7])
+    check("ek2_w_sum", sum(w) == _PAGE_USABLE_TWIPS, str(sum(w)))
+    for i in range(6):
+        check(f"ek2_w_minmax_{i}", _EK2_MIN[i] <= w[i] <= _EK2_MAX[i], str(w[i]))
+    # Seri sütunu en az 14 karakterlik genişlik hedefi
+    check("ek2_seri_gec", w[3] >= _EK2_MIN[3])
+
+    def _ctx(n, ortak=False, multi_seri=False, long_marka=False):
+        rows = []
+        for i in range(n):
+            nolar = [f"SN{i:014d}"]
+            if multi_seri and i == 1:
+                nolar = [f"SN{j:014d}" for j in range(5)]
+            rows.append(
+                {
+                    "esya": f"Esya{i}",
+                    "marka_model": ("MARKA-" + ("X" * 40)) if long_marka else "Marka",
+                    "seri_nolar": nolar,
+                    "adet": 1,
+                    "mulkiyet": "OFISBIR",
+                    "kapsam": "ortak_alan" if (ortak and i == n - 1) else "oda_ici",
+                }
+            )
+        ctx = build_fill_ctx(
+            musteri={
+                "name": "SENT UNVAN AS",
+                "tax_number": "VN-SENT",
+                "guncel_kira_bedeli": 1000.0,
+                "rent_start_date": "2026-01-01",
+            },
+            kyc={"hizmet_turu": "Sanal Ofis", "aylik_kira": 1000.0},
+            sozlesme_no="TEST-LAY",
+            sozlesme_tarihi="2026-01-01",
+            yetkililer=[
+                {"sira": 1, "ad_soyad": "Sentetik A", "tel": "TEL-A"},
+                {"sira": 2, "ad_soyad": "Sentetik B", "tel": "TEL-B"},
+                {"sira": 3, "ad_soyad": "Sentetik C", "tel": ""},
+            ],
+        )
+        ctx["demirbas_rows"] = rows
+        return ctx
+
+    def _trail_empty(doc) -> int:
+        kids = list(doc.element.body.iterchildren())
+        n = 0
+        for c in reversed(kids):
+            tag = c.tag.split("}")[-1]
+            if tag == "sectPr":
+                continue
+            if tag != "p":
+                break
+            texts = "".join((t.text or "") for t in c.iter(qn("w:t")))
+            if texts.strip():
+                break
+            n += 1
+        return n
+
+    for n, ort in ((0, False), (3, False), (8, True)):
+        doc = Document(BytesIO(render_sozlesme_docx_v2(_ctx(n, ortak=ort))))
+        check(f"trail0_n{n}", _trail_empty(doc) == 0)
+        check(f"ek2_tbl_n{n}", len(doc.tables) >= 3)
+        ek2 = doc.tables[2]
+        # fixed layout + grid
+        from docx.oxml.ns import qn as _qn
+
+        grid = ek2._tbl.find(_qn("w:tblGrid"))
+        check(f"ek2_grid_n{n}", grid is not None and len(list(grid)) >= 6)
+        # cantSplit on data row
+        if len(ek2.rows) > 1:
+            tr_pr = ek2.rows[1]._tr.get_or_add_trPr()
+            check(f"ek2_cantsplit_n{n}", tr_pr.find(_qn("w:cantSplit")) is not None)
+        # header repeat
+        tr0 = ek2.rows[0]._tr.get_or_add_trPr()
+        check(f"ek2_hdr_n{n}", tr0.find(_qn("w:tblHeader")) is not None)
+
+    # 5 seri + uzun marka
+    doc_m = Document(
+        BytesIO(render_sozlesme_docx_v2(_ctx(3, multi_seri=True, long_marka=True)))
+    )
+    check("trail0_multi", _trail_empty(doc_m) == 0)
+    blob = "\n".join(c.text or "" for r in doc_m.tables[2].rows for c in r.cells)
+    check("multi_seri_lines", blob.count("SN") >= 5)
+    # Ek-1 yetkili çok satır
+    ek1 = doc_m.tables[1]
+    check("ek1_cols", len(ek1.columns) >= 2)
+    grid1 = ek1._tbl.find(qn("w:tblGrid"))
+    check("ek1_grid", grid1 is not None)
 
 
 def _ek1_yetkili_deger(rows: list[tuple[str, str]]) -> str:
@@ -501,6 +610,7 @@ def main() -> int:
     test_fill_and_ekler()
     test_ek1_senaryolar()
     test_ek1_yetkili_kisiler_sentetik()
+    test_ek2_widths_and_empty_tail()
     test_routes_wire()
     test_mid867_preview_liste()
     test_module_exists()
