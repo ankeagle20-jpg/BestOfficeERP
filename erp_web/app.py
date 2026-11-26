@@ -50,6 +50,7 @@ _LEDGER_ONLY_EXACT_PATHS = frozenset(
         "/favicon.ico",
         "/sw.js",
         "/offline",
+        "/whatsapp/cloud/webhook",
     }
 )
 _LEDGER_ONLY_DENY_MSG = "Bu hesap yalnızca Payafin Cari kullanır; bu sayfaya erişim yok."

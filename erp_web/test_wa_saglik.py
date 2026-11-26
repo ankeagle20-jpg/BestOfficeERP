@@ -498,7 +498,7 @@ def test_rol_kapisi():
     check("muhasebe_api_200", r.status_code == 200 and govde.get("ok") is True,
           (r.status_code, str(govde)[:160]))
     anahtarlar = [k.get("anahtar") for k in govde.get("kontroller") or []]
-    check("kartlar_tam", anahtarlar == ["servis", "oturum", "kuyruk", "son_islem",
+    check("kartlar_tam", anahtarlar == ["cloud_api", "servis", "oturum", "kuyruk", "son_islem",
                                         "belirsiz"], anahtarlar)
 
 

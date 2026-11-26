@@ -829,6 +829,39 @@ def sozlesme_wa_isle(
             govde["web_elle"] = True
         return govde, 200
 
+    # Cloud API (mid allowlist): Node oturum/kuyruk atlanır; serbest metin pencere ister.
+    try:
+        from whatsapp_cloud import cloud_aktif as _wa_cloud_aktif
+        from whatsapp_cloud import kuyruk_sonucuna as _wa_cloud_kuyruk
+        from whatsapp_cloud import metin_gonder as _wa_cloud_metin
+    except Exception:
+        _wa_cloud_aktif = None  # type: ignore
+
+    if callable(_wa_cloud_aktif) and _wa_cloud_aktif(mid) and kuyruk_fn is None:
+        if not onay:
+            son = _son_gonderim(int(uid), metin_h, tel_h, an - timedelta(seconds=TEKRAR_SANIYE))
+            if son:
+                return {"ok": False, "tekrar": True, "durum": str(son.get("durum") or ""), "mesaj": _YINE}, 409
+        row = _kaydet("gonderiliyor", anahtar)
+        if not row:
+            bulunan = _bul(int(uid), anahtar)
+            if bulunan:
+                return _durum_govde(bulunan, True), 200
+            return {"ok": False, "cakisma": True, "mesaj": _ONCEDEN}, 200
+        rid = int(row["id"])
+
+        def _calis_cloud():
+            try:
+                raw = _wa_cloud_metin(mid, norm, metin, pencere_acik=False)
+                sonuc = _wa_cloud_kuyruk(raw)
+            except Exception:
+                logger.info("sozlesme wa cloud arkaplan hata")
+                sonuc = "belirsiz"
+            _arkaplan_yaz(rid, sonuc)
+
+        threading.Thread(target=_calis_cloud, daemon=True, name=f"szwa-c-{rid}").start()
+        return {"ok": True, "durum": "gonderiliyor", "mesaj": _SUREN, "deneme": kim}, 200
+
     if not node_yolu_acik():
         return _geri("kiraci")
 

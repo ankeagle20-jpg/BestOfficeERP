@@ -109,6 +109,41 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
     s = sayaclar or {}
     kartlar: list[dict] = []
 
+    # Cloud API kartı — değer yok; yalnız boolean / sınıf adı
+    try:
+        from whatsapp_cloud import saglik_ozet
+
+        co = saglik_ozet()
+        acik = bool(co.get("cloud_acik"))
+        tok = bool(co.get("token_tanimli"))
+        pid = bool(co.get("phone_number_id_tanimli"))
+        son = str(co.get("son_hata_sinif") or "yok")
+        if not acik:
+            c_sev, c_metin = "ok", "Cloud API: kapalı."
+        elif tok and pid:
+            c_sev = "uyari" if son not in ("", "yok") else "ok"
+            c_metin = (
+                f"Cloud API: açık; token tanımlı; phone_number_id tanımlı; "
+                f"son hata sınıfı: {son}."
+            )
+        else:
+            c_sev = "uyari"
+            c_metin = (
+                "Cloud API: açık ama "
+                f"token={'tanımlı' if tok else 'boş'}, "
+                f"phone_number_id={'tanımlı' if pid else 'boş'}; "
+                f"son hata sınıfı: {son}."
+            )
+        kartlar.append({
+            "anahtar": "cloud_api", "seviye": c_sev, "baslik": "Cloud API",
+            "aciklama": c_metin,
+        })
+    except Exception:
+        kartlar.append({
+            "anahtar": "cloud_api", "seviye": "uyari", "baslik": "Cloud API",
+            "aciklama": "Cloud API durumu alınamadı.",
+        })
+
     if ulasim == "ok":
         kartlar.append({
             "anahtar": "servis", "seviye": "ok", "baslik": "Servis",

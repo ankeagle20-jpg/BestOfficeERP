@@ -643,6 +643,45 @@ def api_servis_durum():
         return jsonify({'bagli': False, 'hata': str(e), 'wa_tenant_id': _wa_tenant_id()})
 
 
+@bp.route("/cloud/webhook", methods=["GET", "POST"])
+def cloud_webhook():
+    """Meta Cloud API webhook. Giriş/CSRF yok (sunucu→sunucu); imza/verify ile korunur."""
+    from whatsapp_cloud import (
+        imza_dogrula,
+        verify_challenge,
+        webhook_olaylari_isle,
+    )
+
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        body, kod = verify_challenge(mode, token, challenge)
+        if body is None:
+            return Response("forbidden", status=kod, content_type="text/plain")
+        return Response(body, status=kod, content_type="text/plain")
+
+    raw = request.get_data(cache=False, as_text=False) or b""
+    sig = request.headers.get("X-Hub-Signature-256")
+    if not imza_dogrula(raw, sig):
+        return jsonify({"ok": False}), 403
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        payload = {}
+    webhook_olaylari_isle(payload if isinstance(payload, dict) else {})
+    return jsonify({"ok": True}), 200
+
+
+@bp.route("/api/cloud-phone-meta", methods=["GET"])
+@admin_gerekli
+def api_cloud_phone_meta():
+    """Yönetici manuel: Graph phone meta (salt okuma). Otomatik çağrılmaz."""
+    from whatsapp_cloud import phone_meta_salt_okuma
+
+    return jsonify(phone_meta_salt_okuma())
+
+
 @bp.route('/saglik')
 @yetki_gerekli("muhasebe")
 def wa_saglik_sayfa():
