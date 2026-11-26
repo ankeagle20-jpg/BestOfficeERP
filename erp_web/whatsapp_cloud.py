@@ -10,6 +10,8 @@ import hashlib
 import hmac
 import logging
 import os
+import threading
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,25 @@ logger = logging.getLogger(__name__)
 # facebook_oauth ile aynı Graph sürümü
 GRAPH_VERSION_DEFAULT = "v22.0"
 
+# Cloud test şablon gönderimi yalnız bu mid için (allowlist kapısı)
+TEST_MID = 867
+_TEST_RATE_MAX = 3
+_TEST_RATE_PENCERE_SN = 60.0
+
 _SON_HATA_SINIF = "yok"
+_rate_lock = threading.Lock()
+_test_gonder_zamanlari: list[float] = []
+
+_webhook_lock = threading.Lock()
+_webhook_sayac = {
+    "messages": 0,
+    "sent": 0,
+    "delivered": 0,
+    "read": 0,
+    "failed": 0,
+    "statuses_diger": 0,
+    "son_olay_ts": None,  # epoch float veya None
+}
 
 
 def son_hata_sinif() -> str:
@@ -112,7 +132,83 @@ def saglik_ozet() -> dict:
         "app_secret_tanimli": app_secret_tanimli(),
         "verify_token_tanimli": verify_token_tanimli(),
         "son_hata_sinif": son_hata_sinif(),
+        "test_mid_aktif": cloud_aktif(TEST_MID),
+        "webhook": webhook_sayaclar(),
     }
+
+
+def webhook_sayaclar() -> dict:
+    """Bellek içi webhook sayaçları — numara/içerik yok."""
+    with _webhook_lock:
+        out = dict(_webhook_sayac)
+    ts = out.get("son_olay_ts")
+    out["son_olay_ts"] = float(ts) if ts is not None else None
+    return out
+
+
+def _webhook_sayac_sifirla_test() -> None:
+    """Yalnız birim testleri."""
+    with _webhook_lock:
+        for k in list(_webhook_sayac.keys()):
+            _webhook_sayac[k] = 0 if k != "son_olay_ts" else None
+
+
+def test_gonder_rate_ok() -> bool:
+    now = time.time()
+    with _rate_lock:
+        while _test_gonder_zamanlari and _test_gonder_zamanlari[0] < now - _TEST_RATE_PENCERE_SN:
+            _test_gonder_zamanlari.pop(0)
+        return len(_test_gonder_zamanlari) < _TEST_RATE_MAX
+
+
+def test_gonder_rate_kaydet() -> None:
+    with _rate_lock:
+        _test_gonder_zamanlari.append(time.time())
+
+
+def test_gonder_rate_sifirla_test() -> None:
+    with _rate_lock:
+        _test_gonder_zamanlari.clear()
+
+
+def test_sablon_gonder(numara, sablon_adi="hello_world", dil="en_US") -> dict:
+    """Admin test: mid=867 kapısı + rate limit. Numara loglanmaz."""
+    if not cloud_aktif(TEST_MID):
+        _set_hata("cloud_kapali")
+        _log_sonuc(TEST_MID, "cloud_kapali")
+        return {
+            "ok": False,
+            "durum": "hata",
+            "neden": "cloud_kapali",
+            "message_id": "",
+            "mesaj": "Cloud kapalı (ENABLED=1 ve mid 867 listede olmalı).",
+        }
+    if not test_gonder_rate_ok():
+        _set_hata("rate_limit")
+        _log_sonuc(TEST_MID, "rate_limit")
+        return {
+            "ok": False,
+            "durum": "hata",
+            "neden": "rate_limit",
+            "message_id": "",
+            "mesaj": "Dakikada en fazla 3 test gönderimi.",
+        }
+    to = numara_e164(numara)
+    if not to:
+        _set_hata("kalici")
+        _log_sonuc(TEST_MID, "kalici")
+        return {
+            "ok": False,
+            "durum": "hata",
+            "neden": "kalici",
+            "message_id": "",
+            "mesaj": "Geçersiz numara.",
+        }
+    test_gonder_rate_kaydet()
+    ad = str(sablon_adi or "hello_world").strip() or "hello_world"
+    lang = str(dil or "en_US").strip() or "en_US"
+    # numara yalnız çağrıda; log yok
+    return sablon_gonder(TEST_MID, to, ad, lang, None)
 
 
 def numara_e164(raw) -> str:
@@ -323,9 +419,9 @@ def imza_dogrula(raw_body: bytes, signature_header: str | None) -> bool:
 
 
 def webhook_olaylari_isle(payload: dict) -> dict:
-    """Taslak: messages/statuses say — DB yazımı yok. Idempotent log."""
+    """messages/statuses sayaç — DB yok; numara/içerik yok."""
     n_msg = 0
-    n_st = 0
+    n_sent = n_del = n_read = n_fail = n_diger = 0
     try:
         entries = payload.get("entry") if isinstance(payload, dict) else None
         for ent in entries or []:
@@ -338,11 +434,49 @@ def webhook_olaylari_isle(payload: dict) -> dict:
                 if isinstance(msgs, list):
                     n_msg += len(msgs)
                 if isinstance(sts, list):
-                    n_st += len(sts)
+                    for st in sts:
+                        if not isinstance(st, dict):
+                            n_diger += 1
+                            continue
+                        s = str(st.get("status") or "").strip().lower()
+                        if s == "sent":
+                            n_sent += 1
+                        elif s == "delivered":
+                            n_del += 1
+                        elif s == "read":
+                            n_read += 1
+                        elif s == "failed":
+                            n_fail += 1
+                        else:
+                            n_diger += 1
     except Exception:
         logger.info("wa_cloud_webhook parse_hata")
-    logger.info("wa_cloud_webhook events messages=%s statuses=%s", int(n_msg), int(n_st))
-    return {"messages": n_msg, "statuses": n_st}
+    n_st = n_sent + n_del + n_read + n_fail + n_diger
+    if n_msg or n_st:
+        with _webhook_lock:
+            _webhook_sayac["messages"] = int(_webhook_sayac["messages"] or 0) + n_msg
+            _webhook_sayac["sent"] = int(_webhook_sayac["sent"] or 0) + n_sent
+            _webhook_sayac["delivered"] = int(_webhook_sayac["delivered"] or 0) + n_del
+            _webhook_sayac["read"] = int(_webhook_sayac["read"] or 0) + n_read
+            _webhook_sayac["failed"] = int(_webhook_sayac["failed"] or 0) + n_fail
+            _webhook_sayac["statuses_diger"] = int(_webhook_sayac["statuses_diger"] or 0) + n_diger
+            _webhook_sayac["son_olay_ts"] = time.time()
+    logger.info(
+        "wa_cloud_webhook events messages=%s sent=%s delivered=%s read=%s failed=%s",
+        int(n_msg),
+        int(n_sent),
+        int(n_del),
+        int(n_read),
+        int(n_fail),
+    )
+    return {
+        "messages": n_msg,
+        "statuses": n_st,
+        "sent": n_sent,
+        "delivered": n_del,
+        "read": n_read,
+        "failed": n_fail,
+    }
 
 
 def phone_meta_salt_okuma() -> dict:

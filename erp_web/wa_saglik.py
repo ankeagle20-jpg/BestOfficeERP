@@ -138,10 +138,37 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
             "anahtar": "cloud_api", "seviye": c_sev, "baslik": "Cloud API",
             "aciklama": c_metin,
         })
+        wh = co.get("webhook") or {}
+        son_ts = wh.get("son_olay_ts")
+        if son_ts is None:
+            son_metin = "henüz yok"
+        else:
+            try:
+                from datetime import datetime, timezone
+
+                son_metin = datetime.fromtimestamp(float(son_ts), tz=timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M UTC"
+                )
+            except Exception:
+                son_metin = "bilinmiyor"
+        wh_metin = (
+            f"Webhook (bellek): messages={int(wh.get('messages') or 0)}; "
+            f"sent={int(wh.get('sent') or 0)}, delivered={int(wh.get('delivered') or 0)}, "
+            f"read={int(wh.get('read') or 0)}, failed={int(wh.get('failed') or 0)}; "
+            f"son olay: {son_metin}."
+        )
+        kartlar.append({
+            "anahtar": "cloud_webhook", "seviye": "ok", "baslik": "Cloud webhook",
+            "aciklama": wh_metin,
+        })
     except Exception:
         kartlar.append({
             "anahtar": "cloud_api", "seviye": "uyari", "baslik": "Cloud API",
             "aciklama": "Cloud API durumu alınamadı.",
+        })
+        kartlar.append({
+            "anahtar": "cloud_webhook", "seviye": "uyari", "baslik": "Cloud webhook",
+            "aciklama": "Webhook sayaçları alınamadı.",
         })
 
     if ulasim == "ok":

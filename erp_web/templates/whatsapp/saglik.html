@@ -44,6 +44,19 @@
   <div class="ws-grid" id="wsKartlar">
     <div class="ws-card"><h3><span class="ws-dot"></span>Yükleniyor</h3><p>Kontrol ediliyor…</p></div>
   </div>
+  {% if cloud_test_admin %}
+  <div class="ws-card" id="wsCloudTestKart" data-cloud-test="1" style="margin-top:12px;">
+    <h3><span class="ws-dot"></span>Cloud test şablon gönder</h3>
+    <p style="margin:0 0 8px;font-size:13px;color:#37474f;">Yalnız yönetici. Numara rapora yazılmaz.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <input type="tel" id="cloudTestNumara" name="cloud_test_numara" autocomplete="off"
+             placeholder="Numara" data-cloud-test-numara
+             style="padding:8px 10px;border:1px solid #cfd8dc;border-radius:4px;min-width:180px;">
+      <button type="button" class="ws-btn" id="btnCloudTestGonder" data-cloud-test-gonder>Gönder</button>
+    </div>
+    <p id="cloudTestSonuc" data-cloud-test-sonuc style="margin:8px 0 0;font-size:13px;color:#37474f;"></p>
+  </div>
+  {% endif %}
   <div class="ws-msg" id="wsMsg"></div>
   <div id="wsBelirsizKutu" style="display:none;margin-top:16px;">
     <h3 style="font-size:14px;margin:0 0 8px;">Sonucu belirsiz kayıtlar — elle işaretleme</h3>
@@ -181,6 +194,45 @@
     if (!window.confirm(n + " eski bekleyen kayıt kapatılacak ve WhatsApp'a gönderilmeyecek. Devam edilsin mi?")) return;
     post(this, "/whatsapp/api/saglik-eski-kapat");
   });
+
+  var cloudTestKart = document.querySelector("[data-cloud-test='1']");
+  if (cloudTestKart) {
+    var btnCloud = cloudTestKart.querySelector("[data-cloud-test-gonder]");
+    var inpCloud = cloudTestKart.querySelector("[data-cloud-test-numara]");
+    var outCloud = cloudTestKart.querySelector("[data-cloud-test-sonuc]");
+    if (btnCloud) {
+      btnCloud.addEventListener("click", async function () {
+        var numara = inpCloud ? String(inpCloud.value || "").trim() : "";
+        if (!numara) {
+          if (outCloud) outCloud.textContent = "Numara gerekli.";
+          return;
+        }
+        btnCloud.disabled = true;
+        if (outCloud) outCloud.textContent = "Gönderiliyor…";
+        try {
+          var r = await fetch("/whatsapp/cloud/test-gonder", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ numara: numara, sablon: "hello_world", dil: "en_US" })
+          });
+          var j = await r.json().catch(function () { return {}; });
+          var parcalar = [];
+          if (j.durum) parcalar.push("durum=" + j.durum);
+          if (j.neden) parcalar.push("hata=" + j.neden);
+          if (j.wamid) parcalar.push("wamid=" + j.wamid);
+          if (!parcalar.length) parcalar.push(j.ok ? "tamam" : ("HTTP " + r.status));
+          if (outCloud) outCloud.textContent = parcalar.join(" · ");
+        } catch (e) {
+          if (outCloud) outCloud.textContent = "İstek gönderilemedi.";
+        } finally {
+          btnCloud.disabled = false;
+          ozetYukle();
+        }
+      });
+    }
+  }
+
   ozetYukle();
 })();
 </script>

@@ -682,11 +682,53 @@ def api_cloud_phone_meta():
     return jsonify(phone_meta_salt_okuma())
 
 
+@bp.route("/cloud/test-gonder", methods=["POST"])
+def cloud_test_gonder():
+    """Admin-only Cloud test şablon. Numara loglanmaz; JSON 401/403."""
+    from flask_login import current_user
+
+    from whatsapp_cloud import test_sablon_gonder
+
+    if not current_user.is_authenticated:
+        return jsonify({"ok": False, "neden": "yetki", "mesaj": "Giriş gerekli."}), 401
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"ok": False, "neden": "yetki", "mesaj": "Bu işlem için yetkiniz yok."}), 403
+
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        body = {}
+    numara = body.get("numara")
+    sablon = body.get("sablon") or body.get("sablon_adi") or "hello_world"
+    dil = body.get("dil") or "en_US"
+    sonuc = test_sablon_gonder(numara, sablon, dil)
+    if sonuc.get("ok"):
+        return jsonify({
+            "ok": True,
+            "durum": sonuc.get("durum") or "gonderildi",
+            "wamid": sonuc.get("message_id") or "",
+        }), 200
+    neden = str(sonuc.get("neden") or "hata")
+    kod = 429 if neden == "rate_limit" else 400
+    return jsonify({
+        "ok": False,
+        "durum": sonuc.get("durum") or "hata",
+        "neden": neden,
+        "mesaj": sonuc.get("mesaj") or neden,
+    }), kod
+
+
 @bp.route('/saglik')
 @yetki_gerekli("muhasebe")
 def wa_saglik_sayfa():
     """WhatsApp Sağlık ekranı (yönetici/muhasebe)."""
-    return render_template('whatsapp/saglik.html', wa_servis_etiket=_wa_servis_etiket())
+    from flask_login import current_user
+
+    cloud_test_admin = getattr(current_user, "role", None) == "admin"
+    return render_template(
+        'whatsapp/saglik.html',
+        wa_servis_etiket=_wa_servis_etiket(),
+        cloud_test_admin=cloud_test_admin,
+    )
 
 
 def _saglik_servis_durumu(timeout=(2, 3)):
@@ -798,11 +840,19 @@ def api_wa_saglik_ozet():
 
     ulasim, oturum, teshis = _saglik_servis_durumu()
     sayaclar = wa_saglik.saglik_sayaclari()
+    cloud_webhook = {}
+    try:
+        from whatsapp_cloud import webhook_sayaclar
+
+        cloud_webhook = webhook_sayaclar()
+    except Exception:
+        cloud_webhook = {}
     return jsonify({
         'ok': True,
         'kontroller': wa_saglik.kontrolleri_uret(ulasim, oturum, sayaclar, teshis=teshis),
         'sayaclar': sayaclar,
         'durum_teshis': teshis,
+        'cloud_webhook': cloud_webhook,
     })
 
 

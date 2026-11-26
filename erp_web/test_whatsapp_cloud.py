@@ -38,6 +38,8 @@ def _clean():
         if k.startswith("WHATSAPP_CLOUD_"):
             os.environ.pop(k, None)
     wc._set_hata("yok")
+    wc.test_gonder_rate_sifirla_test()
+    wc._webhook_sayac_sifirla_test()
 
 
 def test_bayrak_ve_mid():
@@ -337,10 +339,168 @@ def test_saglik_kart():
     cloud = next((x for x in k if x.get("anahtar") == "cloud_api"), None)
     check("saglik_kart_var", cloud is not None)
     check("saglik_kapali_metin", cloud and "kapalı" in cloud.get("aciklama", ""))
+    wh = next((x for x in k if x.get("anahtar") == "cloud_webhook"), None)
+    check("saglik_webhook_kart", wh is not None and "sent=" in (wh.get("aciklama") or ""))
     os.environ["WHATSAPP_CLOUD_ENABLED"] = "1"
     k2 = ws.kontrolleri_uret("ok", "hazir", {})
     cloud2 = next((x for x in k2 if x.get("anahtar") == "cloud_api"), None)
     check("saglik_acik_token_bos", cloud2 and "açık" in cloud2.get("aciklama", ""))
+
+
+def test_webhook_sayaclar():
+    _clean()
+    payload = {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{"id": "m1", "from": "905551111111", "text": {"body": "x"}}],
+                    "statuses": [
+                        {"id": "w1", "status": "sent", "recipient_id": "905551111111"},
+                        {"id": "w2", "status": "delivered"},
+                        {"id": "w3", "status": "read"},
+                        {"id": "w4", "status": "failed"},
+                    ],
+                }
+            }]
+        }]
+    }
+    r = wc.webhook_olaylari_isle(payload)
+    check("wh_counts_ret", r.get("sent") == 1 and r.get("delivered") == 1
+          and r.get("read") == 1 and r.get("failed") == 1 and r.get("messages") == 1)
+    s = wc.webhook_sayaclar()
+    check("wh_counts_mem", s.get("sent") == 1 and s.get("delivered") == 1
+          and s.get("read") == 1 and s.get("failed") == 1 and s.get("messages") == 1)
+    check("wh_son_ts", s.get("son_olay_ts") is not None)
+    dump = str(s) + str(r)
+    check("wh_sayac_pii_yok", "905551111111" not in dump and "body" not in dump)
+
+
+def test_test_sablon_kapali_ve_basari():
+    _clean()
+    r0 = wc.test_sablon_gonder("05551234567", "hello_world", "en_US")
+    check("test_cloud_kapali", r0.get("neden") == "cloud_kapali" and r0.get("ok") is False)
+    check("test_kapali_mesaj", "Cloud kapalı" in str(r0.get("mesaj") or ""))
+
+    os.environ["WHATSAPP_CLOUD_ENABLED"] = "1"
+    os.environ["WHATSAPP_CLOUD_MIDLER"] = "867"
+    os.environ["WHATSAPP_CLOUD_ACCESS_TOKEN"] = "tok-TEST-NO-LEAK"
+    os.environ["WHATSAPP_CLOUD_PHONE_NUMBER_ID"] = "111"
+
+    class _R:
+        status_code = 200
+        content = b'{"messages":[{"id":"wamid.HELLO"}]}'
+
+        def json(self):
+            return {"messages": [{"id": "wamid.HELLO"}]}
+
+    buf = StringIO()
+    handler = logging.StreamHandler(buf)
+    logger = logging.getLogger("whatsapp_cloud")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        with mock.patch("requests.post", return_value=_R()):
+            r = wc.test_sablon_gonder("05551234567", "hello_world", "en_US")
+        out = buf.getvalue()
+    finally:
+        logger.removeHandler(handler)
+
+    check("test_ok", r.get("ok") is True and r.get("message_id") == "wamid.HELLO")
+    check("test_log_numara_yok", "05551234567" not in out and "905551234567" not in out)
+    check("test_log_token_yok", "tok-TEST-NO-LEAK" not in out)
+    check("test_yanit_numara_yok", "0555" not in str(r) and "90555" not in str(r))
+
+
+def test_test_sablon_rate_limit():
+    _clean()
+    os.environ["WHATSAPP_CLOUD_ENABLED"] = "1"
+    os.environ["WHATSAPP_CLOUD_MIDLER"] = "867"
+    os.environ["WHATSAPP_CLOUD_ACCESS_TOKEN"] = "tok"
+    os.environ["WHATSAPP_CLOUD_PHONE_NUMBER_ID"] = "1"
+
+    class _R:
+        status_code = 200
+        content = b'{"messages":[{"id":"wamid.R"}]}'
+
+        def json(self):
+            return {"messages": [{"id": "wamid.R"}]}
+
+    with mock.patch("requests.post", return_value=_R()):
+        for _i in range(3):
+            rr = wc.test_sablon_gonder("05551234567")
+            check("rate_ok_slot", rr.get("ok") is True)
+        r4 = wc.test_sablon_gonder("05551234567")
+    check("rate_limit", r4.get("neden") == "rate_limit" and r4.get("ok") is False)
+
+
+def test_test_gonder_route_auth():
+    _clean()
+    from flask import Flask
+    from auth import User, login_manager
+    import routes.whatsapp_routes as wr
+
+    rol = {"v": "admin"}
+
+    @login_manager.user_loader
+    def _load(_uid):
+        return User(id=1, username="t", full_name="T", role=rol["v"],
+                    aktif_mi=True, security_stamp="test-stamp")
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    login_manager.init_app(app)
+    app.register_blueprint(wr.bp)
+    c = app.test_client()
+
+    r_anon = c.post("/whatsapp/cloud/test-gonder", json={"numara": "05551234567"})
+    check("route_anon_401", r_anon.status_code == 401, r_anon.status_code)
+    j_anon = r_anon.get_json(silent=True) or {}
+    check("route_anon_json", j_anon.get("ok") is False)
+    check("route_anon_pii_yok", "0555" not in str(j_anon) and "90555" not in str(j_anon))
+
+    with c.session_transaction() as s:
+        s["_user_id"] = "1"
+        s["_fresh"] = True
+    rol["v"] = "muhasebe"
+    r_muh = c.post("/whatsapp/cloud/test-gonder", json={"numara": "05551234567"})
+    check("route_muh_403", r_muh.status_code == 403, r_muh.status_code)
+
+    rol["v"] = "admin"
+    r_kapali = c.post(
+        "/whatsapp/cloud/test-gonder",
+        json={"numara": "05551234567", "sablon": "hello_world", "dil": "en_US"},
+    )
+    j_kapali = r_kapali.get_json(silent=True) or {}
+    check("route_cloud_kapali", j_kapali.get("neden") == "cloud_kapali", j_kapali)
+    check("route_kapali_mesaj", "Cloud kapalı" in str(j_kapali.get("mesaj") or ""))
+
+    os.environ["WHATSAPP_CLOUD_ENABLED"] = "1"
+    os.environ["WHATSAPP_CLOUD_MIDLER"] = "867"
+    os.environ["WHATSAPP_CLOUD_ACCESS_TOKEN"] = "tok-ROUTE"
+    os.environ["WHATSAPP_CLOUD_PHONE_NUMBER_ID"] = "1"
+
+    class _R:
+        status_code = 200
+        content = b'{"messages":[{"id":"wamid.ROUTE"}]}'
+
+        def json(self):
+            return {"messages": [{"id": "wamid.ROUTE"}]}
+
+    with mock.patch("requests.post", return_value=_R()):
+        r_ok = c.post(
+            "/whatsapp/cloud/test-gonder",
+            json={"numara": "05551234567", "sablon": "hello_world", "dil": "en_US"},
+        )
+    j_ok = r_ok.get_json(silent=True) or {}
+    check("route_ok", r_ok.status_code == 200 and j_ok.get("ok") is True
+          and j_ok.get("wamid") == "wamid.ROUTE" and j_ok.get("durum"), j_ok)
+    check("route_ok_yalniz_wamid", set(j_ok.keys()) <= {"ok", "durum", "wamid"})
+    check("route_ok_pii_yok", "0555" not in str(j_ok) and "tok-ROUTE" not in str(j_ok))
+
+    html = Path(ROOT / "templates" / "whatsapp" / "saglik.html").read_text(encoding="utf-8")
+    check("fe_cloud_test_kart", 'data-cloud-test="1"' in html and 'type="tel"' in html)
+    check("fe_autocomplete_off", 'autocomplete="off"' in html)
+    check("fe_addEventListener", "addEventListener" in html and "data-cloud-test-gonder" in html)
 
 
 if __name__ == "__main__":
@@ -357,5 +517,9 @@ if __name__ == "__main__":
     test_mid_867_cloud_yolu()
     test_webhook_flask()
     test_saglik_kart()
+    test_webhook_sayaclar()
+    test_test_sablon_kapali_ve_basari()
+    test_test_sablon_rate_limit()
+    test_test_gonder_route_auth()
     print("SONUC", "FAIL" if FAILS else "PASS", len(FAILS))
     sys.exit(1 if FAILS else 0)
