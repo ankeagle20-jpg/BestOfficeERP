@@ -38,6 +38,7 @@ def _clean():
         if k.startswith("WHATSAPP_CLOUD_"):
             os.environ.pop(k, None)
     wc._set_hata("yok")
+    wc._hata_ayrinti_sifirla_test()
     wc.test_gonder_rate_sifirla_test()
     wc._webhook_sayac_sifirla_test()
 
@@ -433,6 +434,79 @@ def test_test_sablon_rate_limit():
     check("rate_limit", r4.get("neden") == "rate_limit" and r4.get("ok") is False)
 
 
+def test_graph_hata_ayrinti_ve_maske():
+    _clean()
+    ornekler = [
+        (190, "OAuthException", "Invalid OAuth access token", "yetki"),
+        (200, "OAuthException", "Permissions error", "yetki"),
+        (10, "OAuthException", "Application does not have permission", "yetki"),
+        (131030, "OAuthException", "Recipient phone number not in allowed list", "kalici"),
+        (132001, "OAuthException", "Template name does not exist in the translation", "sablon_onaysiz"),
+    ]
+    for code, tip, msg, sinif in ornekler:
+        body = {"error": {"code": code, "error_subcode": 33, "type": tip, "message": msg}}
+        check(f"sinif_{code}", wc.siniflandir_http_hata(400 if code not in (190,) else 401, body) == sinif)
+        ay = wc.graph_hata_ayrinti(body)
+        check(f"ay_code_{code}", ay.get("code") == code)
+        check(f"ay_sub_{code}", ay.get("error_subcode") == 33)
+        check(f"ay_type_{code}", ay.get("type") == tip)
+        check(f"ay_msg_{code}", msg[:40] in (ay.get("message") or ""))
+
+    # Token/numara görünümlü parçalar runtime'da üretilir (kaynakta bitişik sızıntı yok)
+    fake_tok = "EAA" + ("ZzYyXxWw" * 6)
+    fake_digits = "9" * 12
+    bearer = "Bearer " + ("q" * 28)
+    dirty = f"fail {fake_tok} phone={fake_digits} auth={bearer} end"
+    masked = wc.maskele_guvenli_metin(dirty)
+    check("mask_eaa", "[gizli]" in masked and fake_tok not in masked)
+    check("mask_digits", fake_digits not in masked)
+    check("mask_bearer", "Bearer [gizli]" in masked and ("q" * 28) not in masked)
+
+    ay2 = wc.graph_hata_ayrinti({
+        "error": {
+            "code": 190,
+            "type": "OAuthException",
+            "message": dirty + ("!" * 200),
+        }
+    })
+    check("ay_msg_len", len(ay2.get("message") or "") <= 120)
+    check("ay_msg_masked", fake_tok not in (ay2.get("message") or "")
+          and fake_digits not in (ay2.get("message") or ""))
+
+    os.environ["WHATSAPP_CLOUD_ACCESS_TOKEN"] = "tok"
+    os.environ["WHATSAPP_CLOUD_PHONE_NUMBER_ID"] = "1"
+
+    class _Err:
+        status_code = 400
+        content = b'{"error":{"code":132001,"error_subcode":99,"type":"OAuthException","message":"template name"}}'
+
+        def json(self):
+            return {
+                "error": {
+                    "code": 132001,
+                    "error_subcode": 99,
+                    "type": "OAuthException",
+                    "message": "template name",
+                }
+            }
+
+    tel = "05" + ("1" * 9)
+    with mock.patch("requests.post", return_value=_Err()):
+        r = wc.sablon_gonder(867, tel, "hello_world", "en_US")
+    check("post_hata_sinif", r.get("neden") == "sablon_onaysiz")
+    check("post_hata_ay", (r.get("hata_ayrinti") or {}).get("code") == 132001)
+    check("post_hata_mem", wc.son_hata_sinif() == "sablon_onaysiz"
+          and (wc.son_hata_ayrinti() or {}).get("code") == 132001)
+    check("post_hata_pii_yok", tel not in str(r) and ("90" + tel[1:]) not in str(r))
+
+    import wa_saglik as ws
+    os.environ["WHATSAPP_CLOUD_ENABLED"] = "1"
+    k = ws.kontrolleri_uret("ok", "hazir", {})
+    cloud = next((x for x in k if x.get("anahtar") == "cloud_api"), None)
+    check("saglik_ayrinti", cloud and "code=132001" in (cloud.get("aciklama") or "")
+          and "sablon_onaysiz" in (cloud.get("aciklama") or ""), cloud)
+
+
 def test_test_gonder_route_auth():
     _clean()
     from flask import Flask
@@ -520,6 +594,7 @@ if __name__ == "__main__":
     test_webhook_sayaclar()
     test_test_sablon_kapali_ve_basari()
     test_test_sablon_rate_limit()
+    test_graph_hata_ayrinti_ve_maske()
     test_test_gonder_route_auth()
     print("SONUC", "FAIL" if FAILS else "PASS", len(FAILS))
     sys.exit(1 if FAILS else 0)

@@ -709,12 +709,24 @@ def cloud_test_gonder():
         }), 200
     neden = str(sonuc.get("neden") or "hata")
     kod = 429 if neden == "rate_limit" else 400
-    return jsonify({
+    govde = {
         "ok": False,
         "durum": sonuc.get("durum") or "hata",
         "neden": neden,
         "mesaj": sonuc.get("mesaj") or neden,
-    }), kod
+    }
+    ay = sonuc.get("hata_ayrinti")
+    if isinstance(ay, dict) and (
+        ay.get("code") is not None or ay.get("message") or ay.get("type")
+        or ay.get("error_subcode") is not None
+    ):
+        govde["hata_ayrinti"] = {
+            "code": ay.get("code"),
+            "error_subcode": ay.get("error_subcode"),
+            "type": ay.get("type") or "",
+            "message": ay.get("message") or "",
+        }
+    return jsonify(govde), kod
 
 
 @bp.route('/saglik')

@@ -118,13 +118,29 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
         tok = bool(co.get("token_tanimli"))
         pid = bool(co.get("phone_number_id_tanimli"))
         son = str(co.get("son_hata_sinif") or "yok")
+        ay = co.get("son_hata_ayrinti") or {}
+        ay_parca = ""
+        if son not in ("", "yok") and isinstance(ay, dict) and (
+            ay.get("code") is not None or ay.get("message") or ay.get("type")
+        ):
+            par = []
+            if ay.get("code") is not None:
+                par.append(f"code={ay.get('code')}")
+            if ay.get("error_subcode") is not None:
+                par.append(f"subcode={ay.get('error_subcode')}")
+            if ay.get("type"):
+                par.append(f"type={ay.get('type')}")
+            if ay.get("message"):
+                par.append(f"msg={ay.get('message')}")
+            if par:
+                ay_parca = " Ayrıntı: " + "; ".join(par) + "."
         if not acik:
             c_sev, c_metin = "ok", "Cloud API: kapalı."
         elif tok and pid:
             c_sev = "uyari" if son not in ("", "yok") else "ok"
             c_metin = (
                 f"Cloud API: açık; token tanımlı; phone_number_id tanımlı; "
-                f"son hata sınıfı: {son}."
+                f"son hata sınıfı: {son}.{ay_parca}"
             )
         else:
             c_sev = "uyari"
@@ -132,7 +148,7 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
                 "Cloud API: açık ama "
                 f"token={'tanımlı' if tok else 'boş'}, "
                 f"phone_number_id={'tanımlı' if pid else 'boş'}; "
-                f"son hata sınıfı: {son}."
+                f"son hata sınıfı: {son}.{ay_parca}"
             )
         kartlar.append({
             "anahtar": "cloud_api", "seviye": c_sev, "baslik": "Cloud API",

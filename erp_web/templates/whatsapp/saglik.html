@@ -221,6 +221,15 @@
           if (j.durum) parcalar.push("durum=" + j.durum);
           if (j.neden) parcalar.push("hata=" + j.neden);
           if (j.wamid) parcalar.push("wamid=" + j.wamid);
+          var ay = j.hata_ayrinti || null;
+          if (ay && typeof ay === "object") {
+            if (ay.code != null && ay.code !== "") parcalar.push("code=" + ay.code);
+            if (ay.error_subcode != null && ay.error_subcode !== "") {
+              parcalar.push("subcode=" + ay.error_subcode);
+            }
+            if (ay.type) parcalar.push("type=" + ay.type);
+            if (ay.message) parcalar.push("msg=" + ay.message);
+          }
           if (!parcalar.length) parcalar.push(j.ok ? "tamam" : ("HTTP " + r.status));
           if (outCloud) outCloud.textContent = parcalar.join(" · ");
         } catch (e) {

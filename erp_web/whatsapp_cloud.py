@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -25,6 +26,7 @@ _TEST_RATE_MAX = 3
 _TEST_RATE_PENCERE_SN = 60.0
 
 _SON_HATA_SINIF = "yok"
+_SON_HATA_AYRINTI: dict[str, Any] = {}
 _rate_lock = threading.Lock()
 _test_gonder_zamanlari: list[float] = []
 
@@ -39,15 +41,77 @@ _webhook_sayac = {
     "son_olay_ts": None,  # epoch float veya None
 }
 
+# Meta mesajında sızma ihtimaline karşı maske
+_RE_EAA = re.compile(r"EAA[A-Za-z0-9]{10,}")
+_RE_BEARER = re.compile(r"(?i)\bBearer\s+\S+")
+_RE_DIGIT_RUN = re.compile(r"\d{10,}")
+
 
 def son_hata_sinif() -> str:
     return _SON_HATA_SINIF
 
 
-def _set_hata(sinif: str) -> str:
-    global _SON_HATA_SINIF
+def son_hata_ayrinti() -> dict:
+    """Son Graph hata özeti — code/subcode/type/message (maskeli)."""
+    return dict(_SON_HATA_AYRINTI) if _SON_HATA_AYRINTI else {}
+
+
+def _set_hata(sinif: str, ayrinti: dict | None = None) -> str:
+    global _SON_HATA_SINIF, _SON_HATA_AYRINTI
     _SON_HATA_SINIF = str(sinif or "yok")[:64]
+    if _SON_HATA_SINIF in ("", "yok"):
+        _SON_HATA_AYRINTI = {}
+    elif ayrinti is not None:
+        _SON_HATA_AYRINTI = dict(ayrinti)
+    else:
+        _SON_HATA_AYRINTI = {}
     return _SON_HATA_SINIF
+
+
+def maskele_guvenli_metin(metin: str) -> str:
+    """EAA… / Bearer … / 10+ rakam → [gizli]."""
+    t = str(metin or "")
+    t = _RE_BEARER.sub("Bearer [gizli]", t)
+    t = _RE_EAA.sub("[gizli]", t)
+    t = _RE_DIGIT_RUN.sub("[gizli]", t)
+    return t
+
+
+def graph_hata_ayrinti(body: dict | None) -> dict:
+    """error.code / error_subcode / type / message (≤120, maskeli)."""
+    out: dict[str, Any] = {
+        "code": None,
+        "error_subcode": None,
+        "type": "",
+        "message": "",
+    }
+    if not isinstance(body, dict):
+        return out
+    err = body.get("error")
+    if not isinstance(err, dict):
+        return out
+    try:
+        code = err.get("code")
+        out["code"] = int(code) if code is not None and str(code).strip() != "" else None
+    except (TypeError, ValueError):
+        out["code"] = None
+    try:
+        sub = err.get("error_subcode")
+        out["error_subcode"] = (
+            int(sub) if sub is not None and str(sub).strip() != "" else None
+        )
+    except (TypeError, ValueError):
+        out["error_subcode"] = None
+    tip = str(err.get("type") or "").strip()
+    out["type"] = maskele_guvenli_metin(tip)[:64]
+    raw_msg = str(err.get("message") or err.get("error_user_msg") or "")
+    out["message"] = maskele_guvenli_metin(raw_msg)[:120]
+    return out
+
+
+def _hata_ayrinti_sifirla_test() -> None:
+    global _SON_HATA_AYRINTI
+    _SON_HATA_AYRINTI = {}
 
 
 def graph_version() -> str:
@@ -132,6 +196,7 @@ def saglik_ozet() -> dict:
         "app_secret_tanimli": app_secret_tanimli(),
         "verify_token_tanimli": verify_token_tanimli(),
         "son_hata_sinif": son_hata_sinif(),
+        "son_hata_ayrinti": son_hata_ayrinti(),
         "test_mid_aktif": cloud_aktif(TEST_MID),
         "webhook": webhook_sayaclar(),
     }
@@ -259,12 +324,16 @@ def siniflandir_http_hata(status: int, body: dict | None = None) -> str:
     return _set_hata("bilinemeyen")
 
 
-def _log_sonuc(mid, sinif: str, message_id: str = "") -> None:
+def _log_sonuc(mid, sinif: str, message_id: str = "", ayrinti: dict | None = None) -> None:
+    ay = ayrinti or {}
     logger.info(
-        "wa_cloud mid=%s sinif=%s msgid=%s",
+        "wa_cloud mid=%s sinif=%s msgid=%s code=%s sub=%s tip=%s",
         int(mid) if mid is not None else 0,
         (sinif or "-")[:32],
         (message_id or "-")[:64],
+        ay.get("code") if ay.get("code") is not None else "-",
+        ay.get("error_subcode") if ay.get("error_subcode") is not None else "-",
+        str(ay.get("type") or "-")[:32],
     )
 
 
@@ -299,9 +368,19 @@ def _post_messages(payload: dict, mid) -> dict:
         body = {}
 
     if int(r.status_code) >= 400 or not isinstance(body, dict):
-        sinif = siniflandir_http_hata(int(r.status_code), body if isinstance(body, dict) else None)
-        _log_sonuc(mid, sinif)
-        return {"ok": False, "durum": "hata", "neden": sinif, "message_id": ""}
+        body_d = body if isinstance(body, dict) else None
+        ay = graph_hata_ayrinti(body_d)
+        sinif = siniflandir_http_hata(int(r.status_code), body_d)
+        # siniflandir _set_hata çağırır; ayrintiyi koru
+        _set_hata(sinif, ay)
+        _log_sonuc(mid, sinif, ayrinti=ay)
+        return {
+            "ok": False,
+            "durum": "hata",
+            "neden": sinif,
+            "message_id": "",
+            "hata_ayrinti": ay,
+        }
 
     msg_id = ""
     msgs = body.get("messages")
